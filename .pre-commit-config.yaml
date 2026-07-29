@@ -1,0 +1,46 @@
+# pre-commit hooks — 로컬에서 CI 위반을 미리 차단
+# 설치:  pip install pre-commit && pre-commit install && pre-commit install --hook-type pre-push
+#        (commit 훅 + push 훅 둘 다 등록해야 pytest 단계까지 동작)
+# 전체 수동 실행:  pre-commit run --all-files
+# 최신 버전으로 갱신:  pre-commit autoupdate
+repos:
+  # 노트북 출력 셀 제거 — .gitattributes의 nbstripout filter와 동일 목적의 안전망.
+  # 신규 팀원이 `nbstripout --install`을 빠뜨려도 여기서 차단된다.
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.7.1
+    hooks:
+      - id: nbstripout
+
+  # 기본 위생 검사 (대용량 파일 커밋 방지, 충돌 마커, 비밀키 평문 등)
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--maxkb=5120"]
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: detect-private-key   # LLM 키/비밀키 평문 커밋 방지
+
+  # ruff — CI의 lint/format 게이트와 동일 검사 (pyproject [tool.ruff] 설정 공유).
+  # ruff-check는 자동 수정(--fix), ruff-format은 자동 포맷.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+        files: ^(src|tests)/.*\.py$
+      - id: ruff-format
+        files: ^(src|tests)/.*\.py$
+
+  # pytest — push 직전에만 실행(커밋마다 돌리기엔 무거움). CI test job과 동일 역할.
+  # 로컬 env에 `pip install -e ".[dev]"`가 돼 있어야 한다.
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest (pre-push)
+        entry: pytest -q
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

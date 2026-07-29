@@ -1,0 +1,21 @@
+# .github/workflows/notebook-check.yml
+name: Notebook Sanity Check
+# ⚠️ paths 필터가 걸린 워크플로이므로 required status check로 지정하지 마세요.
+#    (.ipynb 변경이 없는 PR에서는 체크가 생성되지 않아 머지가 블록됩니다.)
+#    로컬 방어선은 .gitattributes filter + pre-commit nbstripout이 담당합니다.
+on:
+  pull_request:
+    paths:
+      - '**.ipynb'
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check notebook outputs are stripped
+        run: |
+          pip install nbstripout
+          nbstripout --verify **/*.ipynb

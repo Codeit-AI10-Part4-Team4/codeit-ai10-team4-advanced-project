@@ -1,0 +1,40 @@
+name: ✨ 기능 / 작업
+description: 새 모듈·기능 추가 또는 일반 작업을 등록합니다.
+labels: ["feature"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: 목표
+      description: 무엇을 만들/바꿀 것인지 한두 문장으로 적어주세요.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 대상 모듈
+      # TODO: 프로젝트의 실제 모듈/파이프라인 단계 목록으로 교체하세요.
+      options:
+        - api
+        - core
+        - eval
+        - 공통/인프라
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: 완료 조건 (DoD)
+      description: 이 작업이 끝났다고 판단할 수 있는 기준을 적어주세요.
+      placeholder: |
+        - [ ] ...
+        - [ ] tests/ 에 단위 테스트 추가
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: 참고 / 의존성
+      description: 선행 작업, 관련 노트북, 의존 모듈 등.
+    validations:
+      required: false

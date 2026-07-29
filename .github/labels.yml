@@ -1,0 +1,26 @@
+# 레포 라벨 정의 — PR 템플릿의 '변경 유형' 및 이슈 템플릿과 일치.
+# 적용: bash scripts/apply-labels.sh <owner>/<repo> (gh 인증 필요)
+- name: bug
+  color: d73a4a
+  description: "🐛 버그 수정"
+- name: feature
+  color: 0e8a16
+  description: "✨ 새 기능 / 모듈 추가"
+- name: experiment
+  color: 5319e7
+  description: "🔬 실험 (notebooks)"
+- name: data
+  color: fbca04
+  description: "📊 데이터 전처리 / 증강"
+- name: docs
+  color: 0075ca
+  description: "📝 문서 / 주석"
+- name: config
+  color: c5def5
+  description: "🔧 설정 / 환경"
+- name: refactor
+  color: cfd3d7
+  description: "♻️ 리팩토링"
+- name: CollaborationLog
+  color: bfd4f2
+  description: "🤝 협업 일지"

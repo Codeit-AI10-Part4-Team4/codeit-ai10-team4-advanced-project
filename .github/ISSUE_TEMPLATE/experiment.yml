@@ -1,0 +1,37 @@
+name: 🔬 실험
+description: notebooks/ 에서 수행할 조사·실험을 등록합니다.
+labels: ["experiment"]
+body:
+  - type: textarea
+    id: hypothesis
+    attributes:
+      label: 가설 / 알아보려는 것
+      description: 무엇을 검증하려는지, 기대 결과는 무엇인지 적어주세요.
+    validations:
+      required: true
+  - type: dropdown
+    id: stage
+    attributes:
+      label: 실험 대상 (모듈)
+      # TODO: 프로젝트의 실제 모듈/파이프라인 단계 목록으로 교체하세요.
+      options:
+        - core
+        - eval
+        - 기타
+    validations:
+      required: true
+  - type: textarea
+    id: method
+    attributes:
+      label: 실험 방법
+      description: 후보(모델/전략), 데이터, 비교 지표(예: accuracy, recall@k, latency).
+    validations:
+      required: true
+  - type: textarea
+    id: graduation
+    attributes:
+      label: 프로덕션 이전 계획
+      description: 검증 성공 시 src/ 의 어느 모듈로 함수화해 옮길지.
+      placeholder: "예: 검증 후 src/app_core/ 로 분리 이전"
+    validations:
+      required: false

@@ -1,0 +1,72 @@
+# pyproject.toml
+# ⚠️ 템플릿 초기화: `python scripts/init_template.py` 가 name/패키지명을 일괄 치환합니다.
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "my-ai-project"
+version = "0.1.0"
+description = "TODO: 프로젝트 한 줄 설명"
+requires-python = ">=3.12"
+
+# 런타임 의존성 — "어디서나 필요한 최소 집합"만 유지할 것.
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+]
+
+# 개발 및 테스트 추가 의존성
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.27.0",          # FastAPI TestClient 백엔드
+    "ruff>=0.6.0",
+    "mypy>=1.10.0",
+    "nbconvert>=7.0.0",       # 노트북 → 스크립트 변환
+    "ipykernel>=6.0.0",       # venv를 노트북 커널로 등록
+]
+# ── 무거운 도메인 의존성(torch 계열, DB 클라이언트 등)은 core dependencies에 넣지 말고
+#    아래처럼 별도 extra로 분리하세요. CI/기본 설치를 가볍게 유지하는 장치입니다.
+#    필요 시: pip install -e ".[ml]"
+# ml = [
+#     "torch>=2.0.0",
+#     "sentence-transformers>=2.2.0",
+# ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+# src 레이아웃: src/ 하위의 패키지(api, app_core)를 최상위 import 이름으로 노출.
+# 따라서 코드는 `import app_core` / `from api import ...` 형태로 사용한다 (src. 접두어 없음).
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Pylance/pyright(IDE 정적 분석) 경로 설정 — 없으면 IDE에서 내부 import가 unresolved로 표시됨.
+[tool.pyright]
+extraPaths = ["src"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src"]
+mypy_path = ["src"]
+ignore_missing_imports = false   # 내부 코드엔 엄격하게
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+
+# 점진 도입: 처음엔 아래 두 줄을 끄고 시작했다가 단계적으로 적용
+# disallow_untyped_defs = true
+# disallow_incomplete_defs = true
+
+# 타입 스텁이 없는 무거운 extra 의존성은 아래 overrides로 예외 처리하세요.
+# [[tool.mypy.overrides]]
+# module = ["torch.*", "sentence_transformers.*"]
+# ignore_missing_imports = true

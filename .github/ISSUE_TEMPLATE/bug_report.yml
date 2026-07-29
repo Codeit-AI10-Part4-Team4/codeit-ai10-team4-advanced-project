@@ -1,0 +1,40 @@
+name: 🐛 버그 리포트
+description: 예상과 다르게 동작하는 문제를 보고합니다.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: 무엇이 잘못되었나요?
+      description: 기대한 동작과 실제 동작을 함께 적어주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 재현 방법
+      description: 어떤 입력/단계에서 발생하는지 적어주세요.
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 발생 위치 (모듈)
+      # TODO: 프로젝트의 실제 모듈/파이프라인 단계 목록으로 교체하세요.
+      options:
+        - api
+        - core
+        - eval
+        - 기타/모름
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: 환경
+      placeholder: "예: 로컬 / 클라우드 VM, Python 3.12"
+    validations:
+      required: false

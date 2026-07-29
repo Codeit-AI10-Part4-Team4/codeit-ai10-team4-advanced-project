@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🤝 협업 일지 (CollaborationLog)
+    # {{GITHUB_OWNER}}/{{GITHUB_REPO}} 는 scripts/init_template.py 가 치환합니다.
+    # ⚠️ Discussions 카테고리 'CollaborationLog' 는 API로 만들 수 없어 수동 생성 필요
+    #    (docs/TEMPLATE_GUIDE.md 참고).
+    url: https://github.com/{{GITHUB_OWNER}}/{{GITHUB_REPO}}/discussions/new?category=collaborationlog
+    about: 일일 업무/협업 내용은 이슈가 아닌 Discussions의 협업 일지에 작성하세요.

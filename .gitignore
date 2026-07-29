@@ -1,0 +1,136 @@
+# ==========================================
+# AI Team Project .gitignore
+# Language/Tools: Python, Jupyter Notebook
+# ==========================================
+
+# --- Jupyter Notebook & Lab Outputs ---
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+checkpoint_*.ipynb
+.virtual_documents/
+.jupyter/
+.local/share/jupyter/
+
+# 주의: 노트북 출력 셀(실행 결과)이 diff를 오염시키고 저장소 용량을 키우는 문제는
+# .gitignore로 해결되지 않습니다. nbstripout이 .gitattributes filter + pre-commit hook으로
+# 구성되어 있으니 `pre-commit install`을 반드시 실행하세요.
+
+# --- JupyterHub Runtime State ---
+jupyterhub.sqlite
+jupyterhub_cookie_secret
+jupyterhub_config.py.bak
+.jupyterhub-runtime/
+jupyterhub-proxy.pid
+
+# --- Python Build & Runtime ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Virtual Environments ---
+.venv/
+venv/
+ENV/
+env/
+third-party/
+
+# --- Conda ---
+.conda/
+envs/
+conda-meta/
+pkgs/
+*.tar.bz2
+
+# --- Environment Variables & Cloud Secrets (Security) ---
+.env
+.env.*
+.secrets
+*.pem
+*.p12
+*.pfx
+*.key
+*.pub
+id_rsa*
+id_ed25519*
+
+# Cloud Service Account / Credential Files
+# *.json 전체를 막지 않고 명명 패턴으로 한정합니다.
+*-key.json
+*-keyfile.json
+*-credentials.json
+*sa-key.json
+gcp-*.json
+service-account*.json
+secret_*.json
+credentials/
+
+# --- Data & Large Artifacts (Never commit heavy datasets) ---
+*.csv
+# 평가 골든셋 등 의도적으로 커밋하는 소형 CSV는 화이트리스트로 예외 처리
+!golden_dataset*.csv
+*.xlsx
+*.jsonl
+*.parquet
+*.h5
+*.pickle
+*.pkl
+*.npy
+*.npz
+*.sqlite
+*.db
+data/
+datasets/
+outputs/
+
+# --- Model Artifacts & Training Logs ---
+models/
+weights/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.gguf
+*.bin
+*.tflite
+runs/
+lightning_logs/
+wandb/
+mlruns/
+# 데모/검증용으로 특정 작은 모델 파일을 의도적으로 커밋해야 한다면
+# 아래에 화이트리스트 예외를 추가하세요 (무시 규칙보다 반드시 아래쪽에 위치해야 동작합니다).
+# 예시 : !models/demo_small.onnx
+
+# --- Coding Agent ---
+# AGENTS.md / CLAUDE.md 는 팀 공유 자산으로 커밋합니다 (이 템플릿의 정책).
+# 개인별 지침은 홈 디렉토리(~/.claude/CLAUDE.md 등)에 두세요.
+
+# --- OS & IDE Specifics ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V10
+.Trashes
+ehthumbs.db
+Thumbs.db
+.vscode/
+.idea/
