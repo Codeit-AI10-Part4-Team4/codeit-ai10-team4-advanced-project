@@ -28,7 +28,7 @@
 | `require_code_owner_reviews: true` | CODEOWNERS 파일이 없어 no-op | CODEOWNERS 스켈레톤 동봉 + 기본 false, 작성 후 켜도록 안내 |
 | `setup-github.sh` REPO 기본값 | 원본 리포 하드코딩 | 필수 인자로 변경 + `--solo` 모드 추가(1인 프로젝트에서 승인 1 요구는 자기 머지 불가) |
 | `apply-labels.sh`의 yq 의존 | yq는 기본 미설치 환경이 많음 | python3+pyyaml로 교체(pre-commit 설치 시 함께 깔림) |
-| 이슈 config의 Discussions URL | org/리포 URL 하드코딩 | `{{GITHUB_OWNER}}/{{GITHUB_REPO}}` 플레이스홀더 + init 스크립트 치환 |
+| 이슈 config의 Discussions URL | org/리포 URL 하드코딩 | `Codeit-AI10-Part4-Team4/codeit-ai10-team4-advanced-project` 플레이스홀더 + init 스크립트 치환 |
 | 파이썬 버전 불일치 | ci.yml 3.12 / notebook-check.yml 3.11 | 3.12로 통일 |
 | CLAUDE.md gitignore | 원본은 개인별 설정으로 간주해 미공유 | 에이전트 가이드를 팀 공유 자산으로 전환: `AGENTS.md`(표준, 원본) + `CLAUDE.md`(import 포인터) 커밋 |
 | 이슈 템플릿 dropdown | RAG 6단계(parsing~llm) 하드코딩 | 일반 모듈명(api/core/eval)으로 교체 + TODO 주석 |

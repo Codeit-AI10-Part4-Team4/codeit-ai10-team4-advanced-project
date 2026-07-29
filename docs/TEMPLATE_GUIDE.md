@@ -22,7 +22,7 @@ GitHub 템플릿 리포는 **저장소 파일만 복사**하고 **리포 설정�
 # ② clone 후 초기화 스크립트 실행 — 이름 치환의 원스톱 처리
 git clone https://github.com/<owner>/<repo>.git && cd <repo>
 python3 scripts/init_template.py --name <배포판-이름> --owner <owner> --repo <repo>
-#    치환: my-ai-project→이름, app_core→패키지, {{GITHUB_OWNER}}/{{GITHUB_REPO}}→URL
+#    치환: codeit-ai10-team4-advanced-project→이름, app_core→패키지, Codeit-AI10-Part4-Team4/codeit-ai10-team4-advanced-project→URL
 #    교체: README.md ← README.project.md / 삭제: 스크립트 자신
 
 # ③ 개발 환경 구성

@@ -6,7 +6,7 @@ Business logic belongs in app_core, which must stay importable without FastAPI.
 
 from fastapi import FastAPI
 
-app = FastAPI(title="my-ai-project")
+app = FastAPI(title="codeit-ai10-team4-advanced-project")
 
 
 @app.get("/health")
