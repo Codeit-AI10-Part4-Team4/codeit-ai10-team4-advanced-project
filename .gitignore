@@ -123,6 +123,8 @@ mlruns/
 # --- Coding Agent ---
 # AGENTS.md / CLAUDE.md 는 팀 공유 자산으로 커밋합니다 (이 템플릿의 정책).
 # 개인별 지침은 홈 디렉토리(~/.claude/CLAUDE.md 등)에 두세요.
+# 세션별 권한 허용목록 등 개인 설정도 커밋하지 않습니다.
+.claude/
 
 # --- OS & IDE Specifics ---
 .DS_Store

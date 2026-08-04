@@ -1,0 +1,146 @@
+# 금칙 표현 사전 (룰 엔진)
+#
+# 설계 근거: docs/02_광고규제_준수기능_설계.md 3장
+#   "최고", "다이어트" 같은 확정적 금칙어는 LLM이 아니라 룰로 잡는다.
+#   빠르고(~10ms) 정확하며, 놓치지 않는다.
+#
+# severity:
+#   high   = 생성 단계에서 차단 + 결과에서 교체 권고
+#   medium = 경고만 (맥락에 따라 허용될 수 있음)
+#   info   = 안내 (위반이 아니라 의무 사항 리마인드)
+#
+# legal_tags: 이 규칙이 활성화되는 조건. 업종/규격의 legal_tags 와 교집합이 있으면 적용.
+#
+# ✅ 2026-08-04 근거 법령 원문 대조 완료 — configs/laws.yaml 및 docs/02 참조.
+#    표시광고법 제3조(거짓·과장/기만/부당비교/비방 4유형), 제5조(실증)
+#    식품표시광고법 제8조 1호(질병효능)·2호(의약품오인)·3호(건기식오인)·4호(거짓과장)
+
+# ─────────────────────────────────────────────────────────
+# 전 업종 공통 — 표시·광고의 공정화에 관한 법률
+# ─────────────────────────────────────────────────────────
+
+- id: superlative
+  # 조사(의/인)까지 함께 잡아야 교체 후 "최고의" → "○○○의" 처럼 조사가 남지 않는다
+  pattern: "(?:최고급|최고|최상급|최상)(?:의|인)?|(?:제일|가장) 맛있는?"
+  label: 근거 없는 최상급 표현
+  law_id: fair_labeling
+  severity: high
+  legal_tags: [general]
+  reason: "객관적 근거 없는 최상급 표현은 거짓·과장 광고로 간주된다. 광고주에게 실증 책임이 있다."
+  alternatives: ["저희가 자신 있는", "정성껏 만든", "오래 준비한"]
+
+- id: rank_claim
+  pattern: "(?:1위|일위|최초|유일|넘버원|No\\.? ?1)(?:의|인)?"
+  label: 순위·최초·유일 주장
+  law_id: fair_labeling
+  severity: high
+  legal_tags: [general]
+  reason: "'1위', '최초', '유일'은 공인기관 인증이나 시장점유율 데이터 등 객관적 근거 자료를 구비해야 한다. 자체 추산은 허위·과장 광고로 간주된다."
+  alternatives: ["많은 분들이 찾아주신", "오래 사랑받은"]
+
+- id: absolute_claim
+  pattern: "100%|백퍼센트|완벽|무조건|절대|반드시 효과"
+  label: 절대적 표현
+  law_id: fair_labeling
+  severity: medium
+  legal_tags: [general]
+  reason: "예외 없는 단정 표현은 사실과 다를 경우 거짓·과장 광고가 될 수 있다."
+  alternatives: ["엄선한", "꼼꼼하게"]
+
+- id: free_condition
+  pattern: "무료|공짜|0원"
+  label: 무료 표시 — 조건 명시 필요
+  law_id: fair_labeling
+  severity: medium
+  legal_tags: [general]
+  reason: "조건이 있는데 '무료'만 강조하면 중요 정보를 은폐·축소하는 기만적 광고가 될 수 있다. 조건을 함께 표기해야 한다."
+  alternatives: ["첫 방문 시 무료 (조건 표기 필요)"]
+
+- id: disparage
+  pattern: "옆집|타 매장|다른 곳보다|타사보다|경쟁업체"
+  label: 비교·비방 소지
+  law_id: fair_labeling
+  severity: medium
+  legal_tags: [general]
+  reason: "객관적 근거 없이 경쟁사업자와 비교하거나 불리한 사실만 드러내면 부당비교·비방 광고에 해당할 수 있다."
+  alternatives: ["저희만의", "저희 매장은"]
+
+- id: fake_discount
+  pattern: "정상가|원래 가격|최대 \\d+% ?할인"
+  label: 할인율 표시 — 근거 필요
+  law_id: fair_labeling
+  severity: info
+  legal_tags: [general]
+  reason: "정상가를 부풀린 뒤 할인율을 표시하면 부당한 가격 표시가 된다. 실제 판매 이력이 있는 가격을 기준으로 해야 한다."
+  alternatives: []
+
+# ─────────────────────────────────────────────────────────
+# 음식점·카페·식품 — 식품 등의 표시·광고에 관한 법률 제8조
+# ─────────────────────────────────────────────────────────
+
+- id: diet_claim
+  pattern: "다이어트|체지방|살 ?안 ?찌|체중 ?감량|급속 ?감량|지방 ?배출|칼로리 ?컷"
+  label: 체중조절 기능성 표현
+  law_id: food_labeling
+  severity: high
+  legal_tags: [food]
+  reason: "기능성이 인정되지 않은 일반 식품에 체중 조절 관련 문구를 쓰는 것은, 건강기능식품이 아닌 것을 건강기능식품으로 인식하게 할 우려가 있어 금지된다. 소상공인이 가장 흔히 위반하는 표현이다."
+  alternatives: ["가볍게 즐기는", "부담 없는 한 끼"]
+
+- id: disease_claim
+  pattern: "치료|효능|면역력|항암|염증|혈압|혈당|콜레스테롤|디톡스|해독"
+  label: 질병 예방·치료 효능 표현
+  law_id: food_labeling
+  severity: high
+  legal_tags: [food]
+  reason: "식품에 질병의 예방·치료에 효능이 있는 것으로 인식할 우려가 있는 표시·광고는 금지된다."
+  alternatives: ["든든한", "속 편한", "건강하게 즐기는"]
+
+- id: medicine_claim
+  pattern: "약처럼|보약|한약재 효과|의학적|임상"
+  label: 의약품 오인 표현
+  law_id: food_labeling
+  severity: high
+  legal_tags: [food]
+  reason: "식품을 의약품으로 인식할 우려가 있는 표시·광고는 금지된다."
+  alternatives: ["정성 들인", "귀한 재료로"]
+
+- id: origin_notice
+  pattern: "국내산|한우|수입산|원산지"
+  label: 원산지 표시 의무
+  law_id: origin_labeling
+  severity: info
+  legal_tags: [origin]
+  reason: "음식점·식육판매업은 주요 품목의 원산지를 표시할 의무가 있다. 광고에 표기한 원산지는 실제와 일치해야 한다."
+  alternatives: []
+
+# ─────────────────────────────────────────────────────────
+# 업종 특수
+# ─────────────────────────────────────────────────────────
+
+- id: medical_adjacent
+  pattern: "시술|반영구|주름|리프팅|피부 ?재생|모발 ?이식"
+  label: 의료행위 오인 소지
+  law_id: medical_act
+  severity: medium
+  legal_tags: [medical_adjacent]
+  reason: "미용업에서 의료행위로 오인될 수 있는 표현은 의료법에 저촉될 수 있다."
+  alternatives: ["관리", "케어", "스타일링"]
+
+- id: academy_guarantee
+  pattern: "성적 ?보장|무조건 ?합격|100% ?합격|1등급 ?보장"
+  label: 학습 성과 보장 표현
+  law_id: academy_act
+  severity: high
+  legal_tags: [academy]
+  reason: "학원의 과대광고는 금지된다. 성과를 보장하는 표현은 거짓·과장 광고에 해당할 수 있다."
+  alternatives: ["꼼꼼하게 관리하는", "1:1로 챙기는"]
+
+- id: fitness_refund
+  pattern: "환불 ?불가|양도 ?불가|중도 ?해지 ?불가"
+  label: 환불 제한 표시
+  law_id: fitness_act
+  severity: high
+  legal_tags: [fitness]
+  reason: "체육시설 이용계약은 중도 해지·환불이 법으로 보장된다. 이를 배제하는 표시는 무효이며 위법 소지가 있다."
+  alternatives: ["환불 규정은 매장에 문의해 주세요"]

@@ -1,0 +1,71 @@
+# 규격 레지스트리
+# 담당: 캔버스 치수·안전영역·배치 규칙·글자수 상한
+# 담당하지 않음: 그림 내용(industries.yaml), 색감(styles.yaml)
+#
+# layout 은 규격마다 만들지 않고 4개 패턴을 공유한다.
+#   bottom_band  하단 반투명 띠 + 헤드라인      (이미지 중심)
+#   top_bottom   상단 헤드라인 + 하단 정보      (중간)
+#   side_panel   이미지 60% + 우측 텍스트 패널  (중간)
+#   list_grid    항목·가격 반복 배치            (정보 중심)
+#
+# legal_tags: outdoor 가 붙으면 옥외광고물법이 적용 대상에 포함된다
+
+- id: insta_feed
+  label: 인스타 피드
+  emoji: "📷"
+  size: [1080, 1080]
+  layout: bottom_band
+  max_headline_chars: 18
+  max_sub_chars: 34
+  safe_area: { t: 0.06, b: 0.06, l: 0.06, r: 0.06 }
+  legal_tags: [online]
+
+- id: insta_story
+  label: 인스타 스토리
+  emoji: "📱"
+  size: [1080, 1920]
+  layout: top_bottom
+  max_headline_chars: 16
+  max_sub_chars: 40
+  safe_area: { t: 0.14, b: 0.14, l: 0.08, r: 0.08 }   # 상하단 UI 가림 영역 회피
+  legal_tags: [online]
+
+- id: delivery_thumb
+  label: 배달앱 썸네일
+  emoji: "🛵"
+  size: [1000, 1000]
+  layout: bottom_band
+  max_headline_chars: 14
+  max_sub_chars: 28
+  safe_area: { t: 0.05, b: 0.05, l: 0.05, r: 0.05 }
+  legal_tags: [online]
+
+- id: banner_wide
+  label: 가로 배너
+  emoji: "🖼️"
+  size: [1200, 628]
+  layout: side_panel
+  max_headline_chars: 20
+  max_sub_chars: 44
+  safe_area: { t: 0.08, b: 0.08, l: 0.05, r: 0.05 }
+  legal_tags: [online]
+
+- id: flyer_a4
+  label: A4 전단지 (인쇄)
+  emoji: "📄"
+  size: [1240, 1754]           # A4 @150dpi
+  layout: top_bottom
+  max_headline_chars: 18
+  max_sub_chars: 46
+  safe_area: { t: 0.07, b: 0.07, l: 0.08, r: 0.08 }
+  legal_tags: [offline, outdoor]
+
+- id: menu_board
+  label: 메뉴판·특가 POP
+  emoji: "📋"
+  size: [1080, 1350]
+  layout: list_grid
+  max_headline_chars: 14
+  max_sub_chars: 30
+  safe_area: { t: 0.07, b: 0.07, l: 0.08, r: 0.08 }
+  legal_tags: [offline, outdoor]

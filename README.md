@@ -1,45 +1,156 @@
-# codeit-ai10-team4-advanced-project
+# 동네 매장 광고 만들기
 
-[![src CI (lint + test)](https://github.com/Codeit-AI10-Part4-Team4/codeit-ai10-team4-advanced-project/actions/workflows/ci.yml/badge.svg)](https://github.com/Codeit-AI10-Part4-Team4/codeit-ai10-team4-advanced-project/actions/workflows/ci.yml)
-<!-- ⚠️ private 리포에서는 워크플로 배지가 외부 임베드 불가라 렌더되지 않습니다 —
-     위 배지 줄을 삭제하거나 public 전환 시 사용하세요 (docs/TEMPLATE_GUIDE.md §6). -->
+폰으로 찍은 사진 한 장으로, 동네 매장 사장님이 **5분 안에 바로 쓸 수 있는 광고물**을 만드는 서비스.
 
+> 경쟁 상대는 다른 AI 서비스가 아니라 **"그냥 폰 사진 그대로 올리기"** 다.
 
-> TODO: 프로젝트 한 줄 소개를 작성하세요.
+📄 기획 문서 — [01 타깃 사용자 및 기능 정의](docs/01_타깃사용자_및_기능정의.md) · [02 광고 규제 준수 기능 설계](docs/02_광고규제_준수기능_설계.md)
 
-## 설치
+> ⚠️ **챗봇 방식으로 확정**했습니다. 흐름 설계는 [01 문서 6장](docs/01_타깃사용자_및_기능정의.md#6-서비스-흐름--챗봇) 참조.
+> - `streamlit run app_chat.py` — 챗봇 **흐름 설계 데모** (실제 생성 없음, 팀 공유용)
+> - `streamlit run app.py` — 초기 폼 방식 프로토타입 (비교용)
+>
+> `src/` 도메인 모듈은 UI에 의존하지 않으므로 프론트를 바꿔도 그대로 재사용됩니다.
 
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-pip install pre-commit && pre-commit install && pre-commit install --hook-type pre-push
-```
+---
 
 ## 실행
 
 ```bash
-uvicorn api.main:app --reload   # http://127.0.0.1:8000/docs
+pip install -r requirements.txt
+streamlit run app.py
 ```
 
-## 품질 게이트 (커밋/PR 전 필수 — CI와 동일)
+한글 폰트는 Windows 기본 탑재 맑은 고딕을 사용한다 (`src/layout.py` 의 `_FONT_CANDIDATES`).
+다른 OS 에서는 나눔고딕 등 TTF 경로를 추가해야 한다.
 
-```bash
-ruff check src tests
-ruff format src tests
-mypy
-pytest
-```
+---
+
+## 현재 상태 — 무엇이 진짜로 동작하는가
+
+이 저장소는 **기능 범위를 눈으로 확인하기 위한 프로토타입**이다.
+모델이 아직 미정이므로 생성 부분만 스텁이고, 나머지는 실제로 동작한다.
+
+| 모듈 | 상태 | 내용 |
+|---|---|---|
+| `src/layout.py` | ✅ **실제 동작** | PIL 레이아웃 합성. 배치 패턴 4종, 6개 규격 |
+| `src/compliance.py` | ✅ **실제 동작** | 금칙어 룰 엔진, 적용 법령 매핑, 원클릭 교체 |
+| `src/registry.py` | ✅ **실제 동작** | YAML 레지스트리 로더 |
+| `src/image_gen.py` | 🔶 스텁 | 색보정 기반. Diffusion 으로 교체 예정 |
+| `src/copy_gen.py` | 🔶 스텁 | 템플릿 기반. VLM + LLM 으로 교체 예정 |
+
+스텁 두 개는 파일 상단에 **`━━ 실제 모델로 교체할 지점 ━━`** 주석이 있다.
+`generate()` 내부만 갈아끼우면 되고 호출부(`app.py`)는 바뀌지 않는다.
+
+앱의 `🔧 개발자 보기` 패널에서 **실제 모델에 보낼 프롬프트**를 확인할 수 있다.
+
+---
 
 ## 구조
 
 ```
-├── src/
-│   ├── api/         # 웹 서버 관심사 — thin 라우터
-│   └── app_core/    # 도메인 로직 — api 미의존
-├── tests/           # src/ 구조 미러링
-├── notebooks/       # 실험 (검증되면 src/로 이전)
-└── eval/            # 평가 자산
+app.py                        Streamlit 진입점 (UI 전용)
+configs/
+  industries.yaml             업종  — 주제·VLM 힌트·문구 페르소나·법령 태그
+  styles.yaml                 스타일 — 톤·색상 팔레트·문구 어조
+  formats.yaml                규격  — 치수·안전영역·배치 규칙
+  banned_terms.yaml           금칙 표현 사전 (룰 엔진)
+  laws.yaml                   적용 법령 매핑
+src/
+  registry.py                 YAML 로더
+  compliance.py               광고 규제 엔진
+  layout.py                   레이아웃 합성 (PIL)
+  image_gen.py                이미지 생성 (스텁)
+  copy_gen.py                 문구 생성 (스텁)
+docs/                         기획 문서
 ```
 
-> TODO: 아키텍처·규칙 상세는 [AGENTS.md](AGENTS.md)에, 협업 절차는
-> [docs/pr-checklist.md](docs/pr-checklist.md)에 정리되어 있습니다.
+`src/` 는 Streamlit 에 의존하지 않는다. **프론트를 React 로 바꿔도 그대로 재사용된다.**
+
+---
+
+## 프로젝트 요구사항 대응
+
+가이드의 '구현 기능 예시' 5개 중 **4개를 커버**한다 (요구사항 최소치는 1개).
+
+| 요구사항 예시 기능 | 대응 | 모드 |
+|---|:---:|---|
+| 상품 이미지 → **광고 문구 제안** | ✅ | VLM + LLM |
+| 광고 이미지 1: **텍스트 입력만** | ✅ | `scene` |
+| 광고 이미지 2: **레퍼런스 이미지** | ✅ | `reference` / `preserve_ref` |
+| 광고 이미지 3: **입력 이미지 보존** | ✅ | `preserve` — 핵심 기능 |
+| 광고 이미지 4: **스케치** | ❌ | 타깃 적합성 낮아 제외 ([근거](docs/01_타깃사용자_및_기능정의.md#5-프로젝트-요구사항-기능-매핑)) |
+
+### 생성 모드는 사용자가 고르지 않는다
+
+모드 선택 UI 를 만들면 기초·입문 단계 사용자가 헤맨다. **무엇을 올렸는지로 자동 결정**한다.
+
+| 제품 사진 | 레퍼런스 | → 모드 |
+|:---:|:---:|---|
+| ✓ | ✗ | `preserve` — 제품 보존, 배경·조명만 교체 |
+| ✓ | ✓ | `preserve_ref` — 제품 보존 + 레퍼런스 분위기 |
+| ✗ | ✓ | `reference` — 레퍼런스 기반 배경 생성 |
+| ✗ | ✗ | `scene` — 텍스트만으로 배경 생성 |
+
+넷 다 **SDXL 하나 위에서 conditioning 만 다르다** (t2i / IP-Adapter / Inpainting).
+모델을 한 번만 올리면 되므로 모드 추가의 한계 비용이 낮다.
+
+---
+
+## 핵심 설계
+
+### 1. 3축 직교 분리
+
+업종 N × 스타일 M × 규격 K 를 전부 만들면 조합 폭발이지만,
+세 축이 **서로 독립적인 역할만** 담당하게 하면 정의는 `N + M + K` 개로 끝난다.
+
+| 축 | 담당 | 담당하지 않음 |
+|---|---|---|
+| 업종 | 주제·배경 소재, 문구 페르소나, 적용 법령 | 색감, 치수 |
+| 스타일 | 톤·조명·색상 팔레트, 문구 어조 | 무엇을 그릴지, 치수 |
+| 규격 | 치수·안전영역·배치 규칙 | 그림 내용, 색감 |
+
+업종 추가는 YAML 10줄. **코드에 하드코딩된 업종 목록이 없다.**
+
+### 2. 이미지와 텍스트를 분리한다
+
+Diffusion 모델은 한글을 제대로 그리지 못한다.
+그래서 이미지는 **글자 없는 배경**으로만 만들고, 한글은 PIL 로 얹는다.
+
+덤으로 **문구만 수정하면 GPU 재실행 없이 즉시 반영**된다.
+
+### 3. 법을 지키는 방식이 3단계다
+
+| | 단계 | 구현 |
+|---|---|---|
+| **A** | 생성 **전** — 금지 규칙을 문구 생성 프롬프트에 주입 | `compliance.prompt_constraints()` |
+| **B** | 생성 **후** — 위반 후보 탐지 + 대체 표현 원클릭 교체 | `compliance.scan()` / `apply_alternative()` |
+| **C** | 버튼 클릭 — 적용 법령·조문 근거 제시 | `compliance.applicable_laws()` |
+
+확정적 금칙어("최고", "다이어트")는 **LLM 이 아니라 정규식**으로 잡는다. 빠르고 정확하며 놓치지 않는다.
+"왜 안 되는지 + 조문 근거"는 이후 RAG 로 확장한다.
+
+**규격이 법령을 바꾼다.** 전단지를 고르면 옥외광고물법이 활성화되고, 인스타는 해당 없다.
+
+```
+카페(food, general) × 전단지(offline, outdoor)
+  → 검토 대상: 표시광고법 · 식품표시광고법 · 옥외광고물법
+카페(food, general) × 인스타 피드(online)
+  → 검토 대상: 표시광고법 · 식품표시광고법
+```
+
+---
+
+## 다음 단계
+
+- [ ] 기술 스택 확정 (Streamlit 유지 / FastAPI + React)
+- [ ] 이미지 생성 모델 선정 — SDXL Inpainting, ControlNet, FLUX 비교
+- [ ] VLM · LLM 선정 및 `copy_gen` 교체
+- [ ] 법령 코퍼스 수집 → RAG 파이프라인 (`rfp-rag-extractor` 구조 이식)
+- [ ] `verified` 대상 업종 3~4개 선정 및 프롬프트 튜닝
+- [ ] 법령·조문 원문 대조 (현재 문서는 웹 검색 결과 기반 초안)
+
+---
+
+> ⚠️ 앱이 제시하는 법적 검토는 **참고용이며 법률 자문이 아니다.**
+> `configs/laws.yaml`, `configs/banned_terms.yaml` 의 법령·조문은 원문 대조 전 초안이다.
