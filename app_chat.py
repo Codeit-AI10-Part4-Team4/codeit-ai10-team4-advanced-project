@@ -1,15 +1,14 @@
 """동네 매장 광고 만들기 — 챗봇 흐름 설계 데모.
 
 ⚠️ **동작하는 서비스가 아니라 설계를 보여주는 데모**입니다.
-   실제 이미지 생성은 하지 않습니다. "이런 흐름으로 만들려는데 어떠세요?"를
-   팀원에게 보여주는 것이 목적입니다.
+   실제 이미지 생성은 하지 않습니다.
 
-보여주려는 것:
-  1. 자연어로 말하는 것이 기본 동선, 선택형은 보조 경로
-  2. 말에서 알아들은 항목은 건너뛰고 **모자란 것만 되묻는다**
-  3. 각 질문이 무엇을 결정하는지
-  4. 사진 × 레퍼런스 조합으로 생성 모드 4가지가 자동 결정된다
-  5. 두 갈래가 끝에서 다시 합류한다
+보여주려는 것 (기술계획서 4장):
+  1. 경로를 고르게 하지 않는다 — 매 질문에 **선택지 + 자유 입력이 함께** 있다
+  2. 자유 입력은 아무 슬롯이나 채우고, 채워진 질문은 건너뛴다
+  3. 무엇을 알아들었는지 **근거와 함께** 보여준다
+  4. 사진 × 레퍼런스 조합으로 생성 모드가 자동 결정된다
+  5. 두 갈래(문구·이미지)가 끝에서 다시 합류한다
 
 실행: streamlit run app_chat.py
 """
@@ -26,44 +25,36 @@ from src import compliance, copy_gen, flow, nlu, registry
 st.set_page_config(page_title="광고 만들기 — 흐름 설계 데모", page_icon="💬", layout="wide")
 
 TREE = """
-              ┌──────────────────────────────────────┐
-              │  ① 어떻게 시작할까?          ★분기    │
-              └────────┬────────────────────┬────────┘
-            💬 말로 하기 (기본)       🔘 골라서 만들기 (보조)
-              ┌────────▼────────┐            │
-              │ ② 이해한 내용    │            │
-              │    확인          │            │   말로 설명하기
-              │  알아들은 항목은  │            │   어려운 분을 위한
-              │  질문을 건너뜀 ✨ │            │   경로
-              └────────┬────────┘            │
-                       └──────────┬──────────┘
-                        ┌─────────▼─────────┐
-                        │ ③ 무엇을 만들까?   │ ★분기
+                        ┌───────────────────┐
+                        │ ① 무엇을 만들까?   │ ★분기
                         └────┬─────────┬────┘
                      📝 문구 │         │ 🖼️ 이미지
                    ┌─────────▼──┐ ┌────▼───────────┐
-                   │ ④ 어떤 가게?│ │ ④ 어떤 가게?    │
+                   │ ② 어떤 가게?│ │ ② 어떤 가게?    │
                    ├────────────┤ ├────────────────┤
-                   │ ⑤ 제품 사진?│ │ ⑤ 제품 사진?    │ ★분기
+                   │ ③ 제품 사진?│ │ ③ 제품 사진?    │ ★분기
                    └─────────┬──┘ ├────────────────┤
-                             │    │ ⑥ 참고 이미지?  │ ★분기
+                             │    │ ④ 참고 이미지?  │ ★분기
                              │    │   → 생성 모드 확정│
                              │    └────┬───────────┘
                    ┌─────────▼──┐ ┌────▼───────────┐
-                   │ ⑦ 무엇을 홍보│ │ ⑦ 무엇을 홍보   │
-                   │ ⑧ 어디에 쓸까│ │ ⑧ 어디에 쓸까   │
-                   │ ⑨ 어떤 느낌 │ │ ⑨ 어떤 느낌     │
+                   │ ⑤ 무엇을 홍보│ │ ⑤ 무엇을 홍보   │
+                   │ ⑥ 어디에 쓸까│ │ ⑥ 어디에 쓸까   │
+                   │ ⑦ 어떤 느낌 │ │ ⑦ 어떤 느낌     │
                    └─────────┬──┘ ├────────────────┤
-                             │    │ ⑩ 글자도 넣을까?│ ★분기
+                             │    │ ⑧ 글자도 넣을까?│ ★분기
                              │    └──┬──────────┬──┘
                              │  글자넣기│        │이미지만
                    ┌─────────▼────────▼──┐      │
-                   │ ⑪ 가격·조건  ⇄ 합류  │      │
+                   │ ⑨ 가격·조건  ⇄ 합류  │      │
                    └──────────┬──────────┘      │
                               └────────┬────────┘
                                   ┌────▼────┐
                                   │  결과   │
                                   └─────────┘
+
+  ※ 모든 질문에서 선택지를 누르거나, 아래 입력창에 말로 하거나 — 둘 다 됩니다.
+    한 문장에 여러 개를 말하면 해당 질문들을 건너뜁니다.
 """
 
 
@@ -78,10 +69,19 @@ def _go(value, label: str, next_id: str) -> None:
     st.rerun()
 
 
+def _summary(filled: dict) -> str:
+    """자연어에서 채운 슬롯을 한 줄로."""
+    parts = []
+    for slot, val in filled.items():
+        value = val[0] if isinstance(val, tuple) else val.value
+        parts.append(nlu.describe(slot, value))
+    return " · ".join(parts)
+
+
 state = _init()
 
 # ──────────────────────────────────────────────────────────────
-# 사이드바 — 분기와 자동 인식이 눈에 보이게
+# 사이드바
 # ──────────────────────────────────────────────────────────────
 
 with st.sidebar:
@@ -89,19 +89,16 @@ with st.sidebar:
 
     done_nodes = {h["node"] for h in state["_history"]}
     answers = {h["node"]: h["label"] for h in state["_history"]}
-    current, goal, entry = state["_node"], state.get("goal"), state.get("entry")
-    auto = state["_auto"]
+    current, goal, auto = state["_node"], state.get("goal"), state["_auto"]
 
     for s in flow.steps():
         store = s.get("store")
-        skipped = (s.get("only") and goal and s["only"] != goal) or (
-            s.get("only_path") and entry and s["only_path"] != entry
-        )
+        skipped = s.get("only") and goal and s["only"] != goal
 
         if store and store in auto:
             st.markdown(f"✨ ~~{s['step']}. {s['short']}~~")
             st.caption(f"　　→ {nlu.describe(store, state[store])}")
-            st.caption(f"　　💬 “{auto[store]}” 에서 자동 인식")
+            st.caption(f"　　💬 “{auto[store]}” 에서")
             continue
 
         if s["id"] in done_nodes:
@@ -115,11 +112,11 @@ with st.sidebar:
 
         mark = " `★분기`" if s.get("branch") else (" `⇄합류`" if s.get("merge") else "")
         st.markdown(f"{icon} {wrap}{s['step']}. {s['short']}{wrap}{mark}")
-        if s["id"] in answers:
+        if s["id"] in answers and s["id"] not in (current,):
             st.caption(f"　　→ {answers[s['id']]}")
 
     if auto:
-        st.info(f"💬 말씀 한 번으로 **{len(auto)}개 질문**을 건너뛰었습니다.")
+        st.info(f"💬 말씀으로 **{len(auto)}개 질문**을 건너뛰었습니다.")
 
     st.divider()
     mode = flow.resolved_mode(state)
@@ -141,15 +138,14 @@ with st.sidebar:
 st.title("💬 광고 만들기 — 챗봇 흐름 설계")
 st.caption(
     "**설계를 보여주는 데모입니다.** 실제 이미지 생성은 하지 않습니다. "
-    "질문 흐름과 분기 구조를 확인해 주세요."
+    "선택지를 누르셔도 되고, 아래 입력창에 말로 하셔도 됩니다."
 )
 
 with st.expander("🌳 전체 분기 구조 한눈에 보기", expanded=not state["_history"]):
     st.code(TREE, language="text")
     st.markdown(
-        "- **💬 말로 하기가 기본 동선**입니다. 말에서 알아들은 항목(✨)은 질문을 건너뜁니다.\n"
-        "- **🔘 골라서 만들기**는 말로 설명하기 어려운 분을 위한 보조 경로입니다. "
-        "어느 쪽으로 들어와도 **채우는 항목은 같습니다.**\n"
+        "- **경로를 고르게 하지 않습니다.** 매 질문에 선택지와 자유 입력이 함께 있습니다.\n"
+        "- 선택지는 **힌트** 역할을 합니다 — 뭘 물어보는지 보고 말로 풀어 쓸 수 있습니다.\n"
         "- **★분기** — 답에 따라 이후 경로가 갈라지는 질문\n"
         "- **⇄합류** — 문구 갈래와 이미지 갈래가 다시 만나는 지점\n"
         "- 질문 순서는 코드가 아니라 `configs/flow.yaml` 에 있어 "
@@ -157,8 +153,7 @@ with st.expander("🌳 전체 분기 구조 한눈에 보기", expanded=not stat
     )
 
 done, total = flow.progress(state)
-if state.get("entry"):
-    st.progress(done / total, text=f"{done} / {total} 단계")
+st.progress(done / total, text=f"{done} / {total} 단계")
 
 st.divider()
 
@@ -173,65 +168,15 @@ for i, h in enumerate(state["_history"]):
         if c2.button("✏️ 수정", key=f"rw_{i}", width="stretch"):
             st.session_state.chat_state = flow.rewind(st.session_state.chat_state, i)
             st.rerun()
+        if h.get("filled"):
+            st.caption(f"✅ {_summary(h['filled'])} — 이렇게 이해했어요")
 
 # ── 현재 질문 ─────────────────────────────────────────────────
 
 nd = flow.node(state)
 kind = nd.get("kind")
 
-if kind == "nl_entry":
-    with st.chat_message("assistant"):
-        st.markdown(flow.ask_text(nd, state))
-        text = st.text_area(
-            "말씀해 주세요", placeholder=nd.get("placeholder", ""), height=90, key="nl_text"
-        )
-        c1, c2 = st.columns([0.5, 0.5])
-        if c1.button("💬 이렇게 만들어줘", type="primary", width="stretch", disabled=not text):
-            flow.apply_nlu(st.session_state.chat_state, text)
-            flow.advance(st.session_state.chat_state, text, f"“{text}”", nd["next"])
-            st.rerun()
-        if c2.button(nd["fallback_label"], width="stretch"):
-            st.session_state.chat_state["entry"] = "guided"
-            flow.advance(st.session_state.chat_state, None, "골라서 만들기", nd["fallback"])
-            st.rerun()
-        st.caption(
-            "🔧 이 답이 결정하는 것 — " + nd["decides"] + "  \n"
-            "ℹ️ 지금은 키워드 매칭 스텁입니다. LLM 을 붙이면 이 자리가 교체됩니다."
-        )
-
-elif kind == "confirm":
-    with st.chat_message("assistant"):
-        st.markdown(flow.ask_text(nd, state))
-
-        got = state["_auto"]
-        if got:
-            for slot, evidence in got.items():
-                st.markdown(
-                    f"✅ **{nlu.LABELS[slot]}** — {nlu.describe(slot, state[slot])}　"
-                    f"<small style='color:#888'>“{evidence}” 에서</small>",
-                    unsafe_allow_html=True,
-                )
-        else:
-            st.warning("말씀에서 알아들은 항목이 없어요. 하나씩 여쭤볼게요.")
-
-        missing = flow.missing_slots(state)
-        if missing:
-            st.caption(
-                "❓ 아직 모르는 것 — "
-                + ", ".join(nlu.LABELS[m] for m in missing)
-                + " · 이건 이따 여쭤볼게요"
-            )
-
-        c1, c2 = st.columns(2)
-        if c1.button("👍 네, 맞아요", type="primary", width="stretch"):
-            _go(None, "네, 맞아요", nd["next"])
-        if c2.button("🔘 아니요, 골라서 할게요", width="stretch"):
-            flow.clear_auto(st.session_state.chat_state)
-            st.session_state.chat_state["entry"] = "guided"
-            flow.advance(st.session_state.chat_state, None, "골라서 할게요", nd["next"])
-            st.rerun()
-
-elif kind != "result":
+if kind != "result":
     with st.chat_message("assistant"):
         st.markdown(flow.ask_text(nd, state))
         if nd.get("decides"):
@@ -259,9 +204,7 @@ elif kind != "result":
                 _go(img, "사진 첨부함" if img else "(데모 — 첨부 생략)", nd["next"])
 
         elif kind == "text":
-            val = st.text_input("입력", placeholder=nd.get("placeholder", ""), key=f"tx_{nd['id']}")
-            if st.button("다음 →", key=f"next_{nd['id']}", type="primary", disabled=not val):
-                _go(val, val, nd["next"])
+            st.caption(f"💬 아래 입력창에 적어주세요 — {nd.get('placeholder', '')}")
 
         elif kind == "items":
             rows = st.data_editor(
@@ -271,13 +214,30 @@ elif kind != "result":
                 width="stretch",
                 key=f"it_{nd['id']}",
             )
-            filled = [r for r in rows if r.get("항목")]
+            filled_rows = [r for r in rows if r.get("항목")]
             c1, c2 = st.columns(2)
             if c1.button("다음 →", key=f"next_{nd['id']}", type="primary"):
-                label = " · ".join(f"{r['항목']} {r['가격/조건']}" for r in filled) or "입력함"
-                _go(filled, label, nd["next"])
+                label = " · ".join(f"{r['항목']} {r['가격/조건']}" for r in filled_rows) or "입력함"
+                _go(filled_rows, label, nd["next"])
             if c2.button("없어요", key=f"skip_{nd['id']}"):
                 _go([], "없어요", nd["next"])
+
+    # ── 자유 입력 — 항상 열려 있다 ────────────────────────────
+    if text := st.chat_input("말로 하셔도 돼요.  예: 카페 크로플 인스타 사진 감성적으로"):
+        res = flow.submit_free_text(st.session_state.chat_state, text)
+
+        if res["kind"] != "none":
+            st.rerun()
+        elif kind == "text":
+            # 이 질문은 입력 자체가 답이다 (상품명 등)
+            _go(text, text, nd["next"])
+        else:
+            # 못 알아들었을 때는 rerun 하지 않고 그 자리에서 알린다
+            st.warning(
+                f"“{text}” 를 잘 못 알아들었어요. "
+                "위 선택지에서 골라주시거나 다시 말씀해 주세요."
+            )
+            st.caption("ℹ️ 지금은 키워드 매칭 스텁입니다. LLM 을 붙이면 훨씬 잘 알아듣습니다.")
 
 # ── 결과 (목업) ────────────────────────────────────────────────
 

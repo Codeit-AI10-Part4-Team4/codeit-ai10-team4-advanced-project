@@ -1,0 +1,37 @@
+# ===== 이미지 생성 모델 (GPU) =====
+#
+# ⚠️ 아직 모델을 선정하지 않았다. 기술계획서 5-2 참조.
+#    아래는 후보들이 공통으로 요구하는 최소 집합이며,
+#    실험 1~2 로 base 모델이 정해지면 버전을 고정한다.
+#
+# 설치:  pip install -r requirements.txt -r requirements-gpu.txt
+# CUDA 버전은 배포 대상(GCP VM)의 드라이버에 맞춰 조정할 것.
+
+--extra-index-url https://download.pytorch.org/whl/cu124
+
+torch>=2.4.0
+torchvision>=0.19.0
+
+# Diffusion 파이프라인 — 모드 6종이 이 위에서 conditioning 만 달리한다
+diffusers>=0.30.0
+transformers>=4.44.0
+accelerate>=0.33.0
+safetensors>=0.4.0
+
+# 누끼 (제품 분리) — 실험 1 에서 rembg / BiRefNet / SAM2 비교 후 확정
+rembg>=2.0.0
+onnxruntime>=1.18.0
+
+# 스케치 입력 캔버스 (요구사항 '광고 이미지 4')
+streamlit-drawable-canvas>=0.9.3
+
+# ===== 아직 넣지 않은 것 =====
+# controlnet_aux            # ControlNet 전처리기 — 실험 8 에서 종류 확정 후
+# peft                      # LoRA 를 쓰게 되면
+# xformers                  # 메모리 절감. torch 버전과 궁합 확인 필요
+# bitsandbytes              # 8GB 에서 양자화가 필요해지면
+
+# ===== 광고 규제 RAG (별도 단계) =====
+# chromadb>=0.5.0
+# rank-bm25>=0.2.2
+# sentence-transformers>=3.0.0   # bge-m3

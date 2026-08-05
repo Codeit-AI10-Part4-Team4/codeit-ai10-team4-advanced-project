@@ -11,26 +11,45 @@ P0 기능 — Diffusion 모델은 한글을 제대로 그리지 못하므로,
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
-# 맑은 고딕 → 나눔고딕 → 굴림 순으로 탐색 (Windows 기본 탑재)
+# OS 별 한글 폰트 탐색 경로.
+# ⚠️ 리눅스 서버·컨테이너에는 한글 폰트가 기본 탑재되지 않는다.
+#    Docker 이미지는 fonts-nanum 을 설치한다 (Dockerfile 참조).
+#    경로가 다르면 ADS_FONT_REGULAR / ADS_FONT_BOLD 로 덮어쓸 수 있다.
 _FONT_CANDIDATES = {
-    "regular": ["C:/Windows/Fonts/malgun.ttf", "C:/Windows/Fonts/NanumGothic.ttf"],
-    "bold": ["C:/Windows/Fonts/malgunbd.ttf", "C:/Windows/Fonts/NanumGothicBold.ttf"],
+    "regular": [
+        "C:/Windows/Fonts/malgun.ttf",                                  # Windows 맑은 고딕
+        "C:/Windows/Fonts/NanumGothic.ttf",
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",              # Linux (fonts-nanum)
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/System/Library/Fonts/AppleSDGothicNeo.ttc",                   # macOS
+    ],
+    "bold": [
+        "C:/Windows/Fonts/malgunbd.ttf",
+        "C:/Windows/Fonts/NanumGothicBold.ttf",
+        "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+        "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+    ],
 }
 
 
 def _font_path(weight: str) -> str:
-    for p in _FONT_CANDIDATES[weight]:
-        if Path(p).exists():
-            return p
-    for p in _FONT_CANDIDATES["regular"]:
-        if Path(p).exists():
-            return p
+    override = os.environ.get(f"ADS_FONT_{weight.upper()}")
+    if override and Path(override).exists():
+        return override
+    for group in (weight, "regular"):
+        for p in _FONT_CANDIDATES[group]:
+            if Path(p).exists():
+                return p
     raise FileNotFoundError(
-        "한글 폰트를 찾지 못했습니다. assets/fonts/ 에 TTF 를 넣고 _FONT_CANDIDATES 에 추가하세요."
+        "한글 폰트를 찾지 못했습니다. "
+        "리눅스라면 `apt-get install fonts-nanum`, "
+        "또는 ADS_FONT_REGULAR 환경변수로 TTF 경로를 지정하세요."
     )
 
 
