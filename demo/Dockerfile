@@ -13,14 +13,14 @@
 #
 # ── 사용법 ──────────────────────────────────────────────────────
 #   # CPU — 챗봇 흐름 데모
-#   docker build -t ad-maker .
+#   docker build -t ad-maker demo/
 #   docker run --rm -p 8501:8501 ad-maker
 #
 #   # 폼 방식 프로토타입을 보고 싶으면
 #   docker run --rm -p 8501:8501 ad-maker streamlit run app.py
 #
 #   # GPU — 모델 붙인 뒤. 모델 캐시는 반드시 볼륨으로 (SDXL 하나가 7GB 안팎)
-#   docker build --target gpu -t ad-maker:gpu .
+#   docker build --target gpu -t ad-maker:gpu demo/
 #   docker run --rm --gpus all -p 8501:8501 -v ad-models:/models ad-maker:gpu
 # ───────────────────────────────────────────────────────────────
 
