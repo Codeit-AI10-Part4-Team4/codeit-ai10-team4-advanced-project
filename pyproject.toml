@@ -19,12 +19,13 @@ dependencies = [
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "pillow>=10.0.0",         # 레이아웃 합성 — 한글을 이미지에 얹는다
-    "pyyaml>=6.0",            # 업종·스타일·규격 레지스트리
+    "pyyaml>=6.0",            # 업종 레지스트리
+    "sqlalchemy>=2.0.0",      # DB. 테스트는 SQLite, 운영은 PostgreSQL
 ]
 
 # ── 설치 방법 ────────────────────────────────────────────────
 #   전원 공통          pip install -e ".[dev,ui]"
-#   NLU·문구 담당      pip install -e ".[dev,ui,llm]"
+#   NLU·문구 담당      pip install -e ".[dev,ui,llm,db]"
 #   이미지 생성 담당    pip install -e ".[dev,ui,ml]"      ← GPU 필요
 #
 #   담당에 따라 다른 것만 깔면 된다. GPU 가 없는 사람은 ml 을 빼면
@@ -53,6 +54,11 @@ ui = [
 # NLU·문구 생성 담당 — 가볍다. GPU 불필요
 llm = [
     "openai>=1.40.0",
+]
+
+# PostgreSQL 드라이버. 테스트는 SQLite 로 돌아서 CI 엔 필요 없다.
+db = [
+    "psycopg[binary]>=3.2.0",
 ]
 
 # 이미지 생성 담당 — 무겁다(수 GB). GPU 필요
@@ -129,5 +135,6 @@ module = [
     "rembg.*",
     "streamlit.*",
     "pandas.*",
+    "openai.*",
 ]
 ignore_missing_imports = true

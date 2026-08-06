@@ -31,11 +31,11 @@ COPY pyproject.toml README.md ./
 RUN mkdir -p src/api src/app_core \
     && touch src/api/__init__.py src/app_core/__init__.py
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -e ".[dev,ui,llm]"
+    pip install -e ".[dev,ui,llm,db]"
 
 COPY . .
 EXPOSE 8000 8501
-CMD ["streamlit", "run", "demo/app_chat.py", "--server.port=8501"]
+CMD ["streamlit", "run", "app.py", "--server.port=8501"]
 
 
 # ─────────────────────────── gpu ───────────────────────────

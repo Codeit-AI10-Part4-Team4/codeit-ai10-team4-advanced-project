@@ -1,7 +1,4 @@
-"""Smoke test proving the install/CI chain works end to end.
-
-Convention: tests/ mirrors src/ (src/api/main.py -> tests/api/test_main.py).
-"""
+"""설치·CI 사슬이 도는지 확인하는 스모크 테스트."""
 
 from fastapi.testclient import TestClient
 
