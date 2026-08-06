@@ -1,0 +1,57 @@
+# 개발 환경 셋업
+#
+#   docker compose up app          NLU · 문구 · 챗봇 UI  → localhost:8501
+#   docker compose up gpu          이미지 생성 (GPU 필요)
+#   docker compose run app bash    컨테이너 안에서 작업
+#   docker compose run app pytest  테스트
+
+name: ad-maker
+
+services:
+  # NLU · 문구 · 챗봇 UI · API — GPU 불필요
+  app:
+    build:
+      context: .
+      target: cpu
+    ports:
+      - "8501:8501"   # streamlit
+      - "8000:8000"   # fastapi
+    volumes:
+      # 코드를 마운트 — 고칠 때마다 재빌드하지 않는다
+      - .:/app
+      # 컨테이너의 설치 정보를 호스트가 덮어쓰지 않게 분리
+      - /app/src/codeit_ai10_team4_advanced_project.egg-info
+    env_file:
+      - .env
+    stdin_open: true
+    tty: true
+
+  # 이미지 생성 — GPU 필요
+  gpu:
+    build:
+      context: .
+      target: gpu
+      args:
+        # 드라이버에 맞춰 조정: nvidia-smi 상단의 CUDA Version 확인
+        TORCH_INDEX: https://download.pytorch.org/whl/cu124
+    ports:
+      - "8502:8501"
+      - "8001:8000"
+    volumes:
+      - .:/app
+      # 모델 가중치 — 볼륨으로 빼지 않으면 재빌드마다 수십 GB 를 다시 받는다
+      - models:/models
+    env_file:
+      - .env
+    stdin_open: true
+    tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  models:
