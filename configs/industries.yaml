@@ -5,6 +5,7 @@
 # status: verified = 결과 품질을 실제로 검증하고 프롬프트를 튜닝한 업종
 #         beta     = 정의만 해둔 업종. UI에 '베타' 뱃지 표시
 # needs_photo: false = 사진 소재가 없는 것이 정상인 업종 (배경만 생성 모드)
+# 업종 나중에 늘리기 가능
 
 - id: cafe
   label: 카페·디저트

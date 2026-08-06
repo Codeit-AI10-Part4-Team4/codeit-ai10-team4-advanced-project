@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app_core import registry
-from app_core.schema import AdBrief, Evaluation, PriceItem, StoreProfile
+from app_core.schema import AdBrief, AdBriefDraft, Evaluation, PriceItem, StoreProfile
 
 CAFE = "cafe"
 FEED = "insta_feed"
@@ -132,3 +132,58 @@ def test_이전_평가를_받아_재생성할_수_있다() -> None:
 
 def test_평가가_없는_것이_기본이다() -> None:
     assert brief().prev_evaluation is None
+
+
+# ── 대화 초안 (AdBriefDraft) ────────────────────────────────
+
+
+def test_빈_초안은_필수가_전부_비어있다() -> None:
+    assert AdBriefDraft().missing() == ["goal", "style", "product"]
+
+
+def test_한_슬롯만_차도_missing에서_빠진다() -> None:
+    draft = AdBriefDraft(product="크로플")
+    assert draft.missing() == ["goal", "style"]
+
+
+def test_다_차면_missing이_빈다() -> None:
+    draft = AdBriefDraft(goal="image", style=WARM, product="크로플")
+    assert draft.missing() == []
+
+
+def test_모르는_스타일은_초안에서도_거부한다() -> None:
+    with pytest.raises(ValidationError, match="모르는"):
+        AdBriefDraft(style="네온사인")
+
+
+def test_이번_턴에_안_나온_슬롯은_이전_값을_유지한다() -> None:
+    """ "아까 카페라고 했잖아"를 매번 다시 말하게 하지 않는다."""
+    draft = AdBriefDraft(product="크로플").merge(AdBriefDraft(style=WARM))
+    assert draft.product == "크로플" and draft.style == WARM
+
+
+def test_새_턴이_같은_슬롯을_다시_말하면_덮어쓴다() -> None:
+    draft = AdBriefDraft(style=WARM).merge(AdBriefDraft(style="bold"))
+    assert draft.style == "bold"
+
+
+def test_빈_값으로는_기존_값을_지우지_않는다() -> None:
+    """LLM이 이번 턴에 못 뽑아낸 필드를 빈 문자열로 돌려줘도 이전 값이 살아있어야 한다."""
+    draft = AdBriefDraft(product="크로플").merge(AdBriefDraft(product=""))
+    assert draft.product == "크로플"
+
+
+def test_다_차면_주문서로_승격한다() -> None:
+    draft = AdBriefDraft(goal="image", style=WARM, product="크로플")
+    b = draft.to_brief(session_id="sess-1", ad_id="ad-1", store=profile())
+    assert b.product == "크로플" and b.format == FEED
+
+
+def test_안_찼는데_승격하려면_거부한다() -> None:
+    with pytest.raises(ValueError, match="아직 안 찬"):
+        AdBriefDraft(product="크로플").to_brief(session_id="sess-1", ad_id="ad-1", store=profile())
+
+
+def test_초안도_모르는_필드는_거부한다() -> None:
+    with pytest.raises(ValidationError):
+        AdBriefDraft(styel=WARM)

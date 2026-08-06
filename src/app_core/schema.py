@@ -4,6 +4,7 @@
 
 Pydantic 을 쓰는 이유는 **틀린 값이 여기서 걸리게** 하기 위해서다.
 LLM 이 목록에 없는 업종을 지어내도 이 단계에서 막힌다.
+Ai페르소나 관련 데이터는 현재 서울로 주소가 시작하는지만 검사한다.
 
 정보가 들어오는 경로는 둘이고, 채우는 자리가 다르다.
   정보 등록  주소·업종·상호·연락처   한 번 입력하고 재사용   → StoreProfile
@@ -149,3 +150,73 @@ class AdBrief(BaseModel):
             "mode": self.mode,
             "legal_tags": self.legal_tags,
         }
+
+
+# NLU가 한 번에 다 못 채운다. 대화가 몇 턴 걸리는 게 정상이라
+# AdBrief(다 차야 유효)와 달리 전부 선택으로 둔 초안 모델을 따로 둔다.
+REQUIRED_SLOTS = ("goal", "style", "product")
+
+
+class AdBriefDraft(BaseModel):
+    """대화 중 채워지는 값 — LLM이 이번 턴에 뽑아낸 것을 담는다.
+
+    format 은 물어보지 않는다. 지금 규격이 하나뿐이라 고를 게 없다
+    (formats.yaml 이 늘어나면 그때 필수 슬롯으로 옮긴다).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    goal: Goal | None = None
+    style: str | None = None
+    # min_length 를 안 건다 — LLM 이 "이번 턴엔 못 찾았다"는 뜻으로 "" 를 돌려줄 수 있고,
+    # merge() 가 그 "" 를 걸러내는 역할을 한다. 진짜 값 검증은 AdBrief 승격 때 한다.
+    product: str | None = None
+
+    items: list[PriceItem] = Field(default_factory=list)
+    request: str = ""
+    with_text: bool = True
+    has_photo: bool = False
+    raw_utterance: str = ""
+
+    @field_validator("style")
+    @classmethod
+    def _known_style(cls, v: str | None) -> str | None:
+        if v is not None and v not in _ids(registry.styles()):
+            raise ValueError(f"모르는 스타일입니다: {v!r}")
+        return v
+
+    def missing(self) -> list[str]:
+        """아직 안 찬 필수 슬롯 이름. 되묻기가 이 목록을 보고 질문을 고른다."""
+        return [slot for slot in REQUIRED_SLOTS if getattr(self, slot) is None]
+
+    def merge(self, extracted: AdBriefDraft) -> AdBriefDraft:
+        """이번 턴에 새로 뽑아낸 값으로 갱신한다.
+
+        이미 채운 슬롯은 이번 턴에 언급 안 됐으면 그대로 둔다 —
+        "아까 카페라고 했잖아"를 매번 다시 말하게 하지 않으려고.
+        """
+        data = self.model_dump()
+        for field, value in extracted.model_dump(exclude_unset=True).items():
+            if value not in (None, "", []):
+                data[field] = value
+        return AdBriefDraft(**data)
+
+    def to_brief(self, *, session_id: str, ad_id: str, store: StoreProfile) -> AdBrief:
+        """필수 슬롯이 다 찼을 때만 완성된 주문서로 승격한다."""
+        if missing := self.missing():
+            raise ValueError(f"아직 안 찬 항목이 있습니다: {missing}")
+        (default_format,) = registry.formats()  # 규격이 하나뿐이라 자동 선택
+        return AdBrief(
+            session_id=session_id,
+            ad_id=ad_id,
+            store=store,
+            goal=self.goal,  # type: ignore[arg-type]  # missing() 이 None 아님을 보장
+            format=default_format["id"],
+            style=self.style,  # type: ignore[arg-type]
+            product=self.product,  # type: ignore[arg-type]
+            items=self.items,
+            request=self.request,
+            with_text=self.with_text,
+            has_photo=self.has_photo,
+            raw_utterance=self.raw_utterance,
+        )

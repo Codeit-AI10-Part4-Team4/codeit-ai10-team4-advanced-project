@@ -7,6 +7,8 @@
 #   text   본문 텍스트 색
 #   accent 강조(가격·뱃지) 색
 #   band   이미지 위 텍스트 띠 색
+#
+# id값 추후에 늘리기
 
 - id: warm
   label: 따뜻한 감성
