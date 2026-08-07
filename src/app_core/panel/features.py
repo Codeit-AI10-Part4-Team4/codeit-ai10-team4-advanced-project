@@ -230,6 +230,17 @@ def build_features(
             )
         )[0]
 
+        # 상권 성격 — 출퇴근지인가 주거지인가. 시간대 매출로 추론하던 것을 실측으로 대체한다.
+        ctx = con.execute(
+            "SELECT coalesce(w.worker_pop, 0), coalesce(r.resident_pop, 0), "
+            "       coalesce(r.household_cnt, 0), a.apt_avg_price, coalesce(a.apt_cnt, 0) "
+            "FROM area ar "
+            "LEFT JOIN worker w USING(area_cd) LEFT JOIN resident r USING(area_cd) "
+            "LEFT JOIN apartment a USING(area_cd) WHERE ar.area_cd = ?",
+            [area["area_cd"]],
+        ).fetchone()
+        worker_pop, resident_pop, hh, apt_price, apt_cnt = ctx if ctx else (0, 0, 0, None, 0)
+
         quarter = _one(con.execute("SELECT max(quarter) FROM sales"))[0]
         # 어떤 데이터로 만든 피처인지 남긴다. 업종 축이 빠진 폴백이면 그렇게 표기한다.
         # (사장님에게 보여줄 업종명은 store.industry_label 을 쓴다 — 여기 값이 아니다)
@@ -262,6 +273,19 @@ def build_features(
             "avg_ticket": ticket,
             "avg_ticket_pct": _ticket_percentile(con, () if fallback else codes, ticket),
             "competitor_cnt": int(store_cnt),
+            # 상권 성격: 1에 가까우면 출퇴근 상권, 0에 가까우면 주거 상권
+            "worker_pop": int(worker_pop),
+            "resident_pop": int(resident_pop),
+            "work_ratio": (
+                round(worker_pop / (worker_pop + resident_pop), 3)
+                if worker_pop + resident_pop
+                else None
+            ),
+            "household_cnt": int(hh),
+            # 배후 주거의 가격대 — 소득 축의 대리 지표 (객단가 하나로만 보던 것을 보강).
+            # 상권 영역 안에 아파트가 없으면 None (상업지역은 대부분 그렇다).
+            "apt_cnt": int(apt_cnt),
+            "apt_avg_price": int(apt_price) if apt_price else None,
         }
     finally:
         con.close()

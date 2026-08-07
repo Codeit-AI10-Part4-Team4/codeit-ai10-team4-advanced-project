@@ -34,8 +34,10 @@ AGES = ["10", "20", "30", "40", "50", "60_이상"]
 TIMES = ["00~06", "06~11", "11~14", "14~17", "17~21", "21~24"]
 FOOT_TIMES = ["00_06", "06_11", "11_14", "14_17", "17_21", "21_24"]
 
-#: 파일명으로 CSV 4종을 구분한다. 사용자가 받은 파일명을 그대로 쓰기 위한 것.
+#: 파일명으로 CSV 를 구분한다. 사용자가 받은 파일명을 그대로 쓰기 위한 것.
+#: 앞의 4종은 필수, 뒤의 3종은 있으면 적재한다(없으면 해당 피처만 빠진다).
 KINDS = {"추정매출": "sales", "길단위인구": "foot", "영역": "area", "점포": "store"}
+OPTIONAL_KINDS = {"상주인구": "resident", "직장인구": "worker", "아파트": "apartment"}
 
 
 def read_csv(path: Path) -> pd.DataFrame:
@@ -50,7 +52,7 @@ def read_csv(path: Path) -> pd.DataFrame:
 def find(src: Path) -> dict[str, Path]:
     found: dict[str, Path] = {}
     for p in src.glob("*.csv"):
-        for kw, kind in KINDS.items():
+        for kw, kind in {**KINDS, **OPTIONAL_KINDS}.items():
             if kw in p.name and kind not in found:
                 found[kind] = p
     missing = set(KINDS.values()) - set(found)
@@ -121,6 +123,49 @@ def build_foot(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def build_resident(df: pd.DataFrame) -> pd.DataFrame:
+    """상주인구 — 이 상권에 **사는** 사람. 직장인구와 비교해 상권 성격을 가른다.
+
+    성별×연령 교차(`남성연령대_30_상주인구_수`)가 있다. 매출에는 없는 것이라,
+    두 축을 곱해 쓰는 우리 가정이 얼마나 어긋나는지 재는 근거로도 쓴다 (§4.4①).
+    """
+    return pd.DataFrame(
+        {
+            "area_cd": df["상권_코드"].astype(str),
+            "quarter": df["기준_년분기_코드"].astype(str),
+            "resident_pop": df["총_상주인구_수"],
+            "household_cnt": df["총_가구_수"],
+            # 아파트_가구_수 는 최근 8개 분기 내내 0이다(원본이 더 이상 채우지 않는다) → 적재하지 않는다.
+        }
+    )
+
+
+def build_worker(df: pd.DataFrame) -> pd.DataFrame:
+    """직장인구 — 이 상권으로 **출근하는** 사람."""
+    return pd.DataFrame(
+        {
+            "area_cd": df["상권_코드"].astype(str),
+            "quarter": df["기준_년분기_코드"].astype(str),
+            "worker_pop": df["총_직장_인구_수"],
+        }
+    )
+
+
+def build_apartment(df: pd.DataFrame) -> pd.DataFrame:
+    """아파트 — 배후 주거의 가격대. 소득 축의 대리 지표다.
+
+    면적·가격 구간별 세대수는 결측이 많아 쓰지 않고, 결측 없는 평균값만 쓴다.
+    """
+    return pd.DataFrame(
+        {
+            "area_cd": df["상권_코드"].astype(str),
+            "quarter": df["기준_년분기_코드"].astype(str),
+            "apt_cnt": df["아파트_단지_수"],
+            "apt_avg_price": df["아파트_평균_시가"],
+        }
+    )
+
+
 def build_store(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(
         {
@@ -146,9 +191,20 @@ def main() -> None:
     foot = build_foot(latest(read_csv(paths["foot"])))
     store = build_store(latest(read_csv(paths["store"])))
 
+    tables = [("area", area), ("sales", sales), ("foot", foot), ("store", store)]
+    for kind, builder in [
+        ("resident", build_resident),
+        ("worker", build_worker),
+        ("apartment", build_apartment),
+    ]:
+        if kind in paths:
+            tables.append((kind, builder(latest(read_csv(paths[kind])))))
+        else:
+            print(f"  (건너뜀) {kind} — CSV 없음. 해당 피처는 비게 된다")
+
     args.out.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(args.out))
-    for name, df in [("area", area), ("sales", sales), ("foot", foot), ("store", store)]:
+    for name, df in tables:
         con.execute(f"CREATE OR REPLACE TABLE {name} AS SELECT * FROM df")
         print(f"  {name:6s} {len(df):>7,}행")
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS area_pk ON area(area_cd)")

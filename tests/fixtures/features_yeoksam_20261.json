@@ -44,7 +44,13 @@
     "weekend_ratio": 0.138,
     "avg_ticket": 9546,
     "avg_ticket_pct": 0.674,
-    "competitor_cnt": 185
+    "competitor_cnt": 185,
+    "worker_pop": 84399,
+    "resident_pop": 5764,
+    "work_ratio": 0.936,
+    "household_cnt": 4404,
+    "apt_cnt": 82,
+    "apt_avg_price": 326468462
   },
   "personas": [
     {
