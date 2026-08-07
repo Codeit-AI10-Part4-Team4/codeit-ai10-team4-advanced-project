@@ -26,8 +26,18 @@ def _to_brief(row: db.AdRow) -> AdBrief:
     )
 
 
-def save(store_id: int, brief: AdBrief, copies: list[CopyCandidate] | None = None) -> int:
-    """주문서와 생성된 문구를 저장하고 광고 id 를 돌려준다."""
+def save(
+    store_id: int,
+    brief: AdBrief,
+    copies: list[CopyCandidate] | None = None,
+    parent_id: int | None = None,
+) -> int:
+    """주문서와 생성된 문구를 저장하고 광고 id 를 돌려준다.
+
+    다시 만든 것이면 parent_id 로 직전 광고를 가리킨다. 덮어쓰지 않는 이유는
+    사장님이 "아까 그게 나았는데" 할 때 돌아갈 곳이 있어야 하기 때문이다.
+    """
+    fb = brief.feedback
     with db.session() as s:
         row = db.AdRow(
             store_id=store_id,
@@ -38,12 +48,24 @@ def save(store_id: int, brief: AdBrief, copies: list[CopyCandidate] | None = Non
             tone=brief.tone,
             extra=brief.extra,
             transcript=brief.raw_utterance,
+            parent_id=parent_id,
+            feedback_source=fb.source if fb else "",
+            feedback_notes="\n".join(fb.notes) if fb else "",
         )
         s.add(row)
         s.flush()
         for c in copies or []:
             s.add(db.CopyRow(ad_id=row.id, headline=c.headline, sub=c.sub))
         return row.id
+
+
+def copies_of(ad_id: int) -> list[CopyCandidate]:
+    """그 광고로 만든 문구들. 다시 만들 때 '이것과 다르게'로 넣는다."""
+    with db.session() as s:
+        rows = s.scalars(
+            select(db.CopyRow).where(db.CopyRow.ad_id == ad_id).order_by(db.CopyRow.id)
+        ).all()
+        return [CopyCandidate(headline=r.headline, sub=r.sub) for r in rows]
 
 
 def choose_copy(ad_id: int, headline: str) -> bool:

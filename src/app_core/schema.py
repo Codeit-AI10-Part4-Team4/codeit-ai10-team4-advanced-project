@@ -21,6 +21,12 @@ from app_core import registry
 
 Goal = Literal["image", "copy"]
 
+# 다시 만드는 경로는 셋이지만 담기는 자리는 하나다.
+#   typed   사장님이 말로 요청      "좀 더 밝게"
+#   option  화면 선택지를 누름       [더 짧게]
+#   panel   AI 손님 패널 평가 결과   suggestions[] · top_resistance[]
+FeedbackSource = Literal["typed", "option", "panel"]
+
 # 대화로 반드시 채워야 하는 것. goal 은 고정 버튼으로 이미 정해져서 여기 없다.
 # 이게 비면 광고를 만들 수 없다.
 REQUIRED_SLOTS = ("product", "price")
@@ -83,6 +89,35 @@ class Store(StoreInput):
     user_id: int
 
 
+class CopyCandidate(BaseModel):
+    """문구 후보 하나.
+
+    헤드라인과 서브를 나눠서 준다 — 이미지에 얹을 때 헤드라인은 크게,
+    서브는 작게 배치해야 해서 한 덩어리로 주면 어디서 자를지 알 수 없다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    headline: str = Field(min_length=1)
+    sub: str = ""
+
+
+class Feedback(BaseModel):
+    """다시 만드는 이유.
+
+    경로는 셋이지만(말로 요청·선택지·패널 평가) 담기는 형태는 하나다.
+    받는 쪽에서 경로마다 다르게 처리하지 않아도 되게 하려는 것이다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: FeedbackSource
+    notes: list[str] = Field(min_length=1, description="고쳐달라는 내용")
+    resistance: list[str] = Field(
+        default_factory=list, description="패널 평가의 저항 요인. source=panel 일 때만"
+    )
+
+
 class AdBrief(BaseModel):
     """주문서 — 생성에 필요한 모든 것. 필수가 다 차야 만들어진다.
 
@@ -97,7 +132,7 @@ class AdBrief(BaseModel):
     product: str = Field(min_length=1, description="홍보 대상 — 예: 크로플")
     price: int = Field(ge=0, description="원 단위. 0 이면 광고에 가격을 넣지 않는다")
 
-    situation: str = Field(default="", description="신메뉴·할인·오픈 등 알리려는 것")
+    situation: str = Field(default="", description="이 광고를 만드는 이유 — 자유 텍스트")
     tone: str = Field(default="", description="원하는 느낌 — 자유 텍스트")
     extra: str = Field(default="", description="그 밖의 요청")
     with_sub: bool = Field(default=True, description="서브 문구까지 만들지")
@@ -108,6 +143,27 @@ class AdBrief(BaseModel):
     transcript: list[str] = Field(
         default_factory=list, description="사장님이 한 말 그대로, 순서대로"
     )
+
+    # ── 다시 만들 때만 채워진다 ────────────────────────────
+    # 처음 만들 때는 둘 다 비어 있다.
+    prev_copies: list[CopyCandidate] = Field(
+        default_factory=list, description="직전에 만든 문구. 이것과 다르게 만들라고 넣는다"
+    )
+    feedback: Feedback | None = Field(default=None, description="왜 다시 만드는지")
+
+    @property
+    def is_revision(self) -> bool:
+        """다시 만드는 중인가. 프롬프트와 저장 양쪽에서 갈린다."""
+        return self.feedback is not None
+
+    def revised(self, feedback: Feedback, previous: list[CopyCandidate]) -> AdBrief:
+        """재생성용 주문서를 만든다.
+
+        상품·가격 같은 조건은 그대로 두고 피드백과 직전 결과만 얹는다.
+        조건까지 바꾸려면 대화로 돌아가야 한다 — 여기서 슬롯을 건드리면
+        사장님이 말한 적 없는 값이 조용히 바뀐다.
+        """
+        return self.model_copy(update={"feedback": feedback, "prev_copies": previous})
 
     @property
     def show_price(self) -> bool:
@@ -217,19 +273,6 @@ class AdBriefDraft(BaseModel):
             with_sub=self.with_sub,
             transcript=self.transcript,
         )
-
-
-class CopyCandidate(BaseModel):
-    """문구 후보 하나.
-
-    헤드라인과 서브를 나눠서 준다 — 이미지에 얹을 때 헤드라인은 크게,
-    서브는 작게 배치해야 해서 한 덩어리로 주면 어디서 자를지 알 수 없다.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    headline: str = Field(min_length=1)
-    sub: str = ""
 
 
 class ChatTurn(BaseModel):

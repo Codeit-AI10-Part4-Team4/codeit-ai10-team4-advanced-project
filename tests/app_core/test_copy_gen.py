@@ -1,7 +1,7 @@
 """문구 생성 — 후보 3건, 헤드라인+서브."""
 
 from app_core import copy_gen
-from app_core.schema import AdBrief, Store
+from app_core.schema import AdBrief, CopyCandidate, Feedback, Store
 
 
 class FakeClient:
@@ -101,3 +101,62 @@ def test_말이_없으면_그_부분을_빼고_보낸다(store: Store) -> None:
     client = FakeClient(three())
     copy_gen.generate(brief(transcript=[]), store, client=client)
     assert client.system is not None and "원문" not in client.system
+
+
+# ── 다시 만들기 ──────────────────────────────────────────────
+
+
+def revised(**kw) -> AdBrief:
+    fb = kw.pop("feedback", Feedback(source="typed", notes=["좀 더 밝게"]))
+    prev = kw.pop("prev", [CopyCandidate(headline="겨울 감성 크로플", sub="지금 4,500원")])
+    return brief(**kw).revised(fb, prev)
+
+
+def test_처음_만들_때는_재생성_안내가_없다(store: Store) -> None:
+    client = FakeClient(three())
+    copy_gen.generate(brief(), store, client=client)
+    assert client.system is not None and "다시 만드는 중" not in client.system
+
+
+def test_고쳐달라는_말을_프롬프트에_넣는다(store: Store) -> None:
+    client = FakeClient(three())
+    copy_gen.generate(revised(), store, client=client)
+    assert client.system is not None
+    assert "다시 만드는 중" in client.system
+    assert "좀 더 밝게" in client.system
+
+
+def test_직전_문구를_보여주고_다르게_만들라고_한다(store: Store) -> None:
+    """안 보여주면 같은 걸 또 내놓는다."""
+    client = FakeClient(three())
+    copy_gen.generate(revised(), store, client=client)
+    assert client.system is not None
+    assert "겨울 감성 크로플" in client.system
+    assert "다르게" in client.system
+
+
+def test_패널_평가는_저항_요인까지_넣는다(store: Store) -> None:
+    client = FakeClient(three())
+    fb = Feedback(source="panel", notes=["묶음가로 제시"], resistance=["가격"])
+    copy_gen.generate(revised(feedback=fb), store, client=client)
+    assert client.system is not None
+    assert "AI 손님 패널" in client.system
+    assert "가격" in client.system
+
+
+def test_선택지로_고쳐도_같은_자리에_들어간다(store: Store) -> None:
+    client = FakeClient(three())
+    fb = Feedback(source="option", notes=["더 짧게"])
+    copy_gen.generate(revised(feedback=fb), store, client=client)
+    assert client.system is not None and "더 짧게" in client.system
+
+
+def test_직전_문구가_없어도_안_터진다(store: Store) -> None:
+    client = FakeClient(three())
+    assert copy_gen.generate(revised(prev=[]), store, client=client)
+
+
+def test_재생성해도_지어내지_말라는_지시는_남는다(store: Store) -> None:
+    client = FakeClient(three())
+    copy_gen.generate(revised(), store, client=client)
+    assert client.system is not None and "지어내지 마라" in client.system

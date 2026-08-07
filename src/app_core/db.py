@@ -88,6 +88,15 @@ class AdRow(Base):
     # 사장님이 한 말 원문. 줄바꿈으로 이어 붙인다.
     # 슬롯으로 요약하면서 깎인 뉘앙스를 여기서 되살린다.
     transcript: Mapped[str] = mapped_column(Text, default="")
+
+    # 다시 만든 것이면 직전 광고를 가리킨다. 사슬을 따라가면 수정 이력이 나온다.
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ads.id", ondelete="SET NULL"), default=None, index=True
+    )
+    #: "" | typed | option | panel — 어느 경로로 다시 만들었는지
+    feedback_source: Mapped[str] = mapped_column(String(16), default="")
+    feedback_notes: Mapped[str] = mapped_column(Text, default="")
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
 
     store: Mapped[StoreRow] = relationship(back_populates="ads")

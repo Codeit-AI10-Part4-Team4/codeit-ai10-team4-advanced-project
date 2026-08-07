@@ -1,7 +1,7 @@
 """주문서 저장과 이력 조회."""
 
-from app_core import ads, stores
-from app_core.schema import AdBrief, CopyCandidate, Store, StoreInput
+from app_core import ads, db, stores
+from app_core.schema import AdBrief, CopyCandidate, Feedback, Store, StoreInput
 
 
 def brief(**kw) -> AdBrief:
@@ -61,6 +61,55 @@ def test_원문도_저장되고_다시_읽힌다(store: Store) -> None:
 def test_원문이_없어도_읽힌다(store: Store) -> None:
     ads.save(store.id, brief())
     assert ads.recent(store.id)[0].transcript == []
+
+
+# ── 다시 만들기 ──────────────────────────────────────────────
+
+
+def test_만든_문구를_다시_꺼낼_수_있다(store: Store) -> None:
+    """다시 만들 때 '이것과 다르게'로 넣으려면 꺼낼 수 있어야 한다."""
+    made = [CopyCandidate(headline="겨울 크로플", sub="4,500원"), CopyCandidate(headline="따끈")]
+    ad_id = ads.save(store.id, brief(), made)
+    assert ads.copies_of(ad_id) == made
+
+
+def test_문구가_없으면_빈_목록(store: Store) -> None:
+    assert ads.copies_of(ads.save(store.id, brief())) == []
+
+
+def test_다시_만들면_직전_것을_덮어쓰지_않는다(store: Store) -> None:
+    """사장님이 "아까 그게 나았는데" 할 때 돌아갈 곳이 있어야 한다."""
+    first = ads.save(store.id, brief())
+    second = ads.save(store.id, brief(), parent_id=first)
+    assert first != second
+    assert len(ads.recent(store.id)) == 2
+
+
+def test_재생성_이유가_저장된다(store: Store) -> None:
+    fb = Feedback(source="typed", notes=["좀 더 밝게"])
+    ad_id = ads.save(store.id, brief().revised(fb, []))
+    with db.session() as s:
+        row = s.get(db.AdRow, ad_id)
+        assert row is not None
+        assert row.feedback_source == "typed"
+        assert row.feedback_notes == "좀 더 밝게"
+
+
+def test_처음_만든_것은_이유가_비어있다(store: Store) -> None:
+    with db.session() as s:
+        row = s.get(db.AdRow, ads.save(store.id, brief()))
+        assert row is not None
+        assert row.feedback_source == "" and row.parent_id is None
+
+
+def test_패널_평가로_다시_만든_것도_저장된다(store: Store) -> None:
+    fb = Feedback(source="panel", notes=["묶음가로 제시", "가격을 크게"], resistance=["가격"])
+    ad_id = ads.save(store.id, brief().revised(fb, []))
+    with db.session() as s:
+        row = s.get(db.AdRow, ad_id)
+        assert row is not None
+        assert row.feedback_source == "panel"
+        assert row.feedback_notes == "묶음가로 제시\n가격을 크게"
 
 
 def test_가게를_지우면_이력도_지워진다(user_id: int, store: Store) -> None:

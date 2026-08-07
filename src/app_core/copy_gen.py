@@ -5,6 +5,9 @@
 
 가격은 사장님이 입력한 값만 쓴다. 0 원이면 광고에 가격을 넣지 않는다 —
 없는 가격을 쓰면 표시광고법 위반이다.
+
+다시 만들 때는 직전 결과와 피드백을 프롬프트에 얹는다. 조건(상품·가격)은
+그대로 두므로, 결과가 마음에 들 때까지 대화를 처음부터 다시 하지 않아도 된다.
 """
 
 from __future__ import annotations
@@ -18,6 +21,17 @@ CANDIDATE_COUNT = 3
 MAX_HEADLINE = 20
 MAX_SUB = 40
 
+#: 다시 만들기 선택지. 말로 설명하기 어려운 사장님이 누른다.
+#: 대화 중 선택지와 달리 LLM 이 만들지 않는다 — 고칠 방향은 업종·상품과
+#: 무관하게 비슷해서(길이·세기·강조점) 매번 새로 만들 이유가 없다.
+REVISION_OPTIONS = (
+    "더 짧게",
+    "더 힘있게",
+    "더 부드럽게",
+    "가격을 강조해서",
+    "아예 다른 느낌으로",
+)
+
 SYSTEM_PROMPT = """너는 동네 가게 광고 문구를 쓰는 카피라이터다.
 
 가게
@@ -26,11 +40,11 @@ SYSTEM_PROMPT = """너는 동네 가게 광고 문구를 쓰는 카피라이터�
 
 이번 광고
 - 홍보 대상: {product}
-- 알리려는 것: {situation}
+- 광고를 만드는 이유: {situation}
 - 원하는 느낌: {tone}
 - 그 밖의 요청: {extra}
 {price_line}
-{transcript}{history}
+{transcript}{revision}{history}
 규칙
 - **{count}개**를 서로 다르게 만들어라.
 - 헤드라인은 {max_headline}자 이내, 서브는 {max_sub}자 이내.
@@ -75,6 +89,38 @@ def _transcript_block(brief: AdBrief) -> str:
     )
 
 
+FEEDBACK_LABEL = {
+    "typed": "사장님이 이렇게 고쳐달라고 하셨다",
+    "option": "사장님이 이렇게 고쳐달라고 하셨다",
+    "panel": "AI 손님 패널이 평가한 결과다",
+}
+
+
+def _revision_block(brief: AdBrief) -> str:
+    """다시 만드는 경우에만 붙는다.
+
+    직전 결과를 보여주는 이유는 두 가지다 — 같은 걸 또 내놓지 않게,
+    그리고 무엇을 고치라는 말인지 알 수 있게.
+    """
+    if brief.feedback is None:
+        return ""
+
+    parts = ["\n## 다시 만드는 중이다"]
+    if brief.prev_copies:
+        made = "\n".join(
+            f"- {c.headline}" + (f" / {c.sub}" if c.sub else "") for c in brief.prev_copies
+        )
+        parts.append(f"\n직전에 만든 문구 (이것과 **다르게** 만들어라):\n{made}")
+
+    fb = brief.feedback
+    notes = "\n".join(f"- {n}" for n in fb.notes)
+    parts.append(f"\n{FEEDBACK_LABEL[fb.source]}:\n{notes}")
+    if fb.resistance:
+        parts.append("\n손님들이 걸린 부분: " + ", ".join(fb.resistance))
+    parts.append("\n→ 위 지적을 **반드시 반영**해라. 그래도 없는 사실은 지어내지 마라.\n")
+    return "\n".join(parts)
+
+
 def _system_prompt(brief: AdBrief, store: Store, recent: list[AdBrief]) -> str:
     return SYSTEM_PROMPT.format(
         industry=store.industry_label,
@@ -85,6 +131,7 @@ def _system_prompt(brief: AdBrief, store: Store, recent: list[AdBrief]) -> str:
         extra=brief.extra or "(없음)",
         price_line=_price_line(brief),
         transcript=_transcript_block(brief),
+        revision=_revision_block(brief),
         history=_history_block(recent),
         count=CANDIDATE_COUNT,
         max_headline=MAX_HEADLINE,

@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app_core.schema import AdBrief, AdBriefDraft, CopyCandidate, StoreInput
+from app_core.schema import AdBrief, AdBriefDraft, CopyCandidate, Feedback, StoreInput
 
 CAFE = "cafe"
 
@@ -184,6 +184,53 @@ def test_승격해도_말이_따라간다() -> None:
 def test_원문을_한_덩어리로_꺼낼_수_있다() -> None:
     b = brief(transcript=["크로플이요", "4500원"])
     assert b.raw_utterance == "크로플이요\n4500원"
+
+
+# ── 다시 만들기 ──────────────────────────────────────────────
+
+
+def test_처음_만들_때는_재생성이_아니다() -> None:
+    assert brief().is_revision is False
+    assert brief().prev_copies == []
+
+
+def test_피드백을_얹으면_재생성이_된다() -> None:
+    revised = brief().revised(
+        Feedback(source="typed", notes=["좀 더 밝게"]),
+        [CopyCandidate(headline="겨울 크로플")],
+    )
+    assert revised.is_revision is True
+    assert revised.feedback is not None and revised.feedback.notes == ["좀 더 밝게"]
+    assert revised.prev_copies == [CopyCandidate(headline="겨울 크로플")]
+
+
+def test_재생성해도_조건은_그대로다() -> None:
+    """조건까지 바꾸면 사장님이 말한 적 없는 값이 조용히 바뀐다."""
+    original = brief(product="크로플", price=4500, tone="따뜻한")
+    revised = original.revised(Feedback(source="option", notes=["더 짧게"]), [])
+    assert (revised.product, revised.price, revised.tone) == ("크로플", 4500, "따뜻한")
+
+
+@pytest.mark.parametrize("source", ["typed", "option", "panel"])
+def test_세_경로_모두_같은_형태로_담긴다(source: str) -> None:
+    fb = Feedback(source=source, notes=["고쳐줘"])
+    assert brief().revised(fb, []).feedback == fb
+
+
+def test_패널_평가는_저항_요인도_담는다() -> None:
+    fb = Feedback(source="panel", notes=["묶음가로 제시"], resistance=["가격"])
+    assert fb.resistance == ["가격"]
+
+
+def test_이유_없는_재생성은_거부한다() -> None:
+    """왜 다시 만드는지 모르면 같은 걸 또 만들게 된다."""
+    with pytest.raises(ValidationError):
+        Feedback(source="typed", notes=[])
+
+
+def test_모르는_경로는_거부한다() -> None:
+    with pytest.raises(ValidationError):
+        Feedback(source="이메일", notes=["고쳐줘"])
 
 
 # ── 무엇을 물을지 ────────────────────────────────────────────

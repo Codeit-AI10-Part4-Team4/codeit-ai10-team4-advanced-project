@@ -12,7 +12,7 @@ import streamlit as st
 from pydantic import ValidationError
 
 from app_core import ads, auth, chat, config, copy_gen, registry, stores
-from app_core.schema import AdBriefDraft, Store, StoreInput
+from app_core.schema import AdBrief, AdBriefDraft, Feedback, Store, StoreInput
 
 # DB·API 키 설정을 읽는다. app_core 를 쓰기 전에 해야 한다.
 config.load_env()
@@ -27,6 +27,8 @@ def _reset_chat() -> None:
     st.session_state.pop("draft", None)
     st.session_state.pop("history", None)
     st.session_state.pop("copies", None)
+    st.session_state.pop("brief", None)
+    st.session_state.pop("ad_id", None)
 
 
 # ── 로그인 ────────────────────────────────────────────────
@@ -124,18 +126,57 @@ def brief_panel(draft: AdBriefDraft) -> None:
         st.success("다 찼습니다")
 
 
+def _make_copies(store: Store, brief: AdBrief, parent_id: int | None = None) -> None:
+    """문구를 만들어 화면 상태에 담는다. 처음 만들 때도 다시 만들 때도 같은 길이다."""
+    with st.spinner("만드는 중..."):
+        copies = copy_gen.generate(brief, store, ads.recent(store.id))
+        st.session_state.copies = copies
+        st.session_state.brief = brief
+        st.session_state.ad_id = ads.save(store.id, brief, copies, parent_id=parent_id)
+
+
+def revise_view(store: Store) -> None:
+    """다시 만들기 — 경로 셋이 같은 함수로 모인다.
+
+    사장님이 "뭘 원하세요"엔 답을 못 해도 "이거 어때요"엔 답한다.
+    그래서 한 번에 맞히려 하지 않고 고쳐가는 길을 둔다.
+    """
+    brief: AdBrief = st.session_state.brief
+    st.divider()
+    st.caption("마음에 안 드시면 고쳐서 다시 만들어드릴게요")
+
+    def again(feedback: Feedback) -> None:
+        _make_copies(
+            store,
+            brief.revised(feedback, st.session_state.copies),
+            parent_id=st.session_state.ad_id,
+        )
+        st.rerun()
+
+    # ① 선택지 — 말로 설명하기 어려울 때
+    cols = st.columns(len(copy_gen.REVISION_OPTIONS))
+    for col, option in zip(cols, copy_gen.REVISION_OPTIONS, strict=True):
+        if col.button(option, key=f"rev_{option}", use_container_width=True):
+            again(Feedback(source="option", notes=[option]))
+
+    # ② 자연어 — 하고 싶은 말이 따로 있을 때
+    if said := st.chat_input("어떻게 고쳐드릴까요? 예: 좀 더 밝게", key="revise_in"):
+        again(Feedback(source="typed", notes=[said]))
+
+    # ③ AI 손님 패널 평가 — 담당자 기능이 붙으면 여기로 들어온다
+    st.caption("🧑‍🤝‍🧑 손님 패널 평가는 담당자 기능 연결 후 활성화됩니다")
+
+
 def copy_view(store: Store, draft: AdBriefDraft) -> None:
-    brief = draft.to_brief()
     # 필수만 차면 바로 뜬다. 봇이 느낌·상황을 더 묻고 있어도 사장님은
     # 언제든 여기서 끊고 만들 수 있다.
     if draft.next_slot():
         st.caption("더 안 알려주셔도 지금 바로 만들 수 있습니다")
     if st.button("문구 만들기", type="primary"):
-        with st.spinner("만드는 중..."):
-            st.session_state.copies = copy_gen.generate(brief, store, ads.recent(store.id))
-            st.session_state.ad_id = ads.save(store.id, brief, st.session_state.copies)
+        _make_copies(store, draft.to_brief())
 
-    for i, candidate in enumerate(st.session_state.get("copies") or [], start=1):
+    copies = st.session_state.get("copies") or []
+    for i, candidate in enumerate(copies, start=1):
         with st.container(border=True):
             st.markdown(f"### {candidate.headline}")
             if candidate.sub:
@@ -143,6 +184,9 @@ def copy_view(store: Store, draft: AdBriefDraft) -> None:
             if st.button("이걸로 할게요", key=f"pick_copy{i}"):
                 ads.choose_copy(st.session_state.ad_id, candidate.headline)
                 st.success("선택했습니다")
+
+    if copies:
+        revise_view(store)
 
 
 def chat_view(store: Store) -> None:
@@ -173,7 +217,7 @@ def chat_view(store: Store) -> None:
                     st.session_state.pending = option
                     st.rerun()
 
-        typed = st.chat_input(PLACEHOLDER)
+        typed = st.chat_input(PLACEHOLDER, key="chat_in")
         utterance = st.session_state.pop("pending", None) or typed
         if utterance:
             history.append(("user", utterance))
