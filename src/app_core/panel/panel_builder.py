@@ -204,3 +204,50 @@ def _band_of(time_label: str, features: dict[str, Any]) -> str:
         b for b, lab in TIME_LABEL.items() if lab == time_label and b in features["time_share"]
     ]
     return max(cands, key=lambda b: features["time_share"][b])
+
+
+class WeightError(ValueError):
+    """사장님이 넘긴 비중이 말이 안 된다. 화면에 그대로 보여줄 문장이다."""
+
+
+def adjust_weights(
+    personas: list[dict[str, Any]], overrides: dict[str, float]
+) -> list[dict[str, Any]]:
+    """사장님이 고친 비중을 반영한다 (R1 — 슬라이더 조정).
+
+    데이터가 정한 비중이 내 가게와 다를 수 있다. "우리는 주말 20대가 훨씬 많아요"
+    같은 경우다. 고친 값은 **그대로 쓰고, 나머지 손님들이 남은 몫을 원래 비율대로
+    나눠 갖는다.** 손대지 않은 손님들 사이의 상대 관계는 유지된다.
+
+    저장하지 않는다 — 화면이 값을 들고 있다가 평가할 때 같이 넘긴다. 패널은
+    (가게, 업종)에서 결정적으로 다시 만들 수 있으므로 통째로 보관할 이유가 없다.
+    """
+    if not overrides:
+        return personas
+
+    known = {p["persona_id"] for p in personas}
+    unknown = set(overrides) - known
+    if unknown:
+        raise WeightError(f"모르는 손님입니다: {sorted(unknown)}")
+    if any(v < 0 for v in overrides.values()):
+        raise WeightError("비중은 0보다 작을 수 없습니다.")
+
+    fixed = sum(overrides.values())
+    if fixed > 1.0:
+        raise WeightError(f"고친 비중의 합이 100%를 넘습니다 ({fixed:.0%}).")
+
+    rest = [p for p in personas if p["persona_id"] not in overrides]
+    rest_total = sum(p["weight"] for p in rest)
+    remaining = 1.0 - fixed
+
+    out = []
+    for p in personas:
+        if p["persona_id"] in overrides:
+            weight = overrides[p["persona_id"]]
+        elif rest_total > 0:
+            weight = p["weight"] / rest_total * remaining
+        else:
+            # 손대지 않은 손님이 전부 0이었다 — 남은 몫을 고르게 나눈다
+            weight = remaining / len(rest) if rest else 0.0
+        out.append({**p, "weight": round(weight, 4), "is_adjusted": p["persona_id"] in overrides})
+    return out

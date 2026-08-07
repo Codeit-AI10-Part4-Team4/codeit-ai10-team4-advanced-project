@@ -13,6 +13,8 @@ import pytest
 from app_core.panel.features import DB_PATH, build_features
 from app_core.panel.panel_builder import (
     WORK_RATIO_HIGH,
+    WeightError,
+    adjust_weights,
     boundary_age,
     build_panel,
     motive,
@@ -143,3 +145,40 @@ def test_배후지_구성도_경계_판정에_쓰인다() -> None:
 def test_배후지가_없어도_동작한다() -> None:
     """발달상권·전통시장·관광특구에는 배후지 데이터가 없다 (전체의 34%)."""
     assert boundary_age(_features(back_age_share=None)) == "20"
+
+
+def test_고친_비중은_그대로_쓰고_나머지가_남은_몫을_나눈다() -> None:
+    ps = build_panel(_features())
+    before = {p["persona_id"]: p["weight"] for p in ps}
+    target = ps[0]["persona_id"]
+
+    out = adjust_weights(ps, {target: 0.5})
+    got = {p["persona_id"]: p["weight"] for p in out}
+
+    assert got[target] == 0.5
+    assert sum(got.values()) == pytest.approx(1.0, abs=0.01)
+    # 손대지 않은 둘 사이의 상대 관계는 그대로다
+    a, b = ps[1]["persona_id"], ps[2]["persona_id"]
+    assert got[a] / got[b] == pytest.approx(before[a] / before[b], rel=0.01)
+
+
+def test_조정한_손님에_표시가_남는다() -> None:
+    ps = build_panel(_features())
+    out = adjust_weights(ps, {ps[0]["persona_id"]: 0.3})
+    assert out[0]["is_adjusted"] is True
+    assert out[1]["is_adjusted"] is False
+
+
+def test_말이_안_되는_비중은_사장님_언어로_막는다() -> None:
+    ps = build_panel(_features())
+    with pytest.raises(WeightError, match="모르는 손님"):
+        adjust_weights(ps, {"p99": 0.5})
+    with pytest.raises(WeightError, match="0보다 작을 수 없습니다"):
+        adjust_weights(ps, {ps[0]["persona_id"]: -0.1})
+    with pytest.raises(WeightError, match="100%를 넘습니다"):
+        adjust_weights(ps, {p["persona_id"]: 0.5 for p in ps[:3]})
+
+
+def test_조정하지_않으면_그대로다() -> None:
+    ps = build_panel(_features())
+    assert adjust_weights(ps, {}) == ps
