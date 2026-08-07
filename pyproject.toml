@@ -61,6 +61,14 @@ db = [
     "psycopg[binary]>=3.2.0",
 ]
 
+# AI 손님 패널 — 상권 데이터 적재·조회. GPU 불필요, 가볍다.
+# ETL 은 1회만 돌리므로 평소엔 duckdb 만 있으면 된다(pyproj 는 적재 때 좌표 변환용).
+panel = [
+    "duckdb>=1.0.0",
+    "pandas>=2.0.0",          # CSV 적재 (ui 와 중복이지만 독립 설치 가능하게 명시)
+    "pyproj>=3.6.0",          # 상권 좌표 EPSG:5181 → WGS84 (근거: docs/07 §4.4④)
+]
+
 # 이미지 생성 담당 — 무겁다(수 GB). GPU 필요
 # ⚠️ torch 는 CUDA 버전에 맞는 휠을 먼저 설치할 것:
 #      pip install torch --index-url https://download.pytorch.org/whl/cu124
