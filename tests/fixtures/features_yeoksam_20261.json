@@ -5,192 +5,358 @@
     "area_type": "발달상권",
     "gu_nm": "강남구",
     "dong_nm": "역삼1동",
+    "match_distance_m": 49.7,
     "quarter": "20261",
-    "category_cd": "CS100010",
-    "category_nm": "커피-음료",
-
-    "gender_share": { "M": 0.493, "F": 0.507 },
-    "age_share": { "20": 0.165, "30": 0.382, "40": 0.221, "50": 0.151, "60": 0.081 },
+    "category_cds": [
+      "CS100010"
+    ],
+    "category_nm": "cafe",
+    "is_category_fallback": false,
     "demo_coverage": 0.714,
-
+    "gender_share": {
+      "M": 0.4933,
+      "F": 0.5067
+    },
+    "age_share": {
+      "10": 0.0035,
+      "20": 0.1617,
+      "30": 0.3823,
+      "40": 0.221,
+      "50": 0.1508,
+      "60": 0.0807
+    },
     "time_share": {
-      "00-06": 0.001,
-      "06-11": 0.161,
-      "11-14": 0.479,
-      "14-17": 0.19,
-      "17-21": 0.15,
-      "21-24": 0.019
+      "00-06": 0.0007,
+      "06-11": 0.1608,
+      "11-14": 0.4789,
+      "14-17": 0.1907,
+      "17-21": 0.1498,
+      "21-24": 0.0191
     },
     "foot_age_share": {
-      "10": 0.058,
-      "20": 0.196,
-      "30": 0.244,
-      "40": 0.212,
-      "50": 0.166,
-      "60": 0.124
+      "10": 0.0386,
+      "20": 0.2164,
+      "30": 0.3003,
+      "40": 0.2268,
+      "50": 0.1264,
+      "60": 0.0915
     },
-
     "weekend_ratio": 0.138,
     "avg_ticket": 9546,
     "avg_ticket_pct": 0.674,
     "competitor_cnt": 185
   },
-
   "personas": [
     {
       "persona_id": "p01",
       "demo": "30대 남성",
-      "axes": { "price_sens": "mid", "motive": "habitual", "time": "weekday_lunch" },
+      "axes": {
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "weekday_lunch"
+      },
       "weight": 0.13,
       "is_boundary": false,
       "narrative": "역삼역 근처 회사에 다닌다. 점심 먹고 나서 동료들과 커피를 사서 사무실로 돌아가는 게 거의 매일의 루틴이다. 늘 가던 곳이 편하지만 줄이 길면 바로 옆집으로 간다.",
       "evidence": [
-        { "path": "gender_share.M", "value": 0.493 },
-        { "path": "age_share.30", "value": 0.382 },
-        { "path": "time_share.11-14", "value": 0.479 }
+        {
+          "path": "gender_share.M",
+          "value": 0.4933
+        },
+        {
+          "path": "age_share.30",
+          "value": 0.3823
+        },
+        {
+          "path": "time_share.11-14",
+          "value": 0.4789
+        }
       ]
     },
     {
       "persona_id": "p02",
       "demo": "30대 여성",
-      "axes": { "price_sens": "mid", "motive": "habitual", "time": "weekday_lunch" },
+      "axes": {
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "weekday_lunch"
+      },
       "weight": 0.13,
       "is_boundary": false,
       "narrative": "점심시간에 잠깐 나오는 직장인. 이 동네 커피값이 만원 가까운 건 익숙하지만 그만큼 맛과 분위기를 따진다. 새로 생긴 곳은 인스타에서 먼저 보고 간다.",
       "evidence": [
-        { "path": "gender_share.F", "value": 0.507 },
-        { "path": "age_share.30", "value": 0.382 },
-        { "path": "time_share.11-14", "value": 0.479 }
+        {
+          "path": "gender_share.F",
+          "value": 0.5067
+        },
+        {
+          "path": "age_share.30",
+          "value": 0.3823
+        },
+        {
+          "path": "time_share.11-14",
+          "value": 0.4789
+        }
       ]
     },
     {
       "persona_id": "p03",
       "demo": "40대 남성",
-      "axes": { "price_sens": "low", "motive": "habitual", "time": "weekday_lunch" },
+      "axes": {
+        "price_sens": "low",
+        "motive": "habitual",
+        "time": "weekday_lunch"
+      },
       "weight": 0.109,
       "is_boundary": false,
       "narrative": "팀장급 직장인. 가격은 크게 신경 쓰지 않고 조용히 앉아 있을 자리가 있는지를 본다. 오후 미팅 전에 들르는 경우가 많다.",
       "evidence": [
-        { "path": "gender_share.M", "value": 0.493 },
-        { "path": "age_share.40", "value": 0.221 },
-        { "path": "avg_ticket", "value": 9546 }
+        {
+          "path": "gender_share.M",
+          "value": 0.4933
+        },
+        {
+          "path": "age_share.40",
+          "value": 0.221
+        },
+        {
+          "path": "avg_ticket",
+          "value": 9546
+        }
       ]
     },
     {
       "persona_id": "p04",
       "demo": "40대 여성",
-      "axes": { "price_sens": "mid", "motive": "habitual", "time": "afternoon" },
+      "axes": {
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "afternoon"
+      },
       "weight": 0.112,
       "is_boundary": false,
       "narrative": "근처 사무실에서 일한다. 오후에 잠깐 나와 커피를 사고, 디저트는 팀원들과 나눠 먹을 수 있는 걸 고른다.",
       "evidence": [
-        { "path": "gender_share.F", "value": 0.507 },
-        { "path": "age_share.40", "value": 0.221 },
-        { "path": "time_share.14-17", "value": 0.19 }
+        {
+          "path": "gender_share.F",
+          "value": 0.5067
+        },
+        {
+          "path": "age_share.40",
+          "value": 0.221
+        },
+        {
+          "path": "time_share.14-17",
+          "value": 0.1907
+        }
       ]
     },
     {
       "persona_id": "p05",
       "demo": "20대 여성",
-      "axes": { "price_sens": "high", "motive": "exploratory", "time": "weekday_lunch" },
+      "axes": {
+        "price_sens": "high",
+        "motive": "exploratory",
+        "time": "weekday_lunch"
+      },
       "weight": 0.084,
       "is_boundary": false,
       "narrative": "입사 1~2년차. 이 동네 커피값이 부담스러워 쿠폰이나 세트 할인을 챙긴다. 대신 새로 생긴 곳은 꼭 한 번 가보고 사진을 찍는다.",
       "evidence": [
-        { "path": "gender_share.F", "value": 0.507 },
-        { "path": "age_share.20", "value": 0.165 },
-        { "path": "avg_ticket", "value": 9546 }
+        {
+          "path": "gender_share.F",
+          "value": 0.5067
+        },
+        {
+          "path": "age_share.20",
+          "value": 0.1617
+        },
+        {
+          "path": "avg_ticket",
+          "value": 9546
+        }
       ]
     },
     {
       "persona_id": "p06",
       "demo": "20대 남성",
-      "axes": { "price_sens": "high", "motive": "habitual", "time": "weekday_lunch" },
+      "axes": {
+        "price_sens": "high",
+        "motive": "habitual",
+        "time": "weekday_lunch"
+      },
       "weight": 0.081,
       "is_boundary": false,
       "narrative": "가격에 가장 민감한 편. 저가 커피 브랜드를 주로 쓰고, 만원 가까운 커피는 특별한 이유가 있어야 산다.",
       "evidence": [
-        { "path": "gender_share.M", "value": 0.493 },
-        { "path": "age_share.20", "value": 0.165 },
-        { "path": "avg_ticket", "value": 9546 }
+        {
+          "path": "gender_share.M",
+          "value": 0.4933
+        },
+        {
+          "path": "age_share.20",
+          "value": 0.1617
+        },
+        {
+          "path": "avg_ticket",
+          "value": 9546
+        }
       ]
     },
     {
       "persona_id": "p07",
       "demo": "50대 남성",
-      "axes": { "price_sens": "low", "motive": "habitual", "time": "evening" },
+      "axes": {
+        "price_sens": "low",
+        "motive": "habitual",
+        "time": "evening"
+      },
       "weight": 0.074,
       "is_boundary": false,
       "narrative": "관리자급. 늘 마시던 것만 마시고 새 메뉴에는 관심이 적다. 광고 문구가 요란하면 오히려 발길을 돌린다.",
       "evidence": [
-        { "path": "gender_share.M", "value": 0.493 },
-        { "path": "age_share.50", "value": 0.151 },
-        { "path": "time_share.17-21", "value": 0.15 }
+        {
+          "path": "gender_share.M",
+          "value": 0.4933
+        },
+        {
+          "path": "age_share.50",
+          "value": 0.1508
+        },
+        {
+          "path": "time_share.17-21",
+          "value": 0.1498
+        }
       ]
     },
     {
       "persona_id": "p08",
       "demo": "50대 여성",
-      "axes": { "price_sens": "mid", "motive": "exploratory", "time": "afternoon" },
+      "axes": {
+        "price_sens": "mid",
+        "motive": "exploratory",
+        "time": "afternoon"
+      },
       "weight": 0.077,
       "is_boundary": false,
       "narrative": "오후에 지인과 만나러 온다. 앉아서 이야기할 수 있는 자리와 조용한 분위기를 본다. 디저트를 곁들이는 경우가 많다.",
       "evidence": [
-        { "path": "gender_share.F", "value": 0.507 },
-        { "path": "age_share.50", "value": 0.151 },
-        { "path": "time_share.14-17", "value": 0.19 }
+        {
+          "path": "gender_share.F",
+          "value": 0.5067
+        },
+        {
+          "path": "age_share.50",
+          "value": 0.1508
+        },
+        {
+          "path": "time_share.14-17",
+          "value": 0.1907
+        }
       ]
     },
     {
       "persona_id": "p09",
       "demo": "30대 남성",
-      "axes": { "price_sens": "mid", "motive": "exploratory", "time": "evening" },
+      "axes": {
+        "price_sens": "mid",
+        "motive": "exploratory",
+        "time": "evening"
+      },
       "weight": 0.058,
       "is_boundary": false,
       "narrative": "야근이 잦아 저녁에 커피를 사러 나온다. 늦게까지 문을 여는지가 가장 중요하고, 그 다음이 맛이다.",
       "evidence": [
-        { "path": "gender_share.M", "value": 0.493 },
-        { "path": "age_share.30", "value": 0.382 },
-        { "path": "time_share.17-21", "value": 0.15 }
+        {
+          "path": "gender_share.M",
+          "value": 0.4933
+        },
+        {
+          "path": "age_share.30",
+          "value": 0.3823
+        },
+        {
+          "path": "time_share.17-21",
+          "value": 0.1498
+        }
       ]
     },
     {
       "persona_id": "p10",
       "demo": "30대 여성",
-      "axes": { "price_sens": "mid", "motive": "exploratory", "time": "evening" },
+      "axes": {
+        "price_sens": "mid",
+        "motive": "exploratory",
+        "time": "evening"
+      },
       "weight": 0.064,
       "is_boundary": false,
       "narrative": "퇴근 후 약속 전에 시간을 보내려고 들른다. 저녁에도 자리가 넉넉한지가 중요하다. 주말엔 이 동네에 잘 오지 않는다.",
       "evidence": [
-        { "path": "gender_share.F", "value": 0.507 },
-        { "path": "age_share.30", "value": 0.382 },
-        { "path": "weekend_ratio", "value": 0.138 }
+        {
+          "path": "gender_share.F",
+          "value": 0.5067
+        },
+        {
+          "path": "age_share.30",
+          "value": 0.3823
+        },
+        {
+          "path": "weekend_ratio",
+          "value": 0.138
+        }
       ]
     },
     {
       "persona_id": "p11",
       "demo": "60대 남성",
-      "axes": { "price_sens": "high", "motive": "habitual", "time": "morning" },
+      "axes": {
+        "price_sens": "high",
+        "motive": "habitual",
+        "time": "morning"
+      },
       "weight": 0.04,
       "is_boundary": true,
       "narrative": "이 동네에 살거나 오래 일해온 사람. 아침에 지나다니는 60대는 적지 않은데 정작 커피를 사는 비중은 훨씬 낮다. 직장인 대상 광고는 자기 얘기로 느껴지지 않는다.",
       "evidence": [
-        { "path": "age_share.60", "value": 0.081 },
-        { "path": "foot_age_share.60", "value": 0.124 },
-        { "path": "time_share.06-11", "value": 0.161 }
+        {
+          "path": "age_share.60",
+          "value": 0.0807
+        },
+        {
+          "path": "foot_age_share.60",
+          "value": 0.0915
+        },
+        {
+          "path": "time_share.06-11",
+          "value": 0.1608
+        }
       ]
     },
     {
       "persona_id": "p12",
       "demo": "60대 여성",
-      "axes": { "price_sens": "high", "motive": "exploratory", "time": "afternoon" },
+      "axes": {
+        "price_sens": "high",
+        "motive": "exploratory",
+        "time": "afternoon"
+      },
       "weight": 0.041,
       "is_boundary": true,
       "narrative": "인근 거주민. 오후에 지나가다 들르는 정도라 신메뉴나 가격 할인에는 관심이 있지만, 영어나 외래어가 많은 문구는 무슨 뜻인지 몰라 넘긴다.",
       "evidence": [
-        { "path": "age_share.60", "value": 0.081 },
-        { "path": "foot_age_share.60", "value": 0.124 },
-        { "path": "time_share.14-17", "value": 0.19 }
+        {
+          "path": "age_share.60",
+          "value": 0.0807
+        },
+        {
+          "path": "foot_age_share.60",
+          "value": 0.0915
+        },
+        {
+          "path": "time_share.14-17",
+          "value": 0.1907
+        }
       ]
     }
   ]
