@@ -14,7 +14,12 @@ from pathlib import Path
 
 import pytest
 
-from app_core.panel.features import CATEGORY_MAP, DB_PATH, build_features
+from app_core.panel.features import (
+    CATEGORY_MAP,
+    DB_PATH,
+    NoTradeAreaError,
+    build_features,
+)
 
 pytestmark = pytest.mark.skipif(
     not DB_PATH.exists(), reason="data/panel.duckdb 없음 — etl/load_csv.py 를 먼저 실행"
@@ -69,3 +74,15 @@ def test_합산_업종은_단일보다_커버리지가_넓다() -> None:
 def test_가장_가까운_상권에_붙는다(yeoksam_cafe: dict) -> None:
     assert yeoksam_cafe["area_nm"] == "역삼역"
     assert yeoksam_cafe["match_distance_m"] < 200
+
+
+def test_서울_밖_주소는_억지로_붙이지_않는다() -> None:
+    """부산 해운대(313km)가 강남 상권으로 붙던 버그. 사장님 언어로 막는다."""
+    with pytest.raises(NoTradeAreaError, match="서울 안의 주소가 아닌"):
+        build_features("", "cafe", coord=(129.15993, 35.17942))
+
+
+def test_서울_변두리는_통과한다() -> None:
+    """실측 최원거리(도봉동 산자락 2,349m)가 상한 3,000m 안에 있다."""
+    f = build_features("", "cafe", coord=(127.0155, 37.6893))  # 도봉구 도봉동
+    assert f["match_distance_m"] < 3_000

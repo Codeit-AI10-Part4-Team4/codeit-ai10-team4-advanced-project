@@ -105,6 +105,12 @@ def geocode(address: str) -> tuple[float, float]:
     return float(docs[0]["x"]), float(docs[0]["y"])
 
 
+# 서울 밖 주소를 "가장 가까운 상권"으로 억지로 붙이지 않기 위한 상한.
+# 실측: 상권끼리 최근접 간격 p99 837m / 최대 1,801m. 서울 변두리 실주소 8건에서
+# 가장 먼 경우가 도봉동 산자락 2,349m. 부산 해운대는 313km 였다. 사이가 넓다.
+MAX_MATCH_M = 3_000.0
+
+
 def _haversine_sql() -> str:
     """DuckDB 안에서 거리(m)를 재는 식. 상권 1,650개라 전수 비교로 충분하다."""
     return (
@@ -124,6 +130,12 @@ def match_area(con: duckdb.DuckDBPyConnection, lon: float, lat: float) -> dict[s
             [lat, lat, lon],
         )
     )
+    if row[5] > MAX_MATCH_M:
+        raise NoTradeAreaError(
+            "서울 안의 주소가 아닌 것 같습니다. "
+            f"가장 가까운 상권({row[1]})이 {row[5] / 1000:.0f}km 떨어져 있습니다. "
+            "지금은 서울시 상권 데이터만 갖고 있어 다른 지역은 분석할 수 없습니다."
+        )
     return {
         "area_cd": row[0],
         "area_nm": row[1],
