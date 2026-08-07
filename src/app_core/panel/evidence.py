@@ -7,6 +7,7 @@ LLM이 근거 수치를 창작하면 그 응답은 집계에서 빠진다.
 - 비중·비율 등 실수 필드 → 상대 오차 5% 이내
 - 정수 필드(`avg_ticket`, `competitor_cnt`) → 정확 일치
 - 존재하지 않는 경로 → 탈락
+- 인용 금지 필드 → 탈락 (아래 `_NON_CITABLE`)
 """
 
 from __future__ import annotations
@@ -22,7 +23,19 @@ RELATIVE_TOLERANCE: Final = 0.05
 #: 07 §4.4① 이후 성별·연령이 분리돼 네 개가 되었다.
 _MAPPING_FIELDS: Final = frozenset(SHARE_FIELDS)
 
-FailureReason = Literal["unknown_path", "value_mismatch"]
+#: 값은 실재하지만 근거로 인용할 수 없는 필드.
+#:
+#: 상권 특성이 아니라 **매칭·데이터 품질 지표**다. 페르소나가 "상권 중심에서
+#: 320m 떨어져 있어서" 같은 말을 하는 것은 손님의 판단이 아니고, 무엇보다
+#: 이런 수치로도 근거 요건이 충족되면 LLM 이 실제 인구·행동 데이터를 보지
+#: 않고도 검증 게이트를 통과할 수 있다. 게이트의 목적이 무너진다.
+#:
+#: `match_distance_m` 은 아인님 지적(2026-08-07), `demo_coverage` 는 같은
+#: 이유로 함께 넣었다 — 미상 매출 비중은 데이터 품질이지 손님 특성이 아니다.
+#: 둘 다 결과 화면에는 그대로 노출된다(`confidence_reasons` 및 출처 필드).
+_NON_CITABLE: Final = frozenset({"match_distance_m", "demo_coverage"})
+
+FailureReason = Literal["unknown_path", "not_citable", "value_mismatch"]
 
 
 class ResolvedValue(NamedTuple):
@@ -73,7 +86,15 @@ def _within_tolerance(cited: float, actual: float) -> bool:
 
 
 def check_ref(features: TradeAreaFeatures, ref: FeatureRef) -> EvidenceFailure | None:
-    """근거 한 건을 대조한다. 통과하면 None."""
+    """근거 한 건을 대조한다. 통과하면 None.
+
+    `resolve()` 는 "무슨 값인가"만 답하고, 인용해도 되는 값인지는 여기서 본다.
+    경로가 실재하므로 `unknown_path` 가 아니라 `not_citable` 로 구분해 남긴다 —
+    로그에서 프롬프트 문제와 오타를 헷갈리지 않으려고.
+    """
+    if ref.path.partition(".")[0] in _NON_CITABLE:
+        return EvidenceFailure(ref.path, ref.value, None, "not_citable")
+
     resolved = resolve(features, ref.path)
     if resolved is None:
         return EvidenceFailure(ref.path, ref.value, None, "unknown_path")

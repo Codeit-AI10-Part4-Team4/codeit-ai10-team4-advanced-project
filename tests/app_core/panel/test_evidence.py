@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app_core.panel.evidence import (
+    _NON_CITABLE,
     RELATIVE_TOLERANCE,
     check_ref,
     evidence_failures,
@@ -130,3 +131,36 @@ def test_collects_all_failures(features: TradeAreaFeatures) -> None:
     ]
     failures = evidence_failures(features, refs)
     assert [f.reason for f in failures] == ["unknown_path", "value_mismatch"]
+
+
+@pytest.mark.parametrize("path", sorted(_NON_CITABLE))
+def test_quality_metrics_are_not_citable(features: TradeAreaFeatures, path: str) -> None:
+    """매칭·데이터 품질 지표는 값이 실재해도 근거로 못 쓴다.
+
+    이런 수치로 근거 요건이 충족되면 LLM 이 실제 인구·행동 데이터를 보지 않고도
+    검증 게이트를 통과한다. 값이 실제로 채워진 뒤에도 막혀야 한다.
+    """
+    resolved = resolve(features, path)
+    assert resolved is not None, f"{path} 는 실재하는 수치여야 이 테스트가 의미 있다"
+
+    failure = check_ref(features, FeatureRef(path=path, value=resolved.value))
+    assert failure is not None
+    assert failure.reason == "not_citable"
+
+
+def test_not_citable_is_distinguished_from_unknown_path(
+    features: TradeAreaFeatures,
+) -> None:
+    """오타(unknown_path)와 정책 위반(not_citable)을 로그에서 구분할 수 있어야 한다."""
+    typo = check_ref(features, FeatureRef(path="age_share.99", value=0.1))
+    policy = check_ref(features, FeatureRef(path="match_distance_m", value=320.0))
+    assert typo is not None and typo.reason == "unknown_path"
+    assert policy is not None and policy.reason == "not_citable"
+
+
+def test_citable_trade_area_fields_still_pass(features: TradeAreaFeatures) -> None:
+    """상권 특성은 그대로 인용 가능해야 한다 — 금지 목록이 과하게 넓어지면 잡힌다."""
+    for path in ("weekend_ratio", "avg_ticket_pct", "competitor_cnt", "avg_ticket"):
+        resolved = resolve(features, path)
+        assert resolved is not None, path
+        assert check_ref(features, FeatureRef(path=path, value=resolved.value)) is None, path
