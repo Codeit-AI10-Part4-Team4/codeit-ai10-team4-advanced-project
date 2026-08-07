@@ -89,7 +89,7 @@ def test_time_axis_matches_weekend_rule(yeoksam: Panel) -> None:
     역삼역은 0.138이므로 나오면 안 된다. 이전 픽스처에서 어긋났던 부분이다.
     """
     used = {p.axes.time for p in yeoksam.personas}
-    assert {"morning", "afternoon"} <= used
+    assert len(used) >= 3  # 시간 축이 한 값으로 쏠리지 않는다
     if yeoksam.features.weekend_ratio <= 0.4:
         assert "weekend" not in used
 
@@ -106,9 +106,10 @@ def test_avg_ticket_pct_is_a_ratio(yeoksam: Panel) -> None:
 
 
 def test_fallback_defaults(yeoksam: Panel) -> None:
-    """A가 아직 필드를 안 넣어도 파싱되고, 기본값은 '매칭 성공'이다."""
+    """주소 매칭에 성공했고, 얼마나 가까운 상권에 붙었는지 거리가 실려 온다."""
     assert yeoksam.features.is_fallback is False
-    assert yeoksam.features.match_distance_m is None
+    assert yeoksam.features.match_distance_m is not None
+    assert 0 <= yeoksam.features.match_distance_m < 500
 
 
 def test_duplicate_persona_id_rejected(yeoksam_raw: dict[str, Any]) -> None:
@@ -181,7 +182,7 @@ def test_legacy_singular_category_cd_is_accepted(yeoksam_raw: dict[str, Any]) ->
     픽스처가 `category_cds`로 갱신되면 schemas.py의 변환기를 지운다.
     """
     data = copy.deepcopy(yeoksam_raw)
-    assert "category_cd" in data["features"]  # 아직 단수형이다
+    data["features"]["category_cd"] = data["features"].pop("category_cds")[0]
     assert Panel.model_validate(data).features.category_cds == ["CS100010"]
 
 

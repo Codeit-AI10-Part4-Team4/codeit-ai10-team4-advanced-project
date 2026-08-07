@@ -178,7 +178,7 @@ def test_top_resistance_limited_and_ordered(yeoksam: Panel) -> None:
     labels = ["price", "price", "price", "message", "message", "visual"]
     evals = [
         _eval(p, resistance=labels[i] if i < len(labels) else "none")
-        for i, p in enumerate(yeoksam.personas)
+        for i, p in enumerate(sorted(yeoksam.personas, key=lambda x: -x.weight))
     ]
     result = aggregate(yeoksam, evals, ad_id=AD_ID)
     assert len(result.top_resistance) <= 3

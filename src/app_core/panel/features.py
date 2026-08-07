@@ -231,11 +231,25 @@ def build_features(
         )[0]
 
         quarter = _one(con.execute("SELECT max(quarter) FROM sales"))[0]
+        # 어떤 데이터로 만든 피처인지 남긴다. 업종 축이 빠진 폴백이면 그렇게 표기한다.
+        # (사장님에게 보여줄 업종명은 store.industry_label 을 쓴다 — 여기 값이 아니다)
+        category_nm = (
+            "전체 업종"
+            if fallback
+            else " + ".join(
+                r[0]
+                for r in con.execute(
+                    "SELECT DISTINCT category_nm FROM sales "
+                    f"WHERE category_cd IN ({', '.join('?' * len(codes))}) ORDER BY category_nm",
+                    list(codes),
+                ).fetchall()
+            )
+        )
         return {
             **area,
             "quarter": quarter,
             "category_cds": [] if fallback else list(codes),
-            "category_nm": industry,
+            "category_nm": category_nm,
             "is_category_fallback": fallback,
             # 성별·연령 합계가 1이 아니다(미상 매출). 정규화하고 원래 합계를 남긴다.
             "demo_coverage": round((male + female) / amount, 3) if amount else 0.0,

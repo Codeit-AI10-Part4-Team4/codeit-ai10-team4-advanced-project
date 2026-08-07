@@ -28,10 +28,10 @@ def test_every_persona_evidence_is_valid(yeoksam: Panel) -> None:
 @pytest.mark.parametrize(
     ("path", "expected"),
     [
-        ("gender_share.M", 0.493),
-        ("age_share.30", 0.382),
-        ("time_share.11-14", 0.479),
-        ("foot_age_share.60", 0.124),
+        ("gender_share.M", 0.4933),
+        ("age_share.30", 0.3823),
+        ("time_share.11-14", 0.4789),
+        ("foot_age_share.60", 0.0915),
         ("weekend_ratio", 0.138),
         ("avg_ticket_pct", 0.674),
     ],
@@ -49,7 +49,7 @@ def test_resolve_hyphenated_key(features: TradeAreaFeatures) -> None:
     """시간대 키에 하이픈이 있어 dot-path 파싱이 깨지기 쉽다."""
     resolved = resolve(features, "time_share.06-11")
     assert resolved is not None
-    assert resolved.value == pytest.approx(0.161)
+    assert resolved.value == pytest.approx(0.1608)
 
 
 @pytest.mark.parametrize("path", ["avg_ticket", "competitor_cnt"])
@@ -68,7 +68,9 @@ def test_integer_scalars_require_exact(features: TradeAreaFeatures, path: str) -
         "area_nm",  # 수치가 아님
         "category_cd",  # 수치가 아님
         "is_fallback",  # bool 은 수치로 보지 않는다
-        "match_distance_m",  # None
+        # match_distance_m 은 뺐다 — 이제 실측값(49.7)이 들어와 수치로 해석된다.
+        # 다만 상권 특성이 아니라 매칭 품질 지표라 페르소나가 인용할 값은 아니다.
+        # 인용 금지 목록을 evidence.py 에 둘지 수호님 판단 필요 (아인).
         "sales_share.M30",  # 06 §4.4① 이전의 폐기된 경로
         "time_traffic.11-14",  # 폐기된 경로
         "없는필드",
@@ -122,7 +124,7 @@ def test_empty_evidence_is_not_a_match(features: TradeAreaFeatures) -> None:
 
 def test_collects_all_failures(features: TradeAreaFeatures) -> None:
     refs = [
-        FeatureRef(path="age_share.30", value=0.382),  # 통과
+        FeatureRef(path="age_share.30", value=0.3823),  # 통과
         FeatureRef(path="age_share.99", value=0.1),  # unknown
         FeatureRef(path="avg_ticket", value=9999),  # mismatch
     ]
