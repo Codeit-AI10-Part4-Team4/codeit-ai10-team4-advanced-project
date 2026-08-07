@@ -105,12 +105,26 @@ def _assign_times(weights: list[float], time_share: dict[str, float]) -> list[st
 
 
 def boundary_age(features: dict[str, Any]) -> str | None:
-    """지나다니지만 사지 않는 연령대. 매출/유동 비율이 가장 낮은 층이다.
+    """잠재 고객 풀에 비해 실제로 사지 않는 연령대. 경계 페르소나가 될 층이다.
 
-    비중이 너무 작으면(10대 0.3%) 코멘트 한 줄 외에 기여가 없으므로 제외한다.
+    잠재 풀은 두 가지로 관측된다.
+      · `foot_age_share`  지나다니는 사람 (도달)
+      · `back_age_share`  배후지 = 동네 주민 (거주). 골목상권에만 있다.
+
+    둘 중 **큰 쪽**을 분모로 쓴다 — 어느 경로로든 닿을 수 있었는데 안 산 층을
+    잡기 위해서다. 비중이 너무 작으면(역삼역 10대 0.35%) 가중치 기여가 없어
+    코멘트 한 줄 외에 의미가 없으므로 제외한다.
     """
-    age, foot = features["age_share"], features.get("foot_age_share") or {}
-    ratios = {a: age[a] / foot[a] for a in age if foot.get(a) and age[a] >= BOUNDARY_MIN_SHARE}
+    age = features["age_share"]
+    foot = features.get("foot_age_share") or {}
+    back = features.get("back_age_share") or {}
+    ratios = {}
+    for a, share in age.items():
+        if share < BOUNDARY_MIN_SHARE:
+            continue
+        pool = max(foot.get(a, 0.0), back.get(a, 0.0))
+        if pool > 0:
+            ratios[a] = share / pool
     return min(ratios, key=lambda a: ratios[a]) if ratios else None
 
 

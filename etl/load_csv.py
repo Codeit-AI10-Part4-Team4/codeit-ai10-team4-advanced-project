@@ -37,7 +37,12 @@ FOOT_TIMES = ["00_06", "06_11", "11_14", "14_17", "17_21", "21_24"]
 #: 파일명으로 CSV 를 구분한다. 사용자가 받은 파일명을 그대로 쓰기 위한 것.
 #: 앞의 4종은 필수, 뒤의 3종은 있으면 적재한다(없으면 해당 피처만 빠진다).
 KINDS = {"추정매출": "sales", "길단위인구": "foot", "영역": "area", "점포": "store"}
-OPTIONAL_KINDS = {"상주인구": "resident", "직장인구": "worker", "아파트": "apartment"}
+OPTIONAL_KINDS = {
+    "상주인구": "resident",
+    "직장인구": "worker",
+    "아파트": "apartment",
+    "배후지": "back_sales",
+}
 
 
 def read_csv(path: Path) -> pd.DataFrame:
@@ -52,7 +57,8 @@ def read_csv(path: Path) -> pd.DataFrame:
 def find(src: Path) -> dict[str, Path]:
     found: dict[str, Path] = {}
     for p in src.glob("*.csv"):
-        for kw, kind in {**KINDS, **OPTIONAL_KINDS}.items():
+        # "추정매출-상권배후지" 는 "추정매출"에도 걸리므로 배후지를 먼저 본다
+        for kw, kind in {**OPTIONAL_KINDS, **KINDS}.items():
             if kw in p.name and kind not in found:
                 found[kind] = p
     missing = set(KINDS.values()) - set(found)
@@ -166,6 +172,27 @@ def build_apartment(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def build_back_sales(df: pd.DataFrame) -> pd.DataFrame:
+    """배후지 매출 — 상권 **주변 생활권**의 매출. 거주 손님에 가깝다.
+
+    같은 (상권, 업종)에서 상권 매출과 연령 구성이 중앙값 10.7%p 벌어진다(§4.4⑩).
+    골목상권 1,088곳에만 있고 발달상권·전통시장·관광특구에는 없다.
+    """
+    out = pd.DataFrame(
+        {
+            "area_cd": df["상권배후지_코드"].astype(str),
+            "category_cd": df["서비스_업종_코드"],
+            "quarter": df["기준_년분기_코드"].astype(str),
+            "amount": df["당월_매출_금액"],
+            "male_amount": df["남성_매출_금액"],
+            "female_amount": df["여성_매출_금액"],
+        }
+    )
+    for a in AGES:
+        out[f"age_{a.split('_')[0]}_amount"] = df[f"연령대_{a}_매출_금액"]
+    return out
+
+
 def build_store(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(
         {
@@ -196,6 +223,7 @@ def main() -> None:
         ("resident", build_resident),
         ("worker", build_worker),
         ("apartment", build_apartment),
+        ("back_sales", build_back_sales),
     ]:
         if kind in paths:
             tables.append((kind, builder(latest(read_csv(paths[kind])))))

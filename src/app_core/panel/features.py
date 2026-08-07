@@ -170,6 +170,25 @@ def _sales_row(
     return row, True
 
 
+def _back_shares(
+    con: duckdb.DuckDBPyConnection, area_cd: str, codes: tuple[str, ...]
+) -> dict[str, float] | None:
+    """배후지 매출의 연령 비중. 배후지가 없는 상권(발달·전통시장·관광특구)이면 None."""
+    where, params = "", [area_cd]
+    if codes:
+        where = f" AND category_cd IN ({', '.join('?' * len(codes))})"
+        params += list(codes)
+    row = con.execute(
+        "SELECT "
+        + ", ".join(f"sum(age_{a}_amount)" for a in AGE_BANDS)
+        + f" FROM back_sales WHERE area_cd = ?{where}",
+        params,
+    ).fetchone()
+    if not row or not any(row) or sum(x or 0 for x in row) <= 0:
+        return None
+    return _shares(dict(zip(AGE_BANDS, [x or 0 for x in row], strict=True)))
+
+
 def _ticket_percentile(
     con: duckdb.DuckDBPyConnection, codes: tuple[str, ...], ticket: int
 ) -> float:
@@ -241,6 +260,11 @@ def build_features(
         ).fetchone()
         worker_pop, resident_pop, hh, apt_price, apt_cnt = ctx if ctx else (0, 0, 0, None, 0)
 
+        # 배후지 = 상권 주변 생활권. 상권 매출이 '지나가는 손님'이면 이쪽은 '동네 주민'에
+        # 가깝고, 실제로 연령 구성이 중앙값 10.7%p 벌어진다(§4.4⑩).
+        # 골목상권에만 있어 없으면 None 이 되고, 그 경우 관련 판단은 건너뛴다.
+        back_age = _back_shares(con, area["area_cd"], codes)
+
         quarter = _one(con.execute("SELECT max(quarter) FROM sales"))[0]
         # 어떤 데이터로 만든 피처인지 남긴다. 업종 축이 빠진 폴백이면 그렇게 표기한다.
         # (사장님에게 보여줄 업종명은 store.industry_label 을 쓴다 — 여기 값이 아니다)
@@ -269,6 +293,8 @@ def build_features(
             # 시간대는 유동인구가 아니라 매출 기준 — 지나다니는 사람과 사는 사람이 다르다.
             "time_share": _shares({k.replace("_", "-"): v for k, v in times.items()}),
             "foot_age_share": _shares(dict(zip(AGE_BANDS, foot, strict=True))) if foot else {},
+            # 동네 주민 쪽 연령 구성. 골목상권에만 있다(전체의 66%).
+            "back_age_share": back_age,
             "weekend_ratio": round(weekend / amount, 3) if amount else 0.0,
             "avg_ticket": ticket,
             "avg_ticket_pct": _ticket_percentile(con, () if fallback else codes, ticket),

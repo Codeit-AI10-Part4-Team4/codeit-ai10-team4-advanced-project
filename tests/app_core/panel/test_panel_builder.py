@@ -40,6 +40,7 @@ def _features(**over: Any) -> dict[str, Any]:
         "avg_ticket": 9000,
         "avg_ticket_pct": 0.5,
         "work_ratio": 0.9,
+        "back_age_share": None,
         "apt_avg_price": None,
     }
     return {**base, **over}
@@ -126,3 +127,19 @@ def test_상권_성격이_다르면_패널도_달라진다() -> None:
     hongdae = build_panel(build_features("", "korean_food", coord=(126.9250, 37.5610)))
     assert office[0]["axes"]["motive"] == "habitual"  # 역삼 work_ratio 0.94
     assert hongdae[0]["axes"]["motive"] == "exploratory"  # 홍대 0.52
+
+
+def test_배후지_구성도_경계_판정에_쓰인다() -> None:
+    """동네 주민(배후지)에 많은데 안 사는 층도 경계다 (07 §4.4⑩)."""
+    # 유동인구로만 보면 60대(0.07/0.06=1.17)가 낮지 않지만,
+    # 배후지에 60대가 20%나 사는데 매출은 7%뿐이라면 놓치고 있는 층이다.
+    f = _features(
+        foot_age_share={"10": 0.08, "20": 0.2, "30": 0.3, "40": 0.2, "50": 0.16, "60": 0.06},
+        back_age_share={"10": 0.02, "20": 0.15, "30": 0.25, "40": 0.2, "50": 0.18, "60": 0.20},
+    )
+    assert boundary_age(f) == "60"
+
+
+def test_배후지가_없어도_동작한다() -> None:
+    """발달상권·전통시장·관광특구에는 배후지 데이터가 없다 (전체의 34%)."""
+    assert boundary_age(_features(back_age_share=None)) == "20"
