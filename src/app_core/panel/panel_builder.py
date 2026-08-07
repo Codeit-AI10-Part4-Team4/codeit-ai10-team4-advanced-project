@@ -128,11 +128,12 @@ def boundary_age(features: dict[str, Any]) -> str | None:
     return min(ratios, key=lambda a: ratios[a]) if ratios else None
 
 
-def _stub_narrative(demo: str, axes: dict[str, str], features: dict[str, Any]) -> str:
-    """LLM 없이 쓰는 사실 나열. 키가 없을 때도 패널이 돌게 하는 자리표시자다."""
+def stub_narrative(persona: dict[str, Any], features: dict[str, Any]) -> str:
+    """LLM 없이 쓰는 사실 나열. 키가 없거나 모델이 답을 빠뜨려도 패널이 돌게 한다."""
+    axes = persona["axes"]
     place = "출퇴근하는 사람이 많은" if axes["motive"] == "habitual" else "머무는 사람이 섞인"
     return (
-        f"{features['area_nm']} 상권({place} 동네)의 {demo}. "
+        f"{features['area_nm']} 상권({place} 동네)의 {persona['demo']}. "
         f"주로 {TIME_KO[axes['time']]} 시간대에 움직이고, 이 동네 {features['category_nm']} "
         f"객단가는 {features['avg_ticket']:,}원이다."
     )
@@ -190,7 +191,7 @@ def build_panel(
     texts = (
         narrator(personas, features)
         if narrator
-        else [_stub_narrative(p["demo"], p["axes"], features) for p in personas]
+        else [stub_narrative(p, features) for p in personas]
     )
     for p, text in zip(personas, texts, strict=True):
         p["narrative"] = text
