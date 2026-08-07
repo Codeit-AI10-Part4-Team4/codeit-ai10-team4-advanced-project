@@ -3,7 +3,7 @@
 "정량은 코드, LLM은 서사만"이라는 원칙의 집행 지점이다.
 LLM이 근거 수치를 창작하면 그 응답은 집계에서 빠진다.
 
-대조 규칙 (stage2 §8):
+대조 규칙 (07 §8):
 - 비중·비율 등 실수 필드 → 상대 오차 5% 이내
 - 정수 필드(`avg_ticket`, `competitor_cnt`) → 정확 일치
 - 존재하지 않는 경로 → 탈락
@@ -13,13 +13,14 @@ from __future__ import annotations
 
 from typing import Final, Literal, NamedTuple
 
-from app_core.panel.schemas import FeatureRef, TradeAreaFeatures
+from app_core.panel.schemas import SHARE_FIELDS, FeatureRef, TradeAreaFeatures
 
 #: 실수 필드의 상대 오차 허용치.
 RELATIVE_TOLERANCE: Final = 0.05
 
 #: dot-path의 앞부분이 이 값이면 뒤를 매핑 키로 해석한다.
-_MAPPING_FIELDS: Final = frozenset({"sales_share", "time_traffic"})
+#: 07 §4.4① 이후 성별·연령이 분리돼 네 개가 되었다.
+_MAPPING_FIELDS: Final = frozenset(SHARE_FIELDS)
 
 FailureReason = Literal["unknown_path", "value_mismatch"]
 
@@ -43,7 +44,7 @@ class EvidenceFailure(NamedTuple):
 def resolve(features: TradeAreaFeatures, path: str) -> ResolvedValue | None:
     """dot-path로 실제 피처값을 찾는다. 없거나 수치가 아니면 None.
 
-    >>> # sales_share.M30 → 매핑 조회, avg_ticket → 스칼라 조회
+    >>> # age_share.30 → 매핑 조회, avg_ticket → 스칼라 조회
     """
     head, _, rest = path.partition(".")
 
