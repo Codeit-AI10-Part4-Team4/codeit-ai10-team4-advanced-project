@@ -19,12 +19,13 @@ dependencies = [
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "pillow>=10.0.0",         # 레이아웃 합성 — 한글을 이미지에 얹는다
-    "pyyaml>=6.0",            # 업종·스타일·규격 레지스트리
+    "pyyaml>=6.0",            # 업종 레지스트리
+    "sqlalchemy>=2.0.0",      # DB. 테스트는 SQLite, 운영은 PostgreSQL
 ]
 
 # ── 설치 방법 ────────────────────────────────────────────────
 #   전원 공통          pip install -e ".[dev,ui]"
-#   NLU·문구 담당      pip install -e ".[dev,ui,llm]"
+#   NLU·문구 담당      pip install -e ".[dev,ui,llm,db]"
 #   이미지 생성 담당    pip install -e ".[dev,ui,ml]"      ← GPU 필요
 #
 #   담당에 따라 다른 것만 깔면 된다. GPU 가 없는 사람은 ml 을 빼면
@@ -53,6 +54,11 @@ ui = [
 # NLU·문구 생성 담당 — 가볍다. GPU 불필요
 llm = [
     "openai>=1.40.0",
+]
+
+# PostgreSQL 드라이버. 테스트는 SQLite 로 돌아서 CI 엔 필요 없다.
+db = [
+    "psycopg[binary]>=3.2.0",
 ]
 
 # 이미지 생성 담당 — 무겁다(수 GB). GPU 필요
@@ -91,6 +97,10 @@ ignore = ["EXE002"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+# tests/ 가 src/ 를 미러링하므로 tests/api/test_store.py 와 tests/app_core/test_store.py
+# 처럼 파일명이 겹친다. 기본 import 방식은 이걸 같은 모듈로 보고 충돌을 낸다.
+addopts = "--import-mode=importlib"
+
 # src 레이아웃: src/ 하위의 패키지(api, app_core)를 최상위 import 이름으로 노출.
 # 따라서 코드는 `import app_core` / `from api import ...` 형태로 사용한다 (src. 접두어 없음).
 [tool.setuptools.packages.find]
@@ -125,5 +135,6 @@ module = [
     "rembg.*",
     "streamlit.*",
     "pandas.*",
+    "openai.*",
 ]
 ignore_missing_imports = true
