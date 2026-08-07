@@ -57,13 +57,13 @@
       "persona_id": "p01",
       "demo": "10대 남성",
       "axes": {
-        "price_sens": "high",
-        "motive": "exploratory",
-        "time": "afternoon"
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "evening"
       },
       "weight": 0.0017,
-      "is_boundary": true,
-      "narrative": "근처 학교에 다닌다. 이 앞을 지나다니는 또래는 적지 않은데(유동 3.9%) 실제로 여기서 사 먹는 일은 거의 없다(매출 0.3%). 만원 가까운 커피는 살 생각을 안 한다.",
+      "is_boundary": false,
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 10대 남성. 주로 저녁 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
       "evidence": [
         {
           "path": "gender_share.M",
@@ -74,8 +74,8 @@
           "value": 0.0035
         },
         {
-          "path": "foot_age_share.10",
-          "value": 0.0386
+          "path": "time_share.17-21",
+          "value": 0.1498
         }
       ]
     },
@@ -83,13 +83,13 @@
       "persona_id": "p02",
       "demo": "10대 여성",
       "axes": {
-        "price_sens": "high",
-        "motive": "exploratory",
-        "time": "afternoon"
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "evening"
       },
       "weight": 0.0018,
-      "is_boundary": true,
-      "narrative": "근처 학교에 다닌다. 이 앞을 지나다니는 또래는 적지 않은데(유동 3.9%) 실제로 여기서 사 먹는 일은 거의 없다(매출 0.3%). 만원 가까운 커피는 살 생각을 안 한다.",
+      "is_boundary": false,
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 10대 여성. 주로 저녁 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
       "evidence": [
         {
           "path": "gender_share.F",
@@ -100,8 +100,8 @@
           "value": 0.0035
         },
         {
-          "path": "foot_age_share.10",
-          "value": 0.0386
+          "path": "time_share.17-21",
+          "value": 0.1498
         }
       ]
     },
@@ -109,13 +109,13 @@
       "persona_id": "p03",
       "demo": "20대 남성",
       "axes": {
-        "price_sens": "high",
-        "motive": "exploratory",
-        "time": "weekday_lunch"
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "morning"
       },
       "weight": 0.0798,
-      "is_boundary": false,
-      "narrative": "입사 1~2년차. 이 동네 커피값이 부담스러워 쿠폰이나 세트 할인을 챙긴다. 대신 새로 생긴 곳은 꼭 한 번 가보고 사진을 찍는다.",
+      "is_boundary": true,
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 20대 남성. 주로 아침 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
       "evidence": [
         {
           "path": "gender_share.M",
@@ -126,8 +126,8 @@
           "value": 0.1617
         },
         {
-          "path": "time_share.11-14",
-          "value": 0.4789
+          "path": "foot_age_share.20",
+          "value": 0.2164
         }
       ]
     },
@@ -135,13 +135,13 @@
       "persona_id": "p04",
       "demo": "20대 여성",
       "axes": {
-        "price_sens": "high",
-        "motive": "exploratory",
-        "time": "weekday_lunch"
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "afternoon"
       },
       "weight": 0.0819,
-      "is_boundary": false,
-      "narrative": "입사 1~2년차. 이 동네 커피값이 부담스러워 쿠폰이나 세트 할인을 챙긴다. 대신 새로 생긴 곳은 꼭 한 번 가보고 사진을 찍는다.",
+      "is_boundary": true,
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 20대 여성. 주로 오후 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
       "evidence": [
         {
           "path": "gender_share.F",
@@ -152,8 +152,8 @@
           "value": 0.1617
         },
         {
-          "path": "time_share.11-14",
-          "value": 0.4789
+          "path": "foot_age_share.20",
+          "value": 0.2164
         }
       ]
     },
@@ -167,7 +167,7 @@
       },
       "weight": 0.1886,
       "is_boundary": false,
-      "narrative": "역삼역 근처 회사에 다닌다. 점심 먹고 커피를 사서 사무실로 돌아가는 게 거의 매일의 루틴이다. 늘 가던 곳이 편하지만 줄이 길면 바로 옆집으로 간다.",
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 30대 남성. 주로 점심 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
       "evidence": [
         {
           "path": "gender_share.M",
@@ -193,7 +193,7 @@
       },
       "weight": 0.1937,
       "is_boundary": false,
-      "narrative": "점심시간에 잠깐 나오는 직장인. 이 동네 커피값이 만원 가까운 건 익숙하지만 그만큼 맛과 분위기를 따진다. 새로 생긴 곳은 인스타에서 먼저 보고 간다.",
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 30대 여성. 주로 점심 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
       "evidence": [
         {
           "path": "gender_share.F",
@@ -215,11 +215,11 @@
       "axes": {
         "price_sens": "mid",
         "motive": "habitual",
-        "time": "weekday_lunch"
+        "time": "afternoon"
       },
       "weight": 0.109,
       "is_boundary": false,
-      "narrative": "팀장급 직장인. 가격은 크게 신경 쓰지 않고 조용히 앉아 있을 자리가 있는지를 본다. 오후 미팅 전에 들르는 경우가 많다.",
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 40대 남성. 주로 오후 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
       "evidence": [
         {
           "path": "gender_share.M",
@@ -230,8 +230,8 @@
           "value": 0.221
         },
         {
-          "path": "time_share.11-14",
-          "value": 0.4789
+          "path": "time_share.14-17",
+          "value": 0.1907
         }
       ]
     },
@@ -245,7 +245,7 @@
       },
       "weight": 0.112,
       "is_boundary": false,
-      "narrative": "근처 사무실에서 일한다. 점심 후 산책 겸 커피를 사러 나오고, 디저트는 나눠 먹을 수 있는 걸 고른다.",
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 40대 여성. 주로 점심 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
       "evidence": [
         {
           "path": "gender_share.F",
@@ -265,13 +265,13 @@
       "persona_id": "p09",
       "demo": "50대 남성",
       "axes": {
-        "price_sens": "low",
+        "price_sens": "mid",
         "motive": "habitual",
-        "time": "evening"
+        "time": "morning"
       },
       "weight": 0.0744,
       "is_boundary": false,
-      "narrative": "관리자급. 늘 마시던 것만 마시고 새 메뉴에는 관심이 적다. 광고 문구가 요란하면 오히려 발길을 돌린다.",
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 50대 남성. 주로 아침 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
       "evidence": [
         {
           "path": "gender_share.M",
@@ -282,8 +282,8 @@
           "value": 0.1508
         },
         {
-          "path": "time_share.17-21",
-          "value": 0.1498
+          "path": "time_share.06-11",
+          "value": 0.1608
         }
       ]
     },
@@ -291,13 +291,13 @@
       "persona_id": "p10",
       "demo": "50대 여성",
       "axes": {
-        "price_sens": "low",
+        "price_sens": "mid",
         "motive": "habitual",
-        "time": "evening"
+        "time": "morning"
       },
       "weight": 0.0764,
       "is_boundary": false,
-      "narrative": "오후에 지인과 만나러 온다. 앉아서 이야기할 수 있는 자리와 조용한 분위기를 본다. 디저트를 곁들이는 경우가 많다.",
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 50대 여성. 주로 아침 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
       "evidence": [
         {
           "path": "gender_share.F",
@@ -308,8 +308,8 @@
           "value": 0.1508
         },
         {
-          "path": "time_share.17-21",
-          "value": 0.1498
+          "path": "time_share.06-11",
+          "value": 0.1608
         }
       ]
     },
@@ -317,13 +317,13 @@
       "persona_id": "p11",
       "demo": "60대 남성",
       "axes": {
-        "price_sens": "high",
-        "motive": "exploratory",
-        "time": "afternoon"
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "evening"
       },
       "weight": 0.0398,
       "is_boundary": false,
-      "narrative": "인근 거주민이거나 오래 일해온 사람. 오후에 지나가다 들르는 정도라 신메뉴나 할인에는 관심이 있지만, 영어나 외래어가 많은 문구는 무슨 뜻인지 몰라 넘긴다.",
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 60대 남성. 주로 저녁 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
       "evidence": [
         {
           "path": "gender_share.M",
@@ -334,8 +334,8 @@
           "value": 0.0807
         },
         {
-          "path": "time_share.14-17",
-          "value": 0.1907
+          "path": "time_share.17-21",
+          "value": 0.1498
         }
       ]
     },
@@ -343,13 +343,13 @@
       "persona_id": "p12",
       "demo": "60대 여성",
       "axes": {
-        "price_sens": "high",
-        "motive": "exploratory",
-        "time": "afternoon"
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "evening"
       },
       "weight": 0.0409,
       "is_boundary": false,
-      "narrative": "인근 거주민이거나 오래 일해온 사람. 오후에 지나가다 들르는 정도라 신메뉴나 할인에는 관심이 있지만, 영어나 외래어가 많은 문구는 무슨 뜻인지 몰라 넘긴다.",
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 60대 여성. 주로 저녁 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
       "evidence": [
         {
           "path": "gender_share.F",
@@ -360,8 +360,8 @@
           "value": 0.0807
         },
         {
-          "path": "time_share.14-17",
-          "value": 0.1907
+          "path": "time_share.17-21",
+          "value": 0.1498
         }
       ]
     }
