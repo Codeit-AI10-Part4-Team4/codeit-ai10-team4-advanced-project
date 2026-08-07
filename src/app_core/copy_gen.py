@@ -30,7 +30,7 @@ SYSTEM_PROMPT = """너는 동네 가게 광고 문구를 쓰는 카피라이터�
 - 원하는 느낌: {tone}
 - 그 밖의 요청: {extra}
 {price_line}
-{history}
+{transcript}{history}
 규칙
 - **{count}개**를 서로 다르게 만들어라.
 - 헤드라인은 {max_headline}자 이내, 서브는 {max_sub}자 이내.
@@ -57,6 +57,24 @@ def _history_block(recent: list[AdBrief]) -> str:
     return "이 가게가 전에 만든 광고 (겹치지 않게 참고만):\n" + "\n".join(lines) + "\n"
 
 
+def _transcript_block(brief: AdBrief) -> str:
+    """사장님이 한 말 원문.
+
+    위의 항목들은 이 말에서 뽑아낸 요약이라 뉘앙스가 깎여 있다.
+    "단골분들이 매콤한 걸 좋아하셔서" 같은 말은 어느 항목에도 안 들어가지만
+    문구를 쓸 때 가장 쓸모 있다.
+    """
+    if not brief.transcript:
+        return ""
+    lines = "\n".join(f'- "{t}"' for t in brief.transcript)
+    return (
+        "\n사장님이 한 말 (원문 — 위 항목이 놓친 것을 여기서 읽어라):\n"
+        f"{lines}\n"
+        "⚠️ 여기 있는 말도 사장님이 직접 한 말이지만, "
+        "없는 사실을 상상해서 채우지는 마라.\n"
+    )
+
+
 def _system_prompt(brief: AdBrief, store: Store, recent: list[AdBrief]) -> str:
     return SYSTEM_PROMPT.format(
         industry=store.industry_label,
@@ -66,6 +84,7 @@ def _system_prompt(brief: AdBrief, store: Store, recent: list[AdBrief]) -> str:
         tone=brief.tone or "(없음)",
         extra=brief.extra or "(없음)",
         price_line=_price_line(brief),
+        transcript=_transcript_block(brief),
         history=_history_block(recent),
         count=CANDIDATE_COUNT,
         max_headline=MAX_HEADLINE,

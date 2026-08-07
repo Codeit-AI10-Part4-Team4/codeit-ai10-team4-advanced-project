@@ -15,25 +15,30 @@ from __future__ import annotations
 from pydantic import ValidationError
 
 from app_core.llm import ChatClient, get_client
-from app_core.schema import AdBriefDraft, ChatTurn, Store
+from app_core.schema import REQUIRED_SLOTS, AdBriefDraft, ChatTurn, Store
 
 SYSTEM_PROMPT = """너는 동네 가게 사장님이 광고를 만들도록 돕는 챗봇이다.
 
 가게: {industry} · {store_name}
 사장님이 만들려는 것: {goal}
 
+# 사장님이 지금까지 한 말
+{transcript}
+
 # 이미 알고 있는 것
 {filled}
 
-# 아직 모르는 필수 항목
-{missing}
-
-# 할 일
+# 할 일 — 순서대로
 1. 사장님의 **이번 말**에서 새로 알아낸 것을 extracted 에 넣는다.
+   ⚠️ 이걸 먼저 해라. 물어볼 생각부터 하면 답이 눈앞에 있는데도 되묻게 된다.
 2. {next_action}
+   **단, 사장님이 이번 말에서 이미 알려줬다면 묻지 마라.** 짧게 확인하고 넘어가라.
 
 # extracted 규칙 — 가장 중요하다
 - **이번 말에서 새로 알아낸 것만** 넣어라. 이미 알고 있는 것을 되풀이해 넣지 마라.
+- 홍보할 대상을 말하면 product 에 넣어라.
+    "크로플 홍보하고싶어"  →  product: "크로플"
+    "레드콤보요"           →  product: "레드콤보"
 - 느낌·분위기를 말하면 tone 에 넣어라. 놓치기 쉬우니 특히 주의해라.
     "매운 감칠맛을 부각해줘"  →  tone: "매운 감칠맛 강조"
     "중독성 있게"             →  tone: "중독성 있는"
@@ -54,33 +59,45 @@ SYSTEM_PROMPT = """너는 동네 가게 사장님이 광고를 만들도록 돕�
 
 아래 JSON 형식으로만 답해라.
 
+extracted 를 **먼저** 쓰고 그 다음에 message 를 써라. 순서를 지켜라.
+
 {{
+  "extracted": {{"product": "...", "price": 숫자, "situation": "...", "tone": "...", "extra": "..."}},
   "message": "사장님에게 할 말",
-  "options": ["선택지1", "선택지2"],
-  "extracted": {{"product": "...", "price": 숫자, "situation": "...", "tone": "...", "extra": "..."}}
+  "options": ["선택지1", "선택지2"]
 }}
 
 extracted 안의 항목은 이번 말에서 알아낸 것만 남기고 나머지는 지워라.
 
-# 예시
-사장님: "우리 가게 신메뉴 나왔는데 문구 좀 만들어줘"
-{{
-  "message": "어떤 메뉴인가요?",
-  "options": ["직접 입력할게요"],
-  "extracted": {{"situation": "신메뉴"}}
-}}
-→ 메뉴 이름과 가격은 아직 모르니 넣지 않았고, "신메뉴"는 **알아냈으므로 넣었다.**
-   필수가 아니어도 알아낸 것은 빠짐없이 넣어라.
+# extracted 예시
+아래는 extracted 만 보여준다. message 와 options 는 매번 새로 써라 —
+이 예시의 문장을 베끼지 마라.
+
+    "크로플 홍보하고싶어"            →  {{"product": "크로플"}}
+    "우리 가게 신메뉴 나왔는데"       →  {{"situation": "신메뉴"}}
+    "26000원이요"                    →  {{"price": 26000}}
+    "따뜻하고 감성적으로"            →  {{"tone": "따뜻하고 감성적인"}}
+    "레드콤보 신메뉴 12000원이에요"   →  {{"product": "레드콤보",
+                                        "situation": "신메뉴", "price": 12000}}
+    "글쎄요"                         →  {{}}
+
+필수가 아니어도 알아낸 것은 빠짐없이 넣어라.
 """
 
-# 필수가 다 찼는지에 따라 다음에 할 일이 달라진다. 이걸 안 갈라주면
-# LLM 이 선택 항목을 채우려고 같은 질문을 계속 되풀이한다.
-ASK_MORE = """필수 항목 중 **하나만** 물어라. 한 번에 여러 개 묻지 마라.
+# 무엇을 물을지는 코드가 정한다(draft.next_slot()). LLM 에게 맡기면
+# 이미 답을 받은 걸 또 묻거나, 물어야 할 걸 건너뛴다.
+ASK_REQUIRED = """**{label}** 을(를) 물어라. 이건 없으면 광고를 못 만든다.
+   다른 건 묻지 마라. 한 번에 하나만.
    말로 설명하기 어려울 때 누를 수 있도록 선택지(options)를 2~4개 함께 줘라."""
 
-WRAP_UP = """필수가 다 찼다. **더 묻지 말고 마무리해라.**
-   "이제 만들어드릴게요" 처럼 알리고 options 는 반드시 빈 배열로 둬라.
-   느낌·상황 같은 나머지는 사장님이 말한 것만 채우면 된다."""
+ASK_HELPFUL = """**{label}** 을(를) 물어라. 이건 없어도 만들 수는 있지만,
+   알면 사장님 마음에 드는 광고가 나온다.
+   - 부담 주지 마라. "안 정하셨으면 알아서 만들어드릴게요" 처럼 넘어갈 길을 함께 줘라.
+   - 선택지(options)를 2~4개 함께 줘라. 사장님 가게와 상품에 맞는 것으로.
+   - 다른 건 묻지 마라."""
+
+WRAP_UP = """물어볼 것을 다 물었다. **더 묻지 말고 마무리해라.**
+   "이제 만들어드릴게요" 처럼 알리고 options 는 반드시 빈 배열로 둬라."""
 
 GOAL_LABEL = {"image": "광고 이미지", "copy": "광고 문구"}
 
@@ -105,15 +122,21 @@ def _describe(draft: AdBriefDraft) -> str:
     return "\n".join(filled) if filled else "(아직 없음)"
 
 
+def _next_action(slot: str | None) -> str:
+    if slot is None:
+        return WRAP_UP
+    template = ASK_REQUIRED if slot in REQUIRED_SLOTS else ASK_HELPFUL
+    return template.format(label=SLOT_LABEL[slot])
+
+
 def _system_prompt(draft: AdBriefDraft, store: Store) -> str:
-    missing = draft.missing()
     return SYSTEM_PROMPT.format(
         industry=store.industry_label,
         store_name=store.name,
         goal=GOAL_LABEL.get(draft.goal or "", "미정"),
+        transcript="\n".join(f'- "{t}"' for t in draft.transcript) or "(아직 없음)",
         filled=_describe(draft),
-        missing=", ".join(SLOT_LABEL[s] for s in missing) if missing else "(없음 — 다 찼다)",
-        next_action=ASK_MORE if missing else WRAP_UP,
+        next_action=_next_action(draft.next_slot()),
     )
 
 
@@ -138,14 +161,27 @@ def respond(
     client: ChatClient | None = None,
 ) -> ChatTurn:
     """한 턴 처리 — 사장님 말을 듣고 주문서를 갱신한 뒤 다음 질문을 낸다."""
+    # 이번 턴에 무엇을 물을지는 코드가 정하고, LLM 은 그걸 말로 옮기기만 한다.
+    asking = draft.next_slot()
     raw = (client or get_client()).complete_json(_system_prompt(draft, store), utterance)
 
-    merged = draft.merge(_safe_extract(raw.get("extracted") or {}))
+    # 슬롯을 채우기 전에 말부터 기록한다. LLM 이 아무것도 못 뽑아내도
+    # 사장님이 한 말은 남아서 문구 생성 프롬프트로 넘어간다.
+    merged = draft.with_utterance(utterance).merge(_safe_extract(raw.get("extracted") or {}))
+    if asking:
+        # 답을 받았는지와 무관하게 물어본 것으로 친다. 안 그러면 사장님이
+        # 답을 피할 때 같은 질문을 계속 하게 된다.
+        merged = merged.mark_asked(asking)
+
     options = raw.get("options")
     return ChatTurn(
         message=str(raw.get("message") or "조금 더 자세히 말씀해주시겠어요?"),
-        # 필수가 다 찼으면 선택지를 지운다 — LLM 이 지시를 어기고 또 물어봐도
+        # 더 물을 게 없으면 선택지를 지운다 — LLM 이 지시를 어기고 또 물어봐도
         # 화면에는 안 뜨게 해서 대화가 맴돌지 않게 한다.
-        options=[str(o) for o in options] if isinstance(options, list) and merged.missing() else [],
+        options=(
+            [str(o) for o in options]
+            if isinstance(options, list) and merged.next_slot() is not None
+            else []
+        ),
         draft=merged,
     )

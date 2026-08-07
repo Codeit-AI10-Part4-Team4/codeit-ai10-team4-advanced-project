@@ -22,7 +22,12 @@ from app_core import registry
 Goal = Literal["image", "copy"]
 
 # 대화로 반드시 채워야 하는 것. goal 은 고정 버튼으로 이미 정해져서 여기 없다.
+# 이게 비면 광고를 만들 수 없다.
 REQUIRED_SLOTS = ("product", "price")
+
+# 없어도 만들 수는 있지만, 있으면 사장님 의도에 훨씬 가까워지는 것.
+# **한 번씩만 묻고 넘어간다** — 안 그러면 사장님이 답을 피할 때 대화가 맴돈다.
+HELPFUL_SLOTS = ("situation", "tone")
 
 
 class StoreInput(BaseModel):
@@ -79,7 +84,12 @@ class Store(StoreInput):
 
 
 class AdBrief(BaseModel):
-    """주문서 — 생성에 필요한 모든 것. 필수가 다 차야 만들어진다."""
+    """주문서 — 생성에 필요한 모든 것. 필수가 다 차야 만들어진다.
+
+    슬롯과 원문을 **둘 다** 들고 간다. 역할이 다르다.
+      슬롯   검증·저장·조건 판단 — 형식이 고정이라 받는 쪽이 믿고 쓴다
+      원문   생성 프롬프트에 통째로 넣는다 — 슬롯에 안 담기는 뉘앙스를 살린다
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -92,10 +102,36 @@ class AdBrief(BaseModel):
     extra: str = Field(default="", description="그 밖의 요청")
     with_sub: bool = Field(default=True, description="서브 문구까지 만들지")
 
+    # 슬롯이 못 담는 것을 여기서 건진다.
+    # "단골분들이 매콤한 걸 좋아하셔서" 같은 말은 어느 슬롯에도 안 들어가지만
+    # 문구를 쓸 때 가장 쓸모 있는 정보다.
+    transcript: list[str] = Field(
+        default_factory=list, description="사장님이 한 말 그대로, 순서대로"
+    )
+
     @property
     def show_price(self) -> bool:
         """0 원은 '가격 없음'이라는 뜻이다. 광고에 0원이라고 쓰면 안 된다."""
         return self.price > 0
+
+    @property
+    def items(self) -> list[dict[str, str]]:
+        """가격 항목 목록 — 품질 검증·이미지 담당에게 넘기는 형태.
+
+        받는 쪽이 [{"name","price"}] 를 기대한다. 우리는 상품 하나·가격 하나를
+        받으므로 항목은 최대 한 개다. 0 원이면 가격을 안 넣기로 했으므로 빈 목록.
+
+        슬롯으로 두지 않고 계산해서 만드는 이유: 가격은 정수 하나로 받아야
+        "말 안 함(None)"과 "가격 없음(0)"을 구분할 수 있다.
+        """
+        if not self.show_price:
+            return []
+        return [{"name": self.product, "price": f"{self.price:,}원"}]
+
+    @property
+    def raw_utterance(self) -> str:
+        """사장님이 한 말 전체를 한 덩어리로. 프롬프트에 넣을 때 쓴다."""
+        return "\n".join(self.transcript)
 
 
 class AdBriefDraft(BaseModel):
@@ -118,9 +154,34 @@ class AdBriefDraft(BaseModel):
     extra: str = ""
     with_sub: bool = True
 
+    transcript: list[str] = Field(default_factory=list, description="사장님이 한 말 그대로")
+    asked: list[str] = Field(
+        default_factory=list, description="이미 물어본 슬롯. 같은 걸 두 번 묻지 않으려고 센다"
+    )
+
     def missing(self) -> list[str]:
-        """아직 안 찬 필수 슬롯. 이게 비면 생성할 수 있다."""
+        """아직 안 찬 **필수** 슬롯. 이게 비어야 생성할 수 있다."""
         return [slot for slot in REQUIRED_SLOTS if getattr(self, slot) is None]
+
+    def next_slot(self) -> str | None:
+        """다음에 물어볼 것 하나. 더 물을 게 없으면 None.
+
+        필수를 먼저 다 받고, 그 다음 도움되는 것을 한 번씩만 묻는다.
+        사장님이 답을 안 해도 asked 에 남아서 다시 묻지 않는다.
+        """
+        for slot in REQUIRED_SLOTS:
+            if getattr(self, slot) is None:
+                return slot
+        for slot in HELPFUL_SLOTS:
+            if not getattr(self, slot) and slot not in self.asked:
+                return slot
+        return None
+
+    def mark_asked(self, slot: str) -> AdBriefDraft:
+        """물어봤다고 표시한다. 답을 받았는지와 무관하게 한 번이면 충분하다."""
+        if slot in self.asked:
+            return self
+        return self.model_copy(update={"asked": [*self.asked, slot]})
 
     def merge(self, extracted: AdBriefDraft) -> AdBriefDraft:
         """이번 턴에 새로 뽑아낸 값으로 갱신한다.
@@ -130,9 +191,17 @@ class AdBriefDraft(BaseModel):
         """
         data = self.model_dump()
         for field, value in extracted.model_dump(exclude_unset=True).items():
-            if value not in (None, ""):
+            # transcript·asked 는 덮어쓰지 않는다. 쌓이는 것이지 바뀌는 게 아니다.
+            if field not in ("transcript", "asked") and value not in (None, ""):
                 data[field] = value
         return AdBriefDraft(**data)
+
+    def with_utterance(self, utterance: str) -> AdBriefDraft:
+        """사장님이 한 말을 기록에 덧붙인다. 슬롯에 안 담긴 것도 여기 남는다."""
+        said = utterance.strip()
+        if not said:
+            return self
+        return self.model_copy(update={"transcript": [*self.transcript, said]})
 
     def to_brief(self) -> AdBrief:
         """필수가 다 찼을 때만 주문서로 승격한다."""
@@ -146,6 +215,7 @@ class AdBriefDraft(BaseModel):
             tone=self.tone,
             extra=self.extra,
             with_sub=self.with_sub,
+            transcript=self.transcript,
         )
 
 

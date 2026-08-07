@@ -52,6 +52,17 @@ def test_이미지는_경로만_남긴다(store: Store) -> None:
     ads.add_image(ad_id, "gs://bucket/ads/1.png")
 
 
+def test_원문도_저장되고_다시_읽힌다(store: Store) -> None:
+    said = ["단골분들이 매콤한 걸 좋아해요", "젊은 손님도 왔으면 좋겠어요"]
+    ads.save(store.id, brief(transcript=said))
+    assert ads.recent(store.id)[0].transcript == said
+
+
+def test_원문이_없어도_읽힌다(store: Store) -> None:
+    ads.save(store.id, brief())
+    assert ads.recent(store.id)[0].transcript == []
+
+
 def test_가게를_지우면_이력도_지워진다(user_id: int, store: Store) -> None:
     ads.save(store.id, brief())
     stores.delete(user_id, store.id)

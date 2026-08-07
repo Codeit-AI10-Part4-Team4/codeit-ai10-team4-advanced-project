@@ -85,6 +85,9 @@ class AdRow(Base):
     situation: Mapped[str] = mapped_column(String(128), default="")
     tone: Mapped[str] = mapped_column(String(128), default="")
     extra: Mapped[str] = mapped_column(Text, default="")
+    # 사장님이 한 말 원문. 줄바꿈으로 이어 붙인다.
+    # 슬롯으로 요약하면서 깎인 뉘앙스를 여기서 되살린다.
+    transcript: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
 
     store: Mapped[StoreRow] = relationship(back_populates="ads")

@@ -22,6 +22,7 @@ def _to_brief(row: db.AdRow) -> AdBrief:
         situation=row.situation,
         tone=row.tone,
         extra=row.extra,
+        transcript=row.transcript.split("\n") if row.transcript else [],
     )
 
 
@@ -36,6 +37,7 @@ def save(store_id: int, brief: AdBrief, copies: list[CopyCandidate] | None = Non
             situation=brief.situation,
             tone=brief.tone,
             extra=brief.extra,
+            transcript=brief.raw_utterance,
         )
         s.add(row)
         s.flush()

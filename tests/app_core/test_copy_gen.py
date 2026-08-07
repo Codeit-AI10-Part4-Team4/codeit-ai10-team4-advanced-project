@@ -87,3 +87,17 @@ def test_이력이_없으면_그_부분을_빼고_보낸다(store: Store) -> Non
     client = FakeClient(three())
     copy_gen.generate(brief(), store, recent=[], client=client)
     assert client.system is not None and "전에 만든 광고" not in client.system
+
+
+def test_사장님이_한_말_원문을_넣는다(store: Store) -> None:
+    """슬롯으로 요약하면서 깎인 뉘앙스를 원문에서 살린다."""
+    said = "단골분들이 매콤한 걸 좋아하셔서 이번에 낸 거예요"
+    client = FakeClient(three())
+    copy_gen.generate(brief(transcript=[said]), store, client=client)
+    assert client.system is not None and said in client.system
+
+
+def test_말이_없으면_그_부분을_빼고_보낸다(store: Store) -> None:
+    client = FakeClient(three())
+    copy_gen.generate(brief(transcript=[]), store, client=client)
+    assert client.system is not None and "원문" not in client.system

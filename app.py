@@ -126,6 +126,10 @@ def brief_panel(draft: AdBriefDraft) -> None:
 
 def copy_view(store: Store, draft: AdBriefDraft) -> None:
     brief = draft.to_brief()
+    # 필수만 차면 바로 뜬다. 봇이 느낌·상황을 더 묻고 있어도 사장님은
+    # 언제든 여기서 끊고 만들 수 있다.
+    if draft.next_slot():
+        st.caption("더 안 알려주셔도 지금 바로 만들 수 있습니다")
     if st.button("문구 만들기", type="primary"):
         with st.spinner("만드는 중..."):
             st.session_state.copies = copy_gen.generate(brief, store, ads.recent(store.id))

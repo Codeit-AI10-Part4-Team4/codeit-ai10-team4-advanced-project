@@ -54,6 +54,10 @@
   label: 피자·햄버거
   emoji: "🍕"
 
+- id: western_food
+  label: 양식음식점
+  emoji: "🍝"
+
 # ── 소매 ────────────────────────────────────────────────
 - id: convenience
   label: 편의점

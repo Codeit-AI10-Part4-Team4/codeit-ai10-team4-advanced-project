@@ -102,6 +102,16 @@ def test_가격이_있으면_광고에_넣는다() -> None:
     assert brief(price=4500).show_price is True
 
 
+def test_가격을_항목_목록으로_꺼낼_수_있다() -> None:
+    """받는 쪽이 [{"name","price"}] 를 기대한다."""
+    assert brief(product="크로플", price=4500).items == [{"name": "크로플", "price": "4,500원"}]
+
+
+def test_가격이_0이면_항목_목록이_빈다() -> None:
+    """0 원은 '가격 없음'이므로 0원짜리 항목을 만들면 안 된다."""
+    assert brief(price=0).items == []
+
+
 # ── 대화 초안 ────────────────────────────────────────────────
 
 
@@ -146,6 +156,81 @@ def test_다_차면_주문서로_승격한다() -> None:
 def test_안_찼는데_승격하려면_거부한다() -> None:
     with pytest.raises(ValueError, match="아직 안 찬"):
         AdBriefDraft(goal="image", product="크로플").to_brief()
+
+
+# ── 원문 보관 ────────────────────────────────────────────────
+
+
+def test_말을_덧붙이면_쌓인다() -> None:
+    d = AdBriefDraft().with_utterance("크로플이요").with_utterance("4500원")
+    assert d.transcript == ["크로플이요", "4500원"]
+
+
+def test_빈_말은_안_쌓는다() -> None:
+    assert AdBriefDraft().with_utterance("   ").transcript == []
+
+
+def test_병합해도_말은_안_지워진다() -> None:
+    """슬롯은 덮어써도 되지만 말은 쌓이는 것이지 바뀌는 게 아니다."""
+    d = AdBriefDraft().with_utterance("크로플이요").merge(AdBriefDraft(product="크로플"))
+    assert d.transcript == ["크로플이요"]
+
+
+def test_승격해도_말이_따라간다() -> None:
+    d = AdBriefDraft(goal="image", product="크로플", price=4500).with_utterance("매콤하게요")
+    assert d.to_brief().transcript == ["매콤하게요"]
+
+
+def test_원문을_한_덩어리로_꺼낼_수_있다() -> None:
+    b = brief(transcript=["크로플이요", "4500원"])
+    assert b.raw_utterance == "크로플이요\n4500원"
+
+
+# ── 무엇을 물을지 ────────────────────────────────────────────
+
+
+def test_필수부터_묻는다() -> None:
+    assert AdBriefDraft().next_slot() == "product"
+    assert AdBriefDraft(product="크로플").next_slot() == "price"
+
+
+def test_필수가_차면_도움되는_것을_묻는다() -> None:
+    """필수만 채우고 끝내면 사장님 의도를 못 담는다."""
+    d = AdBriefDraft(product="크로플", price=4500)
+    assert d.missing() == []  # 만들 수는 있지만
+    assert d.next_slot() == "situation"  # 더 물어볼 게 있다
+
+
+def test_이미_찬_것은_묻지_않는다() -> None:
+    d = AdBriefDraft(product="크로플", price=4500, situation="신메뉴")
+    assert d.next_slot() == "tone"
+
+
+def test_다_차면_물을_게_없다() -> None:
+    d = AdBriefDraft(product="크로플", price=4500, situation="신메뉴", tone="따뜻한")
+    assert d.next_slot() is None
+
+
+def test_한_번_물어본_것은_비어도_다시_묻지_않는다() -> None:
+    """사장님이 답을 안 해도 넘어가야 한다. 안 그러면 대화가 맴돈다."""
+    d = AdBriefDraft(product="크로플", price=4500).mark_asked("situation")
+    assert d.situation == ""
+    assert d.next_slot() == "tone"
+
+
+def test_전부_물어봤으면_끝난다() -> None:
+    d = AdBriefDraft(product="크로플", price=4500).mark_asked("situation").mark_asked("tone")
+    assert d.next_slot() is None
+
+
+def test_같은_것을_두_번_표시해도_한_번만_쌓인다() -> None:
+    d = AdBriefDraft().mark_asked("tone").mark_asked("tone")
+    assert d.asked == ["tone"]
+
+
+def test_병합해도_물어본_기록은_안_지워진다() -> None:
+    d = AdBriefDraft().mark_asked("tone").merge(AdBriefDraft(product="크로플"))
+    assert d.asked == ["tone"]
 
 
 # ── 문구 후보 ────────────────────────────────────────────────
