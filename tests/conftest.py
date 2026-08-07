@@ -4,8 +4,9 @@
 
 - **서비스(로그인·가게·주문서)**: 실제 PostgreSQL 대신 임시 SQLite 파일을 쓴다 —
   테스트마다 빈 DB 로 시작하고, CI 에 DB 서버가 없어도 돌아간다.
-- **패널 평가**: `features_yeoksam*.json` 은 A(패널 구성) 담당의 산출물 샘플이다.
-  계약이 깨지면 여기서 먼저 터지도록 골든 픽스처로 쓴다.
+- **패널 평가**: `features_yeoksam_20261.json` 은 A(패널 구성) 담당이 CSV 실물
+  검수 후 만든 역삼역 2026Q1 실측 산출물이다. 계약이 깨지면 여기서 먼저 터지도록
+  골든 픽스처로 쓴다. 아인님 소유 파일이라 수정하지 않는다.
 """
 
 from __future__ import annotations
@@ -67,7 +68,7 @@ def store(user_id: int) -> Store:
 
 @pytest.fixture(scope="session")
 def yeoksam_raw() -> dict[str, Any]:
-    with (FIXTURE_DIR / "features_yeoksam.json").open(encoding="utf-8") as fp:
+    with (FIXTURE_DIR / "features_yeoksam_20261.json").open(encoding="utf-8") as fp:
         data: dict[str, Any] = json.load(fp)
     return data
 

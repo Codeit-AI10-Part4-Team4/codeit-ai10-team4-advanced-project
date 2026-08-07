@@ -3,58 +3,112 @@
 from __future__ import annotations
 
 import copy
+import re
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
-from app_core.panel.schemas import METRIC_FIELDS, Panel, PersonaEval, TradeAreaFeatures
+from app_core.panel.schemas import (
+    DEMO_COVERAGE_MIN,
+    METRIC_FIELDS,
+    SHARE_FIELDS,
+    Panel,
+    PersonaEval,
+)
+
+_DEMO = re.compile(r"(\d+)대\s*(남성|여성)")
+
+
+def _split_demo(demo: str) -> tuple[str, str]:
+    """'30대 여성' → ('F', '30')."""
+    m = _DEMO.fullmatch(demo.strip())
+    assert m, f"demo 형식이 예상과 다릅니다: {demo}"
+    age, gender = m.groups()
+    return ("M" if gender == "남성" else "F"), age
 
 
 def test_golden_fixture_parses(yeoksam: Panel) -> None:
-    assert yeoksam.features.area_nm == "역삼역"
-    assert yeoksam.features.category == "cafe"
+    f = yeoksam.features
+    assert f.area_nm == "역삼역"
+    assert f.category_nm == "커피-음료"
+    assert f.quarter == "20261"
     assert len(yeoksam.personas) == 12
 
 
-def test_shares_sum_to_one(yeoksam: Panel) -> None:
-    assert sum(yeoksam.features.sales_share.values()) == pytest.approx(1.0, abs=1e-9)
-    assert sum(yeoksam.features.time_traffic.values()) == pytest.approx(1.0, abs=1e-9)
+def test_all_shares_sum_to_one(yeoksam: Panel) -> None:
+    for name in SHARE_FIELDS:
+        share: dict[str, float] = getattr(yeoksam.features, name)
+        assert sum(share.values()) == pytest.approx(1.0, abs=1e-9), name
     assert sum(p.weight for p in yeoksam.personas) == pytest.approx(1.0, abs=1e-9)
 
 
-def test_persona_weights_decompose_sales_share(yeoksam: Panel) -> None:
-    """페르소나 가중치 합이 성별·연령 매출 비중과 일치해야 한다.
+def test_weight_is_product_of_two_axes(yeoksam: Panel) -> None:
+    """가중치가 `gender_share × age_share` 곱이어야 한다.
 
-    A 영역의 세그먼트 분해가 어긋나면 가중 평균이 상권 구성을 반영하지 못한다.
+    원본에 성별·연령 교차 데이터가 없어 두 축을 독립으로 곱한다(06 §4.4①).
+    이 관계가 깨지면 가중 평균이 상권 구성을 반영하지 못한다.
     """
-    by_cell: dict[str, float] = {}
+    f = yeoksam.features
+    actual: dict[tuple[str, str], float] = {}
     for persona in yeoksam.personas:
-        cell = next(
-            ref.path.split(".", 1)[1]
-            for ref in persona.evidence
-            if ref.path.startswith("sales_share.")
-        )
-        by_cell[cell] = by_cell.get(cell, 0.0) + persona.weight
+        key = _split_demo(persona.demo)
+        actual[key] = actual.get(key, 0.0) + persona.weight
 
-    for cell, share in yeoksam.features.sales_share.items():
-        assert by_cell[cell] == pytest.approx(share, abs=1e-9), cell
+    for (gender, age), weight in actual.items():
+        expected = f.gender_share[gender] * f.age_share[age]
+        assert weight == pytest.approx(expected, abs=2e-3), f"{gender}{age}"
 
 
-def test_boundary_personas_exist(yeoksam: Panel) -> None:
-    """경계 페르소나가 없으면 저항 요인 다양성이 사라진다."""
+def test_evidence_cites_both_axes_separately(yeoksam: Panel) -> None:
+    """근거는 곱한 값이 아니라 원본 두 값을 각각 인용해야 한다 (06 §4.4①)."""
+    non_boundary = [p for p in yeoksam.personas if not p.is_boundary]
+    for persona in non_boundary:
+        paths = {ref.path.split(".", 1)[0] for ref in persona.evidence}
+        assert "gender_share" in paths or "age_share" in paths, persona.persona_id
+
+
+def test_boundary_personas_use_foot_traffic_evidence(yeoksam: Panel) -> None:
+    """경계 페르소나는 '지나다니지만 사지 않는 층'이라 유동인구가 근거다 (06 §7.1)."""
     boundary = [p for p in yeoksam.personas if p.is_boundary]
     assert boundary, "경계 페르소나가 최소 1명은 있어야 한다"
-    assert all(p.weight <= 0.05 for p in boundary)
+
+    f = yeoksam.features
+    for persona in boundary:
+        foot_paths = [r for r in persona.evidence if r.path.startswith("foot_age_share.")]
+        assert foot_paths, persona.persona_id
+        age = foot_paths[0].path.split(".", 1)[1]
+        assert f.foot_age_share[age] > f.age_share[age], (
+            f"{age}대는 유동({f.foot_age_share[age]}) > 매출({f.age_share[age]})이어야 한다"
+        )
 
 
-def test_time_axis_accepts_five_values(yeoksam: Panel) -> None:
-    """stage2 초안은 3종이었으나 실제 산출은 5종이다 (morning·afternoon 추가).
+def test_time_axis_matches_weekend_rule(yeoksam: Panel) -> None:
+    """`weekend` 유형은 `weekend_ratio > 0.4`일 때만 나온다 (06 §7.1).
 
-    enum을 좁히면 이 픽스처가 파싱 단계에서 터진다.
+    역삼역은 0.138이므로 나오면 안 된다. 이전 픽스처에서 어긋났던 부분이다.
     """
     used = {p.axes.time for p in yeoksam.personas}
     assert {"morning", "afternoon"} <= used
+    if yeoksam.features.weekend_ratio <= 0.4:
+        assert "weekend" not in used
+
+
+def test_demo_coverage(yeoksam: Panel) -> None:
+    f = yeoksam.features
+    assert 0.0 < f.demo_coverage <= 1.0
+    assert f.low_coverage is (f.demo_coverage < DEMO_COVERAGE_MIN)
+    assert f.low_coverage is False  # 역삼역 0.714
+
+
+def test_avg_ticket_pct_is_a_ratio(yeoksam: Panel) -> None:
+    assert 0.0 <= yeoksam.features.avg_ticket_pct <= 1.0
+
+
+def test_fallback_defaults(yeoksam: Panel) -> None:
+    """A가 아직 필드를 안 넣어도 파싱되고, 기본값은 '매칭 성공'이다."""
+    assert yeoksam.features.is_fallback is False
+    assert yeoksam.features.match_distance_m is None
 
 
 def test_duplicate_persona_id_rejected(yeoksam_raw: dict[str, Any]) -> None:
@@ -71,35 +125,20 @@ def test_weight_sum_mismatch_rejected(yeoksam_raw: dict[str, Any]) -> None:
         Panel.model_validate(data)
 
 
-def test_share_sum_mismatch_rejected(yeoksam_raw: dict[str, Any]) -> None:
+@pytest.mark.parametrize("field", SHARE_FIELDS)
+def test_share_sum_mismatch_rejected(yeoksam_raw: dict[str, Any], field: str) -> None:
     data = copy.deepcopy(yeoksam_raw)
-    data["features"]["sales_share"]["M30"] = 0.5
+    key = next(iter(data["features"][field]))
+    data["features"][field][key] += 0.5
     with pytest.raises(ValidationError, match="비중 합"):
         Panel.model_validate(data)
 
 
-def test_fallback_defaults_to_false(yeoksam: Panel) -> None:
-    """A가 아직 필드를 안 넣어도 파싱은 되고, 기본값은 '매칭 성공'이다."""
-    assert yeoksam.features.is_fallback is False
-    assert yeoksam.features.match_distance_m is None
-
-
-def test_fallback_roundtrip() -> None:
-    features = TradeAreaFeatures(
-        area_cd="0",
-        area_nm="서울 평균",
-        dong_nm="-",
-        quarter="2025Q4",
-        category="cafe",
-        sales_share={"M30": 0.5, "F30": 0.5},
-        time_traffic={"11-14": 1.0},
-        weekend_ratio=0.2,
-        avg_ticket=6000,
-        competitor_cnt=0,
-        is_fallback=True,
-        match_distance_m=1200.0,
-    )
-    assert features.is_fallback
+def test_unknown_time_axis_rejected(yeoksam_raw: dict[str, Any]) -> None:
+    data = copy.deepcopy(yeoksam_raw)
+    data["personas"][0]["axes"]["time"] = "late_night"
+    with pytest.raises(ValidationError):
+        Panel.model_validate(data)
 
 
 def test_persona_eval_rejects_empty_evidence() -> None:
@@ -123,6 +162,41 @@ def test_persona_eval_metrics_keys() -> None:
         intent=30,
         resistance="none",
         comment="괜찮다",
-        evidence=[{"path": "avg_ticket", "value": 6800}],  # type: ignore[list-item]
+        evidence=[{"path": "avg_ticket", "value": 9546}],  # type: ignore[list-item]
     )
     assert set(ev.metrics()) == set(METRIC_FIELDS)
+
+
+def test_category_codes_are_a_list(yeoksam: Panel) -> None:
+    """07 §4.5 — 서울시 코드를 여러 개 합쳐 읽는다. `fitness`는 4개."""
+    f = yeoksam.features
+    assert f.category_cds == ["CS100010"]
+    assert f.category_nm == "커피-음료"
+    assert f.is_category_fallback is False
+
+
+def test_legacy_singular_category_cd_is_accepted(yeoksam_raw: dict[str, Any]) -> None:
+    """구 픽스처의 단수형 `category_cd`도 받아준다 (한시적 변환).
+
+    픽스처가 `category_cds`로 갱신되면 schemas.py의 변환기를 지운다.
+    """
+    data = copy.deepcopy(yeoksam_raw)
+    assert "category_cd" in data["features"]  # 아직 단수형이다
+    assert Panel.model_validate(data).features.category_cds == ["CS100010"]
+
+
+def test_category_fallback_has_empty_codes(yeoksam_raw: dict[str, Any]) -> None:
+    """업종 데이터가 없으면 상권 전체 평균으로 폴백한다 (07 §4.5).
+
+    `photostudio`·`other`처럼 서울시 코드가 없는 업종, 또는 매핑은 되지만
+    그 상권에 해당 업종 데이터가 없는 경우다. 에러가 아니라 폴백이다.
+    """
+    data = copy.deepcopy(yeoksam_raw)
+    data["features"].pop("category_cd", None)
+    data["features"]["category_cds"] = []
+    data["features"]["category_nm"] = "상권 전체"
+    data["features"]["is_category_fallback"] = True
+
+    panel = Panel.model_validate(data)
+    assert panel.features.category_cds == []
+    assert panel.features.is_category_fallback is True
