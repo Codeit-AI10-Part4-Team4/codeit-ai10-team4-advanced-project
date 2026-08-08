@@ -14,14 +14,14 @@ from __future__ import annotations
 
 from typing import Final, Literal, NamedTuple
 
-from app_core.panel.schemas import SHARE_FIELDS, FeatureRef, TradeAreaFeatures
+from app_core.panel.schemas import MAPPING_FIELDS, FeatureRef, TradeAreaFeatures
 
 #: 실수 필드의 상대 오차 허용치.
 RELATIVE_TOLERANCE: Final = 0.05
 
 #: dot-path의 앞부분이 이 값이면 뒤를 매핑 키로 해석한다.
-#: 07 §4.4① 이후 성별·연령이 분리돼 네 개가 되었다.
-_MAPPING_FIELDS: Final = frozenset(SHARE_FIELDS)
+#: 07 §4.4① 이후 성별·연령이 분리됐고, 배후지가 더해져 다섯 개다.
+_MAPPING_FIELDS: Final = frozenset(MAPPING_FIELDS)
 
 #: 값은 실재하지만 근거로 인용할 수 없는 필드.
 #:
@@ -64,8 +64,9 @@ def resolve(features: TradeAreaFeatures, path: str) -> ResolvedValue | None:
     if head in _MAPPING_FIELDS:
         if not rest:
             return None
-        mapping: dict[str, float] = getattr(features, head)
-        if rest not in mapping:
+        # 배후지처럼 상권 유형에 따라 None 인 매핑이 있다.
+        mapping = getattr(features, head, None)
+        if not isinstance(mapping, dict) or rest not in mapping:
             return None
         return ResolvedValue(float(mapping[rest]), exact=False)
 

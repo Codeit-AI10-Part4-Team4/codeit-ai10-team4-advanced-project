@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from app_core.panel.schemas import (
     DEMO_COVERAGE_MIN,
     METRIC_FIELDS,
+    OPTIONAL_SHARE_FIELDS,
     SHARE_FIELDS,
     Panel,
     PersonaEval,
@@ -176,16 +177,6 @@ def test_category_codes_are_a_list(yeoksam: Panel) -> None:
     assert f.is_category_fallback is False
 
 
-def test_legacy_singular_category_cd_is_accepted(yeoksam_raw: dict[str, Any]) -> None:
-    """구 픽스처의 단수형 `category_cd`도 받아준다 (한시적 변환).
-
-    픽스처가 `category_cds`로 갱신되면 schemas.py의 변환기를 지운다.
-    """
-    data = copy.deepcopy(yeoksam_raw)
-    data["features"]["category_cd"] = data["features"].pop("category_cds")[0]
-    assert Panel.model_validate(data).features.category_cds == ["CS100010"]
-
-
 def test_category_fallback_has_empty_codes(yeoksam_raw: dict[str, Any]) -> None:
     """업종 데이터가 없으면 상권 전체 평균으로 폴백한다 (07 §4.5).
 
@@ -201,3 +192,64 @@ def test_category_fallback_has_empty_codes(yeoksam_raw: dict[str, Any]) -> None:
     panel = Panel.model_validate(data)
     assert panel.features.category_cds == []
     assert panel.features.is_category_fallback is True
+
+
+def test_backyard_is_optional(yeoksam: Panel) -> None:
+    """배후지는 골목상권에만 있다. 역삼역은 발달상권이라 None (07 §4.4)."""
+    f = yeoksam.features
+    assert f.area_type == "발달상권"
+    assert f.back_age_share is None
+    assert f.has_backyard is False
+
+
+def test_backyard_shares_must_sum_to_one_when_present(
+    yeoksam_raw: dict[str, Any],
+) -> None:
+    data = copy.deepcopy(yeoksam_raw)
+    data["features"]["back_age_share"] = {"20": 0.4, "30": 0.6}
+    panel = Panel.model_validate(data)
+    assert panel.features.has_backyard is True
+
+    data["features"]["back_age_share"] = {"20": 0.4, "30": 0.9}
+    with pytest.raises(ValidationError, match="비중 합"):
+        Panel.model_validate(data)
+
+
+@pytest.mark.parametrize("field", OPTIONAL_SHARE_FIELDS)
+def test_optional_share_defaults_to_none(yeoksam_raw: dict[str, Any], field: str) -> None:
+    """A쪽이 아직 안 채워도 파싱은 된다."""
+    data = copy.deepcopy(yeoksam_raw)
+    data["features"].pop(field, None)
+    assert getattr(Panel.model_validate(data).features, field) is None
+
+
+def test_population_fields_are_carried(yeoksam: Panel) -> None:
+    """상권 성격을 추론이 아니라 실측으로 판정하려면 이 값들이 살아 있어야 한다.
+
+    07 §7.1이 `motive`를 `work_ratio >= 0.7`로 바꿨다. 스키마에 없으면
+    Pydantic이 조용히 버려서 평가 프롬프트에 넣을 수가 없다.
+    """
+    f = yeoksam.features
+    assert f.worker_pop == 84399
+    assert f.resident_pop == 5764
+    assert f.work_ratio == pytest.approx(0.936)
+    assert f.household_cnt == 4404
+    assert f.apt_cnt == 82
+    assert f.apt_avg_price == 326468462
+
+
+def test_population_fields_have_safe_defaults(yeoksam_raw: dict[str, Any]) -> None:
+    data = copy.deepcopy(yeoksam_raw)
+    for field in (
+        "worker_pop",
+        "resident_pop",
+        "work_ratio",
+        "household_cnt",
+        "apt_cnt",
+        "apt_avg_price",
+    ):
+        data["features"].pop(field, None)
+    f = Panel.model_validate(data).features
+    assert (f.worker_pop, f.resident_pop, f.household_cnt, f.apt_cnt) == (0, 0, 0, 0)
+    assert f.work_ratio is None
+    assert f.apt_avg_price is None

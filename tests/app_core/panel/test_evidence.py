@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import copy
+from typing import Any
+
 import pytest
 
 from app_core.panel.evidence import (
@@ -164,3 +167,52 @@ def test_citable_trade_area_fields_still_pass(features: TradeAreaFeatures) -> No
         resolved = resolve(features, path)
         assert resolved is not None, path
         assert check_ref(features, FeatureRef(path=path, value=resolved.value)) is None, path
+
+
+def test_backyard_path_resolves_when_present(yeoksam_raw: dict[str, Any]) -> None:
+    """골목상권이면 `back_age_share.*` 를 근거로 인용할 수 있어야 한다."""
+    data = copy.deepcopy(yeoksam_raw)
+    data["features"]["back_age_share"] = {"20": 0.4, "30": 0.6}
+    features = Panel.model_validate(data).features
+
+    resolved = resolve(features, "back_age_share.30")
+    assert resolved is not None
+    assert resolved.value == pytest.approx(0.6)
+    assert check_ref(features, FeatureRef(path="back_age_share.30", value=0.6)) is None
+
+
+def test_backyard_path_fails_when_absent(features: TradeAreaFeatures) -> None:
+    """배후지가 없는 상권(발달·전통시장·관광특구)에서 인용하면 탈락한다.
+
+    `None` 매핑에 `in` 을 쓰면 TypeError 가 나므로 방어가 필요하다.
+    """
+    assert features.back_age_share is None
+    assert resolve(features, "back_age_share.30") is None
+    failure = check_ref(features, FeatureRef(path="back_age_share.30", value=0.6))
+    assert failure is not None
+    assert failure.reason == "unknown_path"
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("worker_pop", 84399),
+        ("resident_pop", 5764),
+        ("household_cnt", 4404),
+        ("apt_cnt", 82),
+        ("apt_avg_price", 326468462),
+    ],
+)
+def test_population_fields_are_citable_and_exact(
+    features: TradeAreaFeatures, path: str, expected: int
+) -> None:
+    """상권 성격·소득 지표는 상권 특성이므로 인용 가능하다. 정수라 정확 일치."""
+    resolved = resolve(features, path)
+    assert resolved is not None
+    assert resolved.exact is True
+    assert check_ref(features, FeatureRef(path=path, value=expected)) is None
+    assert check_ref(features, FeatureRef(path=path, value=expected + 1)) is not None
+
+
+def test_work_ratio_is_citable(features: TradeAreaFeatures) -> None:
+    assert check_ref(features, FeatureRef(path="work_ratio", value=0.936)) is None
