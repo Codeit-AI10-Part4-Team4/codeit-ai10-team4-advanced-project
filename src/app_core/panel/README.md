@@ -1,6 +1,6 @@
 # src/app_core/panel/
 
-**현재 버전 V2** · 최종 수정 2026-08-07
+**현재 버전 V3** · 최종 수정 2026-08-07
 담당: 이아인(데이터·패널) · 이수호(평가·집계)
 
 AI 손님 패널 — 상권 데이터로 구성한 가상 손님이 완성된 광고물을 평가하는 모듈.
@@ -81,8 +81,23 @@ LLM은 `narrative`와 평가 문장만 만든다. 신뢰 판단의 근거는 모
 
 **`aggregate()`는 `suggestions`를 만들지 않는다.**
 개선 제안은 집계가 아니라 요약 콜의 산출물이라(07 §7.3) 인자로 받아 실어 나르기만
-한다. 그런데 07 §7은 "패널 모듈 LLM 콜은 서사 1콜 + 평가 ≤20콜 둘뿐"이라 했고
-제안을 만들 콜이 명세에 없다 — F5에서 요약 1콜을 제안했다.
+한다. 07 §7이 "패널 모듈 LLM 콜은 서사 1콜 + 평가 ≤20콜 둘뿐"이라 했는데 제안을
+만들 콜이 명세에 없어서 `evaluator` 가 집계 뒤 1콜을 더 쓴다. 아인님 합의 전까지
+`evaluate(..., summarize=False)` 로 끌 수 있다.
+
+**병렬은 asyncio 가 아니라 스레드다.**
+`ChatClient.complete_json` 이 동기라 asyncio 를 쓰려면 공용 `app_core/llm.py` 에
+async 를 더해야 한다. API 호출은 IO 바운드라 스레드로 충분하고, 스텁 프로필
+테스트도 그대로 돌아간다. 07 §8 의사코드와 형태만 다르고 동작은 같다.
+
+**두 관문의 실패가 모두 `excluded_cnt` 에 잡혀야 한다.**
+스키마·근거 재시도까지 실패한 페르소나는 `evals` 에 들어오지도 못한다.
+`aggregate(failed_ids=...)` 로 넘기지 않으면 투명성 지표가 앞단 실패를 놓쳐
+"탈락 0건"이라는 거짓말을 한다.
+
+**평가 프롬프트에는 인용 가능한 숫자만 넣는다.**
+`match_distance_m`·`demo_coverage` 를 프롬프트에 주면 모델이 그걸 인용하고
+전량 `not_citable` 로 탈락한다. 페르소나 자신의 근거 + 상권 공통값만 준다.
 
 ## 규칙
 
@@ -98,3 +113,4 @@ LLM은 `narrative`와 평가 문장만 만든다. 신뢰 판단의 근거는 모
 |---|---|---|---|
 | **V1** | 2026-08-06 | `schemas.py`·`evidence.py`·`aggregate.py` 최초 추가 | F0 계약을 먼저 고정해 A·B 병렬 착수. LLM 호출 없이 결정적 로직만 올려 CI 통과 확보 |
 | **V2** | 2026-08-07 | ① CSV 실물 검수(07 §4.4) 반영 — `sales_share`·`time_traffic` 폐기, `gender_share`·`age_share`·`demo_coverage`·`time_share`·`foot_age_share`·`avg_ticket_pct`·`category_cds`·`is_category_fallback` 도입 ② 배후지·직장인구·아파트 7필드 추가 ③ `match_distance_m`·`demo_coverage` 인용 금지 ④ `ad_id`·`suggestions`·`confidence_reasons` 추가 ⑤ 단수 `category_cd` 한시 변환기 제거 | 원본에 성별×연령 교차가 없고 주문서 구조가 05로 바뀜. 신규 피처는 스키마에 없으면 Pydantic이 버려서 평가 프롬프트에 못 넣는다. 인용 금지는 아인님 지적(`match_distance_m`)에 같은 성격인 `demo_coverage`를 더한 것 |
+| **V3** | 2026-08-07 | `evaluator.py` 추가 — 평가 프롬프트, 두 관문(스키마·근거) 검증, 1회 재시도, 스레드 병렬(≤20콜), 개선 제안 요약 콜. `aggregate()` 에 `failed_ids` 추가 | F5. LLM 단계 탈락이 `excluded_cnt` 에 안 잡히던 구멍을 같이 막음 |
