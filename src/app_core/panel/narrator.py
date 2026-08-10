@@ -28,8 +28,16 @@ SYSTEM = """상권 데이터를 손님 소개글로 옮긴다. 이 글은 나중
 평가할 때 "당신은 이런 사람입니다"로 들어간다.
 
 각 손님을 **2문장**으로 쓴다.
-  1문장 — 이 동네에서 언제·어떻게 움직이는 사람인지 (주어진 시간대·동네 성격만)
-  2문장 — 가게를 고를 때 무엇을 보는지 (주어진 가격 성향·방문 성향만)
+  1문장 — 이 동네에서 언제 움직이는 사람인지 (주어진 시간대·동네 성격만)
+  2문장 — **이 업종을 얼마나 이용하는 사람인지.** 손님마다 이 값이 다르다.
+          12명을 가르는 것은 이 한 가지뿐이니 여기에 힘을 준다.
+
+**2문장은 각 손님에게 주어진 이용 정도를 그대로 옮긴다.**
+  많이 산다   → 이 근처에서 이런 가게를 가장 자주 찾는 사람들이다
+  평범하다    → 가끔 들르는 정도다
+  적게 산다   → 이 근처를 지나다니지만 이런 가게에는 좀처럼 들르지 않는다
+  (표현은 바꿔 써도 되지만 **방향을 바꾸면 안 된다.**
+   적게 사는 손님을 "자주 이용한다"로 쓰면 틀린 글이다)
 
 **지어내면 안 되는 것** — 아래는 데이터에 없다. 한 글자도 쓰지 마라.
   직업·회사·소득 ("회사원", "팀장", "학생")
@@ -37,24 +45,11 @@ SYSTEM = """상권 데이터를 손님 소개글로 옮긴다. 이 글은 나중
   취향·브랜드 ("커피를 좋아해서", "인스타를 보고")
   주어지지 않은 수치
 
-**나쁜 예** (전부 지어낸 것)
-  "역삼역 근처 회사에 다니는 30대 남성. 동료들과 점심 후 커피를 마신다."
-**좋은 예** (주어진 것만)
-  "평일 점심 무렵에 이 동네를 오가는 30대 남성이다. 늘 가던 곳을 다시 찾는 편이라
-   새로 생긴 가게에는 잘 눈이 가지 않는다."
-
 **분석 용어를 문장에 쓰지 마라.** 이건 손님을 설명하는 글이지 통계 설명이 아니다.
-  금지: "매출 비중", "데이터", "평균", "비중", "층", "%", "배"
-  나쁜 예: "매출 비중보다 더 많이 소비한다"
-  좋은 예: "이 동네에서 이런 가게를 자주 이용하는 편이다"
+  금지어: 매출, 비중, 데이터, 평균, 층, %, 배
 
-**핵심 고객 / 놓치는 층은 행동으로 표현한다.**
-  많이 사는 층 → "이런 가게를 자주 이용하는 편이다"
-  평범한 층   → 이 얘기를 굳이 넣지 말고 시간대·성향만 쓴다
-  적게 사는 층 → "이 근처를 지나다니지만 이런 가게에는 잘 들르지 않는다"
-                 (경계 손님은 이 문장이 **반드시** 들어가야 한다)
-
-12명이 서로 다른 문장이어야 한다. 사장님이 읽을 글이라 전문용어는 쓰지 않는다.
+12명이 서로 **다른 내용**이어야 한다. 시간대와 이용 정도가 같으면 나이만
+바꿔 쓰지 말고, 그 나이대가 이 동네에서 어떻게 다른지로 문장을 달리한다.
 응답은 JSON 하나로만: {"p01": "문장", "p02": "문장", ...}"""
 
 
@@ -74,18 +69,23 @@ def _pool_ratio(p: dict[str, Any], features: dict[str, Any]) -> str:
         return ""
     r = share / pool
     if r >= 1.15:
-        return f" 이 동네에 있는 비중보다 **실제로 사는 비중이 {r:.1f}배 높다**(핵심 고객)."
+        return f" 이용 정도 = **많이 산다** (지나다니는 정도의 {r:.1f}배)."
     if r <= 0.85:
-        return f" 이 동네에 있는 비중의 **{r:.1f}배만큼만 산다**(놓치고 있는 층)."
-    return " 있는 만큼 사는, 평범한 비중의 층이다."
+        return f" 이용 정도 = **적게 산다** (지나다니는 정도의 {r:.2f}배뿐)."
+    return " 이용 정도 = 평범하다."
 
 
 def _persona_line(p: dict[str, Any], features: dict[str, Any]) -> str:
-    axes = p["axes"]
+    """`motive`·`price_sens` 는 넣지 않는다.
+
+    둘 다 상권 단위라 12명이 **전원 같은 값**이다(실측: motive 는 상권 300곳
+    중 82%가 exploratory). 구별에 기여하지 않으면서 문장만 어지럽힌다 —
+    "늘 가던 곳을 다시 찾는 편이라 다양한 가게를 자주 이용한다" 같은 앞뒤가
+    안 맞는 문장이 나왔다. 가격 성향은 어차피 평가 프롬프트에 따로 들어간다.
+    """
     return (
-        f"- {p['persona_id']}: {p['demo']}, 이 업종 매출의 {p['weight'] * 100:.1f}%. "
-        f"{TIME_KO.get(axes['time'], axes['time'])}에 주로 움직임. "
-        f"{MOTIVE_KO[axes['motive']]} 편, {PRICE_KO[axes['price_sens']]} 동네."
+        f"- {p['persona_id']}: {p['demo']}. "
+        f"{TIME_KO.get(p['axes']['time'], p['axes']['time'])}에 주로 움직임."
         + _pool_ratio(p, features)
     )
 
@@ -106,15 +106,20 @@ def build_prompt(personas: list[dict[str, Any]], features: dict[str, Any]) -> st
     )
 
 
-def narrate(personas: list[dict[str, Any]], features: dict[str, Any]) -> list[str]:
+def narrate(
+    personas: list[dict[str, Any]], features: dict[str, Any], client: Any = None
+) -> list[str]:
     """`build_panel(features, narrator=narrate)` 로 넘겨 쓴다.
 
     모델이 답을 못 주면(스텁 프로필·응답 누락) 빈 문자열 대신 사실 나열로 남긴다 —
     서사가 비어도 평가는 돌아야 한다.
+
+    `client` 를 넘기면 그것을 쓴다. `review()` 가 평가와 **같은 클라이언트**를
+    넘기기 위한 통로다 — 테스트에서 여기만 실제 API 를 부르면 안 되기 때문이다.
     """
     from app_core.panel.panel_builder import stub_narrative
 
-    reply = get_client().complete_json(SYSTEM, build_prompt(personas, features))
+    reply = (client or get_client()).complete_json(SYSTEM, build_prompt(personas, features))
     return [
         str(reply.get(p["persona_id"]) or stub_narrative(p, features)).strip() for p in personas
     ]

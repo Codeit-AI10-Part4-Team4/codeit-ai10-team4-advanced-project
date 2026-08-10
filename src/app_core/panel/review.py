@@ -10,11 +10,13 @@
 
 from __future__ import annotations
 
+from functools import partial
 from hashlib import sha256
 from typing import Any
 
 from app_core.panel.evaluator import evaluate
 from app_core.panel.features import build_features
+from app_core.panel.narrator import narrate
 from app_core.panel.panel_builder import build_panel
 from app_core.panel.schemas import EvaluationResult, Panel, Persona, TradeAreaFeatures
 from app_core.schema import AdBrief, CopyCandidate, Store
@@ -57,17 +59,24 @@ def review(
     *,
     ad_id: str = "ad",
     coord: tuple[float, float] | None = None,
+    client: Any = None,
     **kw: Any,
 ) -> EvaluationResult:
     """가게 주소로 패널을 만들고 광고 1건을 평가받는다.
 
     `coord` 는 `build_features` 와 같은 뜻 — 넘기면 카카오 호출을 건너뛴다.
     테스트에서 외부 API 를 부르지 않기 위한 통로다 (AGENTS.md).
-    나머지 키워드 인자(`client`·`summarize`·`sigma_max`)는 `evaluate` 로 넘어간다.
+    나머지 키워드 인자(`summarize`·`sigma_max`)는 `evaluate` 로 넘어간다.
+
+    서사 생성(`narrate`)에도 **같은** `client` 를 넘긴다. 안 넘기면 서사만
+    실제 API 를 불러 테스트가 외부에 나간다.
     """
     key = _key(store, brief, copy, ad_id)
     if key not in _CACHE:
         features = build_features(store.address, store.industry, coord=coord)
-        panel = to_panel(features, build_panel(features))
-        _CACHE[key] = evaluate(panel, store, brief, copy, ad_id=ad_id, **kw)
+        # 서사를 LLM 에 맡긴다. 스텁 문장을 쓰면 12명이 나이·성별만 다른 같은
+        # 문장을 받아 평가도 서로 비슷해진다 (실측: 프롬프트 21줄 중 고유 5줄).
+        personas = build_panel(features, narrator=partial(narrate, client=client))
+        panel = to_panel(features, personas)
+        _CACHE[key] = evaluate(panel, store, brief, copy, ad_id=ad_id, client=client, **kw)
     return _CACHE[key]

@@ -41,8 +41,22 @@ def _clear_cache() -> None:
     mod._CACHE.clear()
 
 
-def _honest(coord: tuple[float, float]) -> FakeClient:
-    """그 동네 패널의 근거를 그대로 인용하는 성실한 모델."""
+class Honest(FakeClient):
+    """근거를 그대로 인용하는 성실한 모델. **서사 콜까지** 받는다.
+
+    수호님 `FakeClient` 는 평가·요약 두 종류만 알아서, 서사 프롬프트가 오면
+    페르소나 이름을 못 찾고 터진다. 여기서 한 겹 감싼다.
+    """
+
+    def complete_json(self, system: str, user: str) -> dict:
+        if system.startswith("상권 데이터를 손님 소개글로"):
+            self.calls.append("narrate")
+            ids = [ln.split(":")[0][2:] for ln in user.splitlines() if ln.startswith("- p")]
+            return {pid: f"{pid} 손님의 이야기" for pid in ids}
+        return super().complete_json(system, user)
+
+
+def _honest(coord: tuple[float, float]) -> Honest:
     features = build_features("", "cafe", coord=coord)
     # 수호님 FakeClient 는 프롬프트("## 나")에서 demo 를 뽑아 넘긴다 — persona_id 가 아니다.
     by_demo = {p.demo: p for p in to_panel(features, build_panel(features)).personas}
@@ -51,7 +65,7 @@ def _honest(coord: tuple[float, float]) -> FakeClient:
         p = by_demo[demo]
         return _good(p, attention=50 + int(p.persona_id[1:]))
 
-    return FakeClient(reply=reply)
+    return Honest(reply=reply)
 
 
 def test_주소만_넣으면_결과가_나온다() -> None:
@@ -104,3 +118,16 @@ def test_요청한_피처가_평가에_실린다() -> None:
     for name in ("work_ratio", "worker_pop", "resident_pop", "apt_avg_price", "back_age_share"):
         assert hasattr(panel.features, name), name
     assert panel.features.work_ratio == f["work_ratio"]
+
+
+def test_서사를_LLM_이_쓴다() -> None:
+    """스텁 문장을 쓰면 12명이 나이·성별만 다른 같은 글을 받는다.
+
+    실측(2026-08-10): 손님 1명이 받는 프롬프트 21줄 중 12명 사이에 다른 줄이
+    5줄뿐이었고, 그중 3줄은 숫자였다. 서사가 스텁이라 그랬다.
+    """
+    c = _honest(YEOKSAM)
+    r = review(_store(), BRIEF, COPY, client=c, coord=YEOKSAM)
+    assert "narrate" in c.calls  # 서사 콜이 실제로 나갔다
+    assert c.calls.count("narrate") == 1  # 12명을 배치 1콜로
+    assert len(r.persona_comments) == 12
