@@ -71,9 +71,25 @@ def compose_ad(
     d = ImageDraw.Draw(canvas)
     max_text_w = int(w * 0.9)
     head_font = _fit_font(headline, max_text_w, 76)
-    d.text((w // 2, 140), headline, font=head_font, fill=(70, 45, 20), anchor="mm")
+    d.text(
+        (w // 2, 140),
+        headline,
+        font=head_font,
+        fill=(255, 255, 255),
+        anchor="mm",
+        stroke_width=4,
+        stroke_fill=(60, 35, 15),
+    )
     if sub:
         sub_font = _fit_font(sub, max_text_w, 52)
-        d.text((w // 2, 235), sub, font=sub_font, fill=(160, 75, 25), anchor="mm")
+        d.text(
+            (w // 2, 235),
+            sub,
+            font=sub_font,
+            fill=(255, 245, 230),
+            anchor="mm",
+            stroke_width=3,
+            stroke_fill=(60, 35, 15),
+        )
 
     return canvas.convert("RGB")
