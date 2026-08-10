@@ -63,6 +63,16 @@ def test_원문이_없어도_읽힌다(store: Store) -> None:
     assert ads.recent(store.id)[0].transcript == []
 
 
+def test_사진_번호도_저장되고_다시_읽힌다(store: Store) -> None:
+    ads.save(store.id, brief(goal="image", photo_id=7))
+    assert ads.recent(store.id)[0].photo_id == 7
+
+
+def test_사진이_없으면_None으로_읽힌다(store: Store) -> None:
+    ads.save(store.id, brief())
+    assert ads.recent(store.id)[0].photo_id is None
+
+
 # ── 다시 만들기 ──────────────────────────────────────────────
 
 

@@ -22,6 +22,7 @@ def _to_brief(row: db.AdRow) -> AdBrief:
         situation=row.situation,
         tone=row.tone,
         extra=row.extra,
+        photo_id=row.photo_id,
         transcript=row.transcript.split("\n") if row.transcript else [],
     )
 
@@ -47,6 +48,7 @@ def save(
             situation=brief.situation,
             tone=brief.tone,
             extra=brief.extra,
+            photo_id=brief.photo_id,
             transcript=brief.raw_utterance,
             parent_id=parent_id,
             feedback_source=fb.source if fb else "",

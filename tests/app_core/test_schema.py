@@ -112,6 +112,36 @@ def test_가격이_0이면_항목_목록이_빈다() -> None:
     assert brief(price=0).items == []
 
 
+# ── 사진 ────────────────────────────────────────────────────
+
+
+def test_사진은_없어도_된다() -> None:
+    """None 이면 사진 없이 배경만 만든다."""
+    assert brief().photo_id is None
+
+
+def test_사진_번호를_담는다() -> None:
+    """이미지는 JSON 에 못 실어서 보관함 번호만 싣는다."""
+    assert brief(photo_id=7).photo_id == 7
+
+
+def test_사진_번호는_1부터다() -> None:
+    """0 이나 음수는 보관함에 없는 번호다."""
+    with pytest.raises(ValidationError):
+        brief(photo_id=0)
+
+
+def test_승격해도_사진_번호가_따라간다() -> None:
+    d = AdBriefDraft(goal="image", product="크로플", price=4500, photo_id=7)
+    assert d.to_brief().photo_id == 7
+
+
+def test_다시_만들어도_사진은_그대로다() -> None:
+    """사진을 바꾸려면 다시 올려야 한다. 재생성이 조건을 건드리지 않는다."""
+    revised = brief(photo_id=7).revised(Feedback(source="option", notes=["더 짧게"]), [])
+    assert revised.photo_id == 7
+
+
 # ── 대화 초안 ────────────────────────────────────────────────
 
 

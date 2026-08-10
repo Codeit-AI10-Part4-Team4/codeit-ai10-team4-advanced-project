@@ -137,6 +137,12 @@ class AdBrief(BaseModel):
     extra: str = Field(default="", description="그 밖의 요청")
     with_sub: bool = Field(default=True, description="서브 문구까지 만들지")
 
+    # 이미지는 JSON 에 실을 수 없어서 사진 보관함에 두고 번호만 싣는다.
+    # 보관함은 이미지 생성 담당의 photo_store 가 맡는다.
+    photo_id: int | None = Field(
+        default=None, ge=1, description="사진 보관함 번호. None 이면 사진 없이 생성"
+    )
+
     # 슬롯이 못 담는 것을 여기서 건진다.
     # "단골분들이 매콤한 걸 좋아하셔서" 같은 말은 어느 슬롯에도 안 들어가지만
     # 문구를 쓸 때 가장 쓸모 있는 정보다.
@@ -209,6 +215,8 @@ class AdBriefDraft(BaseModel):
     tone: str = ""
     extra: str = ""
     with_sub: bool = True
+    # 대화로 묻지 않는다. 사장님이 화면에서 사진을 올리면 채워진다.
+    photo_id: int | None = Field(default=None, ge=1)
 
     transcript: list[str] = Field(default_factory=list, description="사장님이 한 말 그대로")
     asked: list[str] = Field(
@@ -271,6 +279,7 @@ class AdBriefDraft(BaseModel):
             tone=self.tone,
             extra=self.extra,
             with_sub=self.with_sub,
+            photo_id=self.photo_id,
             transcript=self.transcript,
         )
 
