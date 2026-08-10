@@ -40,6 +40,10 @@ class OpenAIClient:
     def complete_json(self, system: str, user: str) -> dict:
         response = self._client.chat.completions.create(
             model=self._model,
+            # 같은 입력에 같은 결과가 나와야 한다. 기본값 1.0 이면 사장님이 같은
+            # 광고를 두 번 넣었을 때 점수가 달라져 신뢰가 깨진다. 답이 갈리는지
+            # 보고 싶을 때만 호출부에서 올린다.
+            temperature=0,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": system},
