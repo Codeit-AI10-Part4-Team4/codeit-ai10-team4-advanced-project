@@ -50,14 +50,17 @@ def compose_ad(
     headline: str,
     sub: str = "",
     size: tuple[int, int] = (1080, 1080),
+    background: Image.Image | None = None,
 ) -> Image.Image:
     """누끼 딴 제품 이미지를 배경 위에 얹고 문구를 그려 광고 이미지를 만든다.
 
     headline·sub는 문구 생성이 주는 형식(CopyCandidate) 그대로다 —
     헤드라인은 크게, 서브는 그 아래 작게. 가격은 보통 sub에 녹아 온다.
+    background를 주면 크기를 맞춰 배경으로 쓰고, 없으면 그라데이션(임시)을 깐다.
     """
     w, h = size
-    canvas = make_gradient_background(size).convert("RGBA")
+    bg = background.resize(size) if background else make_gradient_background(size)
+    canvas = bg.convert("RGBA")
 
     # 투명 여백을 잘라 제품이 크게 보이게 (개선 1호)
     bbox = product.getbbox()
