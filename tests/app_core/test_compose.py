@@ -1,0 +1,32 @@
+"""compose 부품 테스트 — 폰트·GPU 없이 돌도록 작은 이미지와 기본 폰트를 쓴다."""
+
+from PIL import Image, ImageFont
+
+from app_core import compose
+
+
+def _fake_font(size: int) -> ImageFont.FreeTypeFont:
+    return ImageFont.load_default(size)
+
+
+def test_gradient_background_size_and_mode():
+    bg = compose.make_gradient_background(size=(64, 64))
+    assert bg.size == (64, 64)
+    assert bg.mode == "RGB"
+    assert bg.getpixel((0, 0)) == (255, 244, 228)
+
+
+def test_compose_ad_returns_rgb_canvas(monkeypatch):
+    monkeypatch.setattr(compose, "_load_font", _fake_font)
+    product = Image.new("RGBA", (40, 30), (255, 0, 0, 255))
+    ad = compose.compose_ad(product, "헤드라인", "서브 문구", size=(256, 256))
+    assert ad.size == (256, 256)
+    assert ad.mode == "RGB"
+
+
+def test_compose_ad_uses_given_background(monkeypatch):
+    monkeypatch.setattr(compose, "_load_font", _fake_font)
+    product = Image.new("RGBA", (40, 30), (255, 0, 0, 255))
+    blue = Image.new("RGB", (64, 64), (0, 0, 255))
+    ad = compose.compose_ad(product, "제목", size=(256, 256), background=blue)
+    assert ad.getpixel((5, 250)) == (0, 0, 255)
