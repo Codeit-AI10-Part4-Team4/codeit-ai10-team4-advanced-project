@@ -55,6 +55,7 @@ def aggregate(
     *,
     ad_id: str,
     suggestions: list[str] | None = None,
+    failed_ids: list[str] | None = None,
     sigma_max: float = DEFAULT_SIGMA_MAX,
     include_boundary_in_scores: bool = False,
 ) -> EvaluationResult:
@@ -66,6 +67,9 @@ def aggregate(
         ad_id: 평가 대상 광고물 식별자.
         suggestions: 개선 제안. 집계는 이걸 만들지 않는다 — 별도 요약 콜의
             산출물을 그대로 실어 나른다 (07 §7.3).
+        failed_ids: 호출 단계에서 이미 탈락해 `evals` 에 들어오지도 못한
+            페르소나. 스키마·근거 재시도까지 실패한 경우다. 여기서 안 받으면
+            `excluded_cnt` 가 앞단 실패를 놓쳐 투명성 지표가 거짓이 된다.
         sigma_max: 이 값을 넘는 가중 표준편차면 `confidence="low"`.
         include_boundary_in_scores: 경계 페르소나를 점수에 넣을지.
             기본값 False가 07 §7.1의 설계다.
@@ -76,7 +80,7 @@ def aggregate(
     features = panel.features
 
     valid: list[tuple[Persona, PersonaEval]] = []
-    excluded_ids: list[str] = []
+    excluded_ids: list[str] = list(failed_ids or [])
 
     for ev in evals:
         persona = panel.by_id(ev.persona_id)

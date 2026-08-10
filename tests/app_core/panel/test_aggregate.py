@@ -199,3 +199,16 @@ def test_category_fallback_is_surfaced_but_not_low_confidence(yeoksam: Panel) ->
     assert result.is_category_fallback is True
     assert result.confidence == "ok"
     assert result.confidence_reasons == []
+
+
+def test_failed_ids_are_counted_as_excluded(yeoksam: Panel) -> None:
+    """호출 단계에서 탈락한 페르소나도 `excluded_cnt` 에 잡혀야 한다.
+
+    `evals` 에 들어오지도 못한 응답을 안 세면 투명성 지표가 거짓이 된다.
+    """
+    evals = _all_valid(yeoksam)[:-2]
+    dropped = [p.persona_id for p in yeoksam.personas[-2:]]
+
+    result = aggregate(yeoksam, evals, ad_id=AD_ID, failed_ids=dropped)
+    assert result.excluded_cnt == 2
+    assert set(dropped) <= set(result.excluded_ids)

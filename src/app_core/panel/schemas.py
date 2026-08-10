@@ -17,7 +17,7 @@ LLM은 서사(narrative)와 평가(PersonaEval)만 만든다. 그래서 이 파�
 
 from __future__ import annotations
 
-from typing import Any, Final, Literal
+from typing import Final, Literal
 
 from pydantic import (
     BaseModel,
@@ -41,8 +41,16 @@ SHARE_SUM_TOL: Final = 0.02
 #: 요식업·카페 6,573행 기준 평균 0.879, 중앙값 0.918. 0.5 미만은 전체의 1.2%.
 DEMO_COVERAGE_MIN: Final = 0.5
 
-#: 합이 1로 정규화되어야 하는 비중 필드.
+#: 합이 1로 정규화되고 항상 존재하는 비중 필드.
 SHARE_FIELDS: Final = ("gender_share", "age_share", "time_share", "foot_age_share")
+
+#: 상권 유형에 따라 없을 수 있는 비중 필드.
+#: 배후지는 골목상권 1,088곳(전체의 66%)에만 있다 — 발달상권·전통시장·관광특구는
+#: `None` 이다. 역삼역이 발달상권이라 그렇다 (07 §4.4 배후지 절).
+OPTIONAL_SHARE_FIELDS: Final = ("back_age_share",)
+
+#: 근거 dot-path 의 앞부분이 될 수 있는 매핑 필드 전체.
+MAPPING_FIELDS: Final = SHARE_FIELDS + OPTIONAL_SHARE_FIELDS
 
 #: 가중 평균을 내는 지표 이름. 결과 `scores`의 키와 같다.
 METRIC_FIELDS: Final = ("attention", "message", "intent")
@@ -98,9 +106,12 @@ class TradeAreaFeatures(BaseModel):
     #: 시간대 **매출** 비중. 유동인구가 아니다 — 지나다니는 사람과 사는 사람이
     #: 다르기 때문이다 (07 §4.4③: 역삼역 유동은 평탄한데 매출은 11-14가 0.479).
     time_share: dict[str, float]
-    #: 유동인구 연령 비중. 도달층이며 경계 페르소나의 근거로 쓴다.
-    #: `foot_age_share > age_share`인 연령대가 "지나다니지만 사지 않는 층"이다.
+    #: 유동인구 연령 비중 — 지나다니는 사람(도달층).
     foot_age_share: dict[str, float]
+    #: 배후지(동네 주민) 연령 비중. 골목상권에만 있고 없으면 None.
+    #: 경계 페르소나는 `age_share / max(foot_age_share, back_age_share)` 가 가장
+    #: 낮은 연령대다 — 지나다니든 그 동네에 살든 닿을 수 있었는데 안 산 층 (07 §7.1).
+    back_age_share: dict[str, float] | None = None
 
     weekend_ratio: float = Field(ge=0.0, le=1.0)
     #: 객단가(원) = 당월_매출_금액 / 당월_매출_건수
@@ -109,27 +120,24 @@ class TradeAreaFeatures(BaseModel):
     avg_ticket_pct: float = Field(ge=0.0, le=1.0)
     competitor_cnt: int = Field(ge=0)
 
+    # 상권 성격 — 시간대 매출로 추론하던 것을 실측으로 대체 (07, 2026-08-07).
+    # `motive` 판정이 "점심에 팔리니 직장인 상권"이라는 추론에서 직장인구 실측으로
+    # 바뀌었다. 평가 프롬프트에도 이 값이 들어가야 근거가 단단해진다.
+    worker_pop: int = Field(default=0, ge=0)
+    resident_pop: int = Field(default=0, ge=0)
+    #: 직장 / (직장 + 상주). 1에 가까우면 출퇴근 상권. 인구 데이터가 없으면 None.
+    work_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+    household_cnt: int = Field(default=0, ge=0)
+    #: 상권 안 아파트 단지 수
+    apt_cnt: int = Field(default=0, ge=0)
+    #: 아파트 평균 시가(원) — 소득 축의 대리 지표. 없으면 None.
+    apt_avg_price: int | None = Field(default=None, ge=0)
+
     #: 07 §6에 없는 추가 필드 — 06 §5의 "동네 데이터 없이 평가함" 배지 요구 때문.
     #: 주소 매칭 실패로 서울 평균을 쓴 경우 True. 기본값이 있어 A쪽 산출을 깨지 않는다.
     is_fallback: bool = False
     #: 가게 좌표와 매칭된 상권 중심 사이의 거리(m).
     match_distance_m: float | None = Field(default=None, ge=0.0)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _accept_legacy_category_cd(cls, data: Any) -> Any:
-        """구 픽스처의 단수형 `category_cd`를 `category_cds`로 받아준다.
-
-        07 §6이 2026-08-07 `category_cds: list[str]`(코드 합산)로 바뀌었으나
-        픽스처가 아직 단수형이다. 픽스처가 갱신되면 이 변환은 지운다.
-        """
-        if isinstance(data, dict) and "category_cds" not in data:
-            legacy = data.get("category_cd")
-            if isinstance(legacy, str):
-                return {**data, "category_cds": [legacy]}
-            if "category_cd" in data:
-                return {**data, "category_cds": []}
-        return data
 
     @field_validator(*SHARE_FIELDS)
     @classmethod
@@ -140,6 +148,24 @@ class TradeAreaFeatures(BaseModel):
         if abs(total - 1.0) > SHARE_SUM_TOL:
             raise ValueError(f"{info.field_name} 비중 합이 1.0이 아닙니다 (합계 {total:.4f})")
         return v
+
+    @field_validator(*OPTIONAL_SHARE_FIELDS)
+    @classmethod
+    def _optional_sums_to_one(
+        cls, v: dict[str, float] | None, info: ValidationInfo
+    ) -> dict[str, float] | None:
+        """없으면 그냥 통과. 있으면 합이 1이어야 한다."""
+        if v is None:
+            return None
+        total = sum(v.values())
+        if not v or abs(total - 1.0) > SHARE_SUM_TOL:
+            raise ValueError(f"{info.field_name} 비중 합이 1.0이 아닙니다 (합계 {total:.4f})")
+        return v
+
+    @property
+    def has_backyard(self) -> bool:
+        """배후지 데이터가 있는 상권인가. 골목상권만 True."""
+        return self.back_age_share is not None
 
     @property
     def low_coverage(self) -> bool:

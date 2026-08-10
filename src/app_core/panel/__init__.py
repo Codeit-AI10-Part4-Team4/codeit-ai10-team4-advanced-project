@@ -5,6 +5,7 @@ A(데이터·패널 구성)가 만든 `Panel`을 받아 페르소나별 평가�
 """
 
 from app_core.panel.aggregate import AggregationError, aggregate
+from app_core.panel.evaluator import evaluate
 from app_core.panel.evidence import (
     EvidenceFailure,
     evidence_failures,
@@ -34,6 +35,7 @@ __all__ = [
     "PersonaEval",
     "TradeAreaFeatures",
     "aggregate",
+    "evaluate",
     "evidence_failures",
     "evidence_match",
     "resolve",
