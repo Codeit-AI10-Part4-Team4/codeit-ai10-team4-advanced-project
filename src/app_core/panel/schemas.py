@@ -30,7 +30,13 @@ from pydantic import (
 
 PriceSens = Literal["low", "mid", "high"]
 Motive = Literal["habitual", "exploratory"]
-TimeContext = Literal["morning", "weekday_lunch", "afternoon", "evening", "weekend"]
+#: ⚠️ `night` 는 아인님이 추가했습니다 (수호님 부재 중, 되돌리기 쉬운 추가 변경).
+#: `build_panel` 이 `time_share["21-24"]` 상위 구간에서 `night` 를 내는데 이 목록에
+#: 없어서 `Persona` 생성이 터졌습니다. 실측: 상권 360곳 중 210곳(58%)에서 발생하고
+#: 치킨은 95%, 한식은 70% 입니다. 심야 매출은 실재하므로 `evening` 으로 뭉개면
+#: 데이터가 거짓이 됩니다.
+#: `weekend` 는 아직 `build_panel` 이 내지 않습니다 — 남겨둘지 논의 필요.
+TimeContext = Literal["morning", "weekday_lunch", "afternoon", "evening", "night", "weekend"]
 Resistance = Literal["price", "message", "visual", "relevance", "none"]
 Confidence = Literal["ok", "low"]
 
