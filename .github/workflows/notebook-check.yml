@@ -18,4 +18,11 @@ jobs:
       - name: Check notebook outputs are stripped
         run: |
           pip install nbstripout
-          nbstripout --verify **/*.ipynb
+          # `**/*.ipynb` 는 bash 기본 설정에서 안 펼쳐진다(globstar 꺼져 있음).
+          # nbstripout 이 그 문자열을 파일명으로 받아 "file not found" 로 죽었다.
+          #
+          # -z 가 핵심이다. 그냥 `git ls-files` 는 한글 경로를 "\354\203\201..." 로
+          # 이스케이프해서 내보내고(core.quotepath), nbstripout 이 그걸 파일명으로
+          # 받아 또 못 찾는다. -z 는 NUL 로 끊은 원본 경로를 그대로 준다.
+          # 이 저장소는 노트북 이름이 전부 한글이라 여기 걸린다.
+          git ls-files -z '*.ipynb' | xargs -0 -r nbstripout --verify
