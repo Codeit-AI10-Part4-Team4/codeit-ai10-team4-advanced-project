@@ -14,7 +14,7 @@ from app_core.panel.evaluator import (
     evaluate,
     offered_paths,
 )
-from app_core.panel.schemas import Panel, Persona
+from app_core.panel.schemas import ContrastNote, Panel, Persona
 from app_core.schema import AdBrief, CopyCandidate, Store, StoreInput
 
 AD_ID = "ad-001"
@@ -738,3 +738,116 @@ def test_summary_prompt_has_no_fabricated_example() -> None:
     """
     assert "8,900원" not in evaluator.SUMMARY_SYSTEM
     assert "금액을 만들어내지 마라" in evaluator.SUMMARY_SYSTEM
+
+
+# --- 경계 계약 (2026-08-11 아인님이 화면에서 찾은 버그) -------------------------
+#
+# `AttributeError: 'ContrastNote' object has no attribute 'fit'`
+#
+# 아인님 테스트는 `Note` 를, 제 테스트는 `ContrastNote` 를 각각 직접 씁니다.
+# 391개가 전부 초록불인데 **둘을 잇는 지점은 아무도 안 봤습니다.**
+# 각자 테스트를 아무리 잘 짜도 경계는 비어 있습니다 — 그 경계를 여기서 봅니다.
+
+
+def test_contrast_note_covers_every_note_field() -> None:
+    """`Note` 에 필드가 늘면 `ContrastNote` 도 따라와야 한다.
+
+    이게 없으면 아인님이 필드를 추가할 때마다 화면이 죽고, 그때까지
+    양쪽 테스트는 모두 통과한다.
+    """
+    from app_core.panel.contrast import Note
+
+    missing = set(Note._fields) - set(ContrastNote.model_fields)
+    assert not missing, f"ContrastNote 에 없는 Note 필드: {missing}"
+
+
+def test_conversion_carries_every_field(yeoksam: Panel, shop, brief, copy) -> None:
+    """필드를 하나씩 적어 넘기는 구조라 빠뜨리기 쉽다 — 값까지 확인한다."""
+    from app_core.panel.contrast import Note, contrast
+
+    source = {n.kind: n for n in contrast(yeoksam.features, brief, copy)}
+    result = evaluate(
+        yeoksam, shop, brief, copy, client=FakeClient(_reply_by_demo(yeoksam)), consistency_k=1
+    )
+
+    assert source, "대조가 하나도 안 나오면 이 테스트가 아무것도 검사하지 않는다"
+    for note in result.contrast_notes:
+        origin = source[note.kind]
+        for field in Note._fields:
+            assert getattr(note, field) == getattr(origin, field), f"{note.kind}.{field}"
+
+
+def test_screen_can_read_every_contrast_field(yeoksam: Panel, shop, brief, copy) -> None:
+    """화면이 실제로 읽는 접근을 흉내 낸다 — 죽었던 지점이 여기다."""
+    result = evaluate(
+        yeoksam, shop, brief, copy, client=FakeClient(_reply_by_demo(yeoksam)), consistency_k=1
+    )
+    for note in result.contrast_notes:
+        assert isinstance(note.kind, str)
+        assert isinstance(note.text, str)
+        assert note.fit is None or 0.0 <= note.fit <= 1.0
+
+
+# --- 광고가 말한 시간대를 근거로 준다 (2026-08-11 실측에서 나온 것) -------------
+
+
+def test_mentioned_slot_is_offered(yeoksam: Panel) -> None:
+    """광고가 새벽을 말하면 새벽 수치를 줘야 근거로 인용할 수 있다.
+
+    실측: "새벽 감성" 광고에 `time_share.00-06`(0.0007)을 받은 손님이 0명이라
+    "이 동네는 새벽에 안 산다"를 숫자로 말할 방법이 없었다. 시간대 쌍 판별
+    점수차가 +2.3 에 그쳤다 — 가격 쌍은 +25.5 였다.
+    """
+    persona = yeoksam.personas[0]
+    dawn = CopyCandidate(headline="새벽 감성 크로플", sub="해 뜨기 전에 드세요")
+
+    assert "time_share.00-06" in offered_paths(yeoksam.features, persona, dawn)
+    assert "time_share.00-06" not in offered_paths(yeoksam.features, persona)
+
+
+def test_mentioned_slot_reaches_every_persona(yeoksam: Panel) -> None:
+    dawn = CopyCandidate(headline="새벽 감성 크로플")
+    for persona in yeoksam.personas:
+        assert "time_share.00-06" in offered_paths(yeoksam.features, persona, dawn)
+
+
+def test_no_slot_mentioned_adds_nothing(yeoksam: Panel) -> None:
+    """시점을 안 말한 광고에 엉뚱한 시간대를 끼워 넣으면 안 된다."""
+    persona = yeoksam.personas[0]
+    plain = CopyCandidate(headline="겉바속촉 크로플")
+
+    assert offered_paths(yeoksam.features, persona, plain) == offered_paths(
+        yeoksam.features, persona
+    )
+
+
+def test_prompt_and_gate_agree_on_the_mentioned_slot(yeoksam: Panel, shop, brief) -> None:
+    """프롬프트에 준 것과 게이트가 인정하는 것이 같아야 한다."""
+    persona = yeoksam.personas[0]
+    dawn = CopyCandidate(headline="새벽 감성 크로플")
+
+    block = evaluator._feature_lines(yeoksam.features, persona, dawn)
+    in_prompt = {line.split(" = ")[0].removeprefix("- ") for line in block.splitlines()}
+    assert in_prompt == offered_paths(yeoksam.features, persona, dawn)
+
+
+def test_mentioned_slot_evidence_passes_the_gate(yeoksam: Panel, shop, brief) -> None:
+    """새벽 수치를 근거로 든 응답이 통과해야 한다 — 주고서 막으면 안 된다."""
+    dawn = CopyCandidate(headline="새벽 감성 크로플")
+    by_demo = {p.demo: p for p in yeoksam.personas}
+
+    def reply(persona_id: str, _calls: list[str]) -> dict[str, Any]:
+        return _good(
+            by_demo[persona_id],
+            evidence=[{"path": "time_share.00-06", "value": 0.0007}],
+        )
+
+    result = evaluate(yeoksam, shop, brief, dawn, client=FakeClient(reply), consistency_k=1)
+    assert result.excluded_cnt == 0
+
+
+def test_time_words_are_shared_with_contrast() -> None:
+    """목록을 복사해두면 대조와 평가가 서로 다른 시간대를 보게 된다."""
+    from app_core.panel import contrast as C
+
+    assert evaluator.TIME_WORDS is C.TIME_WORDS

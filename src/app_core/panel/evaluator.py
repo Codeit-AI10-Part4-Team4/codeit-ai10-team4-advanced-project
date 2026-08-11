@@ -27,7 +27,7 @@ from pydantic import ValidationError
 
 from app_core.llm import ChatClient, get_client
 from app_core.panel.aggregate import DEFAULT_SIGMA_MAX, aggregate
-from app_core.panel.contrast import contrast
+from app_core.panel.contrast import TIME_WORDS, contrast
 from app_core.panel.evidence import evidence_failures
 from app_core.panel.narrator import MOTIVE_KO, PRICE_KO, TIME_KO
 from app_core.panel.schemas import (
@@ -172,20 +172,49 @@ def _amounts(text: str) -> set[int]:
     return out
 
 
-def offered_paths(features: TradeAreaFeatures, persona: Persona) -> frozenset[str]:
+def mentioned_slot(copy: CopyCandidate) -> str | None:
+    """광고가 말한 시간대. 없으면 None.
+
+    `contrast.TIME_WORDS` 를 그대로 쓴다 — 목록을 복사해두면 한쪽만 늘었을 때
+    대조와 평가가 서로 다른 시간대를 보게 된다.
+    """
+    text = f"{copy.headline} {copy.sub}"
+    return next(
+        (slot for slot, words in TIME_WORDS.items() if any(w in text for w in words)),
+        None,
+    )
+
+
+def offered_paths(
+    features: TradeAreaFeatures,
+    persona: Persona,
+    copy: CopyCandidate | None = None,
+) -> frozenset[str]:
     """이 손님에게 실제로 보여준 숫자의 경로.
 
     프롬프트와 근거 게이트가 **같은 목록**을 봐야 한다. 따로 관리하면 한쪽만
     바뀌었을 때 멀쩡한 근거가 탈락하거나 엉뚱한 근거가 통과한다.
+
+    **광고가 말한 시간대는 따로 넣는다.** 페르소나의 기본 근거에는 자기가
+    움직이는 시간대만 들어 있어서, 광고가 다른 때를 말하면 그 수치를 아무도
+    못 받는다 — 실측(2026-08-11): "새벽 감성" 광고에 `time_share.00-06`
+    (0.0007)을 받은 손님이 0명이라 "이 동네는 새벽에 안 산다"를 숫자로 말할
+    방법이 없었고, 시간대 쌍 판별 점수차가 +2.3 에 그쳤다(가격 쌍은 +25.5).
     """
     paths = {ref.path for ref in persona.evidence}
     paths |= {"avg_ticket", "avg_ticket_pct", "competitor_cnt", "weekend_ratio"}
     if features.work_ratio is not None:
         paths.add("work_ratio")
+    if copy is not None:
+        slot = mentioned_slot(copy)
+        if slot is not None and slot in features.time_share:
+            paths.add(f"time_share.{slot}")
     return frozenset(paths)
 
 
-def _feature_lines(features: TradeAreaFeatures, persona: Persona) -> str:
+def _feature_lines(
+    features: TradeAreaFeatures, persona: Persona, copy: CopyCandidate | None = None
+) -> str:
     """평가에 쓸 숫자만 골라 준다.
 
     전부 넘기면 토큰이 낭비되고, 자기와 무관한 수치를 인용해도 근거 대조를
@@ -195,7 +224,7 @@ def _feature_lines(features: TradeAreaFeatures, persona: Persona) -> str:
     from app_core.panel.evidence import resolve
 
     lines = []
-    for path in sorted(offered_paths(features, persona)):
+    for path in sorted(offered_paths(features, persona, copy)):
         resolved = resolve(features, path)
         if resolved is not None:
             value = int(resolved.value) if resolved.exact else round(resolved.value, 4)
@@ -234,7 +263,7 @@ def build_user_prompt(
         f"{TIME_KO.get(axes.time, axes.time)}에 주로 움직이고, "
         f"{MOTIVE_KO[axes.motive]} 편, {PRICE_KO[axes.price_sens]} 동네에 산다.\n\n"
         f"## 우리 동네 숫자 (evidence 는 여기서만 고른다)\n"
-        f"{_feature_lines(features, persona)}\n\n"
+        f"{_feature_lines(features, persona, copy)}\n\n"
         f"## 광고물\n{_ad_lines(store, brief, copy)}"
     )
 
@@ -271,7 +300,7 @@ def _evaluate_one(
 ) -> PersonaEval | None:
     """한 명을 평가한다. 두 관문 중 하나라도 실패하면 1회만 다시 부른다."""
     user = build_user_prompt(persona, features, store, brief, copy)
-    allowed = offered_paths(features, persona)
+    allowed = offered_paths(features, persona, copy)
     hint = ""
 
     for attempt in range(RETRY_ONCE + 1):
