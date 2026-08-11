@@ -55,11 +55,15 @@ SYSTEM = """너는 아래 특성의 손님이다. 광고를 보고 솔직하게 
   message    무엇을 파는지 바로 알겠는가 (0~100)
   intent     가볼 마음이 드는가 (0~100)
 
-**resistance** — 가장 큰 걸림돌 하나만 고른다.
+**resistance** — 가장 큰 걸림돌을 **딱 하나** 고른다.
   price      가격이 부담되거나 값어치를 모르겠다
   message    무슨 말인지 모르겠거나 와닿지 않는다
   relevance  나와 상관없는 광고로 느껴진다
   none       걸리는 게 없다
+
+  **넷 중 하나를 그대로 적는다.** `"price"` 처럼 한 단어만 넣는다.
+  두 개 이상을 세로줄이나 쉼표로 잇거나 목록으로 주면 그 응답은 버려진다.
+
   ※ 광고 이미지는 보지 않았다. **visual 은 고르지 마라.**
 
 **evidence** — 왜 그렇게 느꼈는지를 아래 "우리 동네 숫자"에서 골라 인용한다.
@@ -72,11 +76,25 @@ SYSTEM = """너는 아래 특성의 손님이다. 광고를 보고 솔직하게 
 
 아래 JSON 형식으로만 답해라.
 
-{"attention": 0, "message": 0, "intent": 0,
- "resistance": "price|message|relevance|none",
- "resistance_detail": "한 줄",
- "comment": "한 문장",
- "evidence": [{"path": "age_share.30", "value": 0.382}]}"""
+{"attention": 62, "message": 74, "intent": 45,
+ "resistance": "price",
+ "resistance_detail": "9,500원이면 한 번 더 생각하게 된다",
+ "comment": "맛은 궁금한데 가격에서 손이 멈추네요.",
+ "evidence": [{"path": "age_share.30", "value": 0.382}]}
+
+**이 예시의 형식만 따르고 값은 베끼지 마라.** 점수·문장·근거는 네 판단으로 채운다."""
+
+
+def _retry_hint(reason: str) -> str:
+    """재시도 프롬프트에 붙일 교정 지시.
+
+    `temperature=0` 이라 같은 입력을 다시 보내면 **같은 오답**이 나온다.
+    재시도가 의미를 가지려면 입력이 달라져야 하므로, 무엇을 어겼는지 알려준다.
+    무작위성을 올리는 것보다 낫다 — 틀린 지점을 짚어주는 쪽이 교정 확률이 높고
+    점수 재현성도 유지된다.
+    """
+    return f"\n\n## 직전 응답이 규칙을 어겼다\n{reason}\n설명 없이 JSON 하나만 다시 답하라."
+
 
 SUMMARY_SYSTEM = """손님들의 평가를 사장님이 바로 쓸 수 있는 **개선 제안**으로 옮긴다.
 
@@ -170,16 +188,28 @@ def _evaluate_one(
 ) -> PersonaEval | None:
     """한 명을 평가한다. 두 관문 중 하나라도 실패하면 1회만 다시 부른다."""
     user = build_user_prompt(persona, features, store, brief, copy)
+    hint = ""
 
     for attempt in range(RETRY_ONCE + 1):
-        result = _parse(client.complete_json(SYSTEM, user), persona.persona_id)
-        if result is not None:
-            failures = evidence_failures(features, result.evidence)
-            if not failures:
-                return result
-            logger.debug(
-                "근거 대조 실패 %s (시도 %d): %s", persona.persona_id, attempt + 1, failures
+        result = _parse(client.complete_json(SYSTEM, user + hint), persona.persona_id)
+
+        if result is None:
+            hint = _retry_hint(
+                "JSON 형식이나 값이 스키마에 맞지 않았다. resistance 는 "
+                "price · message · relevance · none 중 **하나만** 적는다."
             )
+            continue
+
+        failures = evidence_failures(features, result.evidence)
+        if not failures:
+            return result
+
+        logger.debug("근거 대조 실패 %s (시도 %d): %s", persona.persona_id, attempt + 1, failures)
+        paths = ", ".join(f.path for f in failures)
+        hint = _retry_hint(
+            f"근거로 든 수치가 실제 값과 달랐다 ({paths}). "
+            "'우리 동네 숫자'에 적힌 값을 **그대로** 옮겨 적어라."
+        )
     return None
 
 

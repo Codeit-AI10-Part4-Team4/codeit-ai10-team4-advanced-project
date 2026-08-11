@@ -30,13 +30,17 @@ from pydantic import (
 
 PriceSens = Literal["low", "mid", "high"]
 Motive = Literal["habitual", "exploratory"]
-#: ⚠️ `night` 는 아인님이 추가했습니다 (수호님 부재 중, 되돌리기 쉬운 추가 변경).
-#: `build_panel` 이 `time_share["21-24"]` 상위 구간에서 `night` 를 내는데 이 목록에
-#: 없어서 `Persona` 생성이 터졌습니다. 실측: 상권 360곳 중 210곳(58%)에서 발생하고
-#: 치킨은 95%, 한식은 70% 입니다. 심야 매출은 실재하므로 `evening` 으로 뭉개면
-#: 데이터가 거짓이 됩니다.
-#: `weekend` 는 아직 `build_panel` 이 내지 않습니다 — 남겨둘지 논의 필요.
-TimeContext = Literal["morning", "weekday_lunch", "afternoon", "evening", "night", "weekend"]
+#: 하루 중 언제 움직이는 손님인가. `time_share`(매출) 상위 구간에서 나온다.
+#:
+#: `night` 는 아인님이 추가(2026-08-10). `build_panel` 이 21-24시 상위 상권에서
+#: 이 값을 내는데 목록에 없어 `Persona` 생성이 터졌다. 상권 360곳 중 210곳(58%),
+#: 치킨 95%·한식 70%. 심야 매출은 실재하므로 `evening` 으로 뭉개면 데이터가
+#: 거짓이 된다 — 그대로 둔다.
+#:
+#: `weekend` 는 뺐다(2026-08-11). **주말은 시간대가 아니라 요일이라** 같은 축에
+#: 섞으면 "주말 저녁 손님"을 표현할 수 없고, 주말 비중은 `weekend_ratio` 로 이미
+#: 따로 있다. `build_panel` 도 이 값을 내지 않았다.
+TimeContext = Literal["morning", "weekday_lunch", "afternoon", "evening", "night"]
 Resistance = Literal["price", "message", "visual", "relevance", "none"]
 Confidence = Literal["ok", "low"]
 
@@ -182,8 +186,8 @@ class TradeAreaFeatures(BaseModel):
 class PersonaAxes(BaseModel):
     """행동 축. 값은 A 영역의 유도 룰(07 §7.1)이 결정한다.
 
-    `time`은 `time_share`(매출) 상위 구간에서 나오며, `weekend`는
-    `weekend_ratio > 0.4`일 때만 추가된다. 역삼역은 0.138이라 나오지 않는다.
+    `time`은 `time_share`(매출) 상위 구간에서 나온다. 주말은 이 축이 아니라
+    `weekend_ratio` 로 따로 본다 — 요일과 시간대를 섞으면 "주말 저녁"을 못 쓴다.
     """
 
     model_config = ConfigDict(frozen=True)

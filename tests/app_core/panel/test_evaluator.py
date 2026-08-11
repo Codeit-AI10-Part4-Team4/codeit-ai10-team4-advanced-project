@@ -229,3 +229,83 @@ def test_prompt_carries_narrative_and_ad(yeoksam: Panel, shop, brief, copy) -> N
 def test_visual_resistance_is_forbidden_in_prompt() -> None:
     """이미지를 안 보여주므로 visual 저항은 근거 없는 판정이 된다."""
     assert "visual 은 고르지 마라" in evaluator.SYSTEM
+
+
+# --- 프롬프트 회귀 방지 (2026-08-11 아인님 제보) --------------------------------
+
+
+def test_prompt_has_no_pipe_placeholder() -> None:
+    """세로줄 예시를 넣으면 모델이 그대로 베낀다.
+
+    실측(아인님): 23콜 중 21콜이 `"price|message"` 같은 값을 내서 스키마에서
+    탈락했다. 12명 중 1~5명만 살아남아 제품 전체가 막혔다.
+    자리표시자는 **실제로 쓸 수 있는 값 하나**여야 한다.
+    """
+    assert "price|message" not in evaluator.SYSTEM
+    assert '"resistance": "price"' in evaluator.SYSTEM
+
+
+def test_prompt_states_allowed_values_as_prose() -> None:
+    """허용값은 예시가 아니라 문장으로 알려준다."""
+    assert "넷 중 하나를 그대로 적는다" in evaluator.SYSTEM
+    assert "세로줄" in evaluator.SYSTEM
+
+
+def test_json_example_uses_realistic_values() -> None:
+    """`"attention": 0` 같은 자리표시자는 모델을 0점으로 끌어당긴다."""
+    assert '"attention": 0,' not in evaluator.SYSTEM
+    assert "값은 베끼지 마라" in evaluator.SYSTEM
+
+
+def test_retry_carries_a_correction_hint(yeoksam: Panel, shop, brief, copy) -> None:
+    """`temperature=0` 이라 같은 입력을 다시 보내면 같은 오답이 나온다.
+
+    재시도가 의미를 가지려면 무엇을 어겼는지 알려줘야 한다.
+    """
+    target = yeoksam.personas[0].demo
+    seen: list[str] = []
+
+    def reply(persona_id: str, calls: list[str]) -> dict[str, Any]:
+        persona = {p.demo: p for p in yeoksam.personas}[persona_id]
+        if persona_id == target:
+            if calls.count(target) == 1:
+                return {"resistance": "price|message"}  # 세로줄 오답 재현
+            return _good(persona)
+        return _good(persona)
+
+    class Recording(FakeClient):
+        def complete_json(self, system: str, user: str) -> dict:
+            if not system.startswith("손님들의 평가를"):
+                seen.append(user)
+            return super().complete_json(system, user)
+
+    client = Recording(reply)
+    result = evaluate(yeoksam, shop, brief, copy, client=client)
+
+    retried = [u for u in seen if "직전 응답이 규칙을 어겼다" in u]
+    assert retried, "재시도 프롬프트에 교정 지시가 붙어야 한다"
+    assert "하나만" in retried[0]
+    assert result.excluded_cnt == 0  # 교정 후 통과
+
+
+def test_evidence_failure_hint_names_the_path(yeoksam: Panel, shop, brief, copy) -> None:
+    """어느 수치가 틀렸는지 짚어줘야 모델이 고칠 수 있다."""
+    target = yeoksam.personas[0].demo
+    seen: list[str] = []
+
+    def reply(persona_id: str, calls: list[str]) -> dict[str, Any]:
+        persona = {p.demo: p for p in yeoksam.personas}[persona_id]
+        if persona_id == target and calls.count(target) == 1:
+            return _good(persona, evidence=[{"path": "age_share.30", "value": 0.999}])
+        return _good(persona)
+
+    class Recording(FakeClient):
+        def complete_json(self, system: str, user: str) -> dict:
+            if not system.startswith("손님들의 평가를"):
+                seen.append(user)
+            return super().complete_json(system, user)
+
+    evaluate(yeoksam, shop, brief, copy, client=Recording(reply))
+    retried = [u for u in seen if "직전 응답이 규칙을 어겼다" in u]
+    assert retried
+    assert "age_share.30" in retried[0]
