@@ -31,7 +31,7 @@ COPY pyproject.toml README.md ./
 RUN mkdir -p src/api src/app_core \
     && touch src/api/__init__.py src/app_core/__init__.py
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -e ".[dev,ui,llm,db]"
+    pip install -e ".[dev,ui,llm,db,panel]"
 
 COPY . .
 EXPOSE 8000 8501
