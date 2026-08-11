@@ -73,6 +73,13 @@ def predict(row: dict[str, str]) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", help="real | observed | constructed")
+    parser.add_argument(
+        "-n",
+        "--repeat",
+        type=int,
+        default=3,
+        help="몇 번 반복할지. LLM 은 매번 답이 달라서 한 번으로는 판단할 수 없다 (기본 3)",
+    )
     args = parser.parse_args()
 
     rows = load_golden(args.source)
@@ -80,23 +87,45 @@ def main() -> None:
         raise SystemExit(f"해당하는 케이스가 없습니다: {args.source}")
 
     expectations = [expected_of(r) for r in rows]
-    predictions = [predict(r) for r in rows]
 
-    print(f"{len(rows)}개 발화" + (f" (source={args.source})" if args.source else ""))
+    #: 케이스별로 몇 번 실패했는지. 매번 실패하는 것과 가끔 실패하는 것은 성격이 다르다.
+    fail_count = dict.fromkeys(range(len(rows)), 0)
+    fail_detail: dict[int, dict] = {}
+    overalls, slot_runs = [], []
+
+    for _ in range(args.repeat):
+        predictions = [predict(r) for r in rows]
+        overalls.append(overall_accuracy(predictions, expectations))
+        slot_runs.append(slot_accuracy(predictions, expectations))
+        for i, slots in failures(predictions, expectations):
+            fail_count[i] += 1
+            fail_detail[i] = slots
+
+    print(
+        f"{len(rows)}개 발화 × {args.repeat}회"
+        + (f" (source={args.source})" if args.source else "")
+    )
     print()
-    for slot, acc in slot_accuracy(predictions, expectations).items():
-        print(f"  {slot:10s} {acc:5.0%}")
-    print(f"\n  {'전체 일치':10s} {overall_accuracy(predictions, expectations):5.0%}")
+    for slot in slot_runs[0]:
+        scores = [run[slot] for run in slot_runs]
+        spread = f"  ({min(scores):.0%}~{max(scores):.0%})" if min(scores) != max(scores) else ""
+        print(f"  {slot:10s} {sum(scores) / len(scores):5.0%}{spread}")
+    spread = (
+        f"  ({min(overalls):.0%}~{max(overalls):.0%})" if min(overalls) != max(overalls) else ""
+    )
+    print(f"\n  {'전체 일치':10s} {sum(overalls) / len(overalls):5.0%}{spread}")
 
-    wrong = failures(predictions, expectations)
+    wrong = {i: n for i, n in fail_count.items() if n}
     if not wrong:
         print("\n틀린 것 없음")
         return
 
-    print(f"\n{'─' * 60}\n틀린 것 {len(wrong)}건\n")
-    for i, slots in wrong:
-        print(f'  "{rows[i]["utterance"]}"   [{rows[i]["source"]}]')
-        for slot, (got, want) in slots.items():
+    print(f"\n{'─' * 60}\n틀린 것 {len(wrong)}건  (n/{args.repeat} = 몇 번 틀렸는지)\n")
+    # 매번 틀리는 것부터. 이게 진짜 결함이고, 가끔 틀리는 것은 흔들림이다.
+    for i, n in sorted(wrong.items(), key=lambda kv: -kv[1]):
+        mark = "❌ 매번" if n == args.repeat else f"⚠️ {n}/{args.repeat}"
+        print(f'  {mark}  "{rows[i]["utterance"]}"   [{rows[i]["source"]}]')
+        for slot, (got, want) in fail_detail[i].items():
             print(f"      {slot:10s} 뽑음={got!r}  정답={want!r}")
         print()
 

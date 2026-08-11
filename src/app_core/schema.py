@@ -227,19 +227,20 @@ class AdBriefDraft(BaseModel):
         """아직 안 찬 **필수** 슬롯. 이게 비어야 생성할 수 있다."""
         return [slot for slot in REQUIRED_SLOTS if getattr(self, slot) is None]
 
-    def next_slot(self) -> str | None:
-        """다음에 물어볼 것 하나. 더 물을 게 없으면 None.
+    def remaining_slots(self) -> list[str]:
+        """아직 물어볼 게 남은 슬롯 전부. 우선순위 순이다.
 
         필수를 먼저 다 받고, 그 다음 도움되는 것을 한 번씩만 묻는다.
         사장님이 답을 안 해도 asked 에 남아서 다시 묻지 않는다.
         """
-        for slot in REQUIRED_SLOTS:
-            if getattr(self, slot) is None:
-                return slot
-        for slot in HELPFUL_SLOTS:
-            if not getattr(self, slot) and slot not in self.asked:
-                return slot
-        return None
+        left = [s for s in REQUIRED_SLOTS if getattr(self, s) is None]
+        left += [s for s in HELPFUL_SLOTS if not getattr(self, s) and s not in self.asked]
+        return left
+
+    def next_slot(self) -> str | None:
+        """다음에 물어볼 것 하나. 더 물을 게 없으면 None."""
+        left = self.remaining_slots()
+        return left[0] if left else None
 
     def mark_asked(self, slot: str) -> AdBriefDraft:
         """물어봤다고 표시한다. 답을 받았는지와 무관하게 한 번이면 충분하다."""
