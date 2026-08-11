@@ -302,3 +302,58 @@ def test_fuzz_invariants(yeoksam: Panel, seed: int) -> None:
     weights = [c.weight for c in result.persona_comments]
     assert weights == sorted(weights, reverse=True)
     assert result.excluded_cnt == 0
+
+
+# --- 걸림돌은 "발길을 돌린 이유"만 센다 (2026-08-11 실측) ----------------------
+
+
+def test_resistance_from_willing_customers_is_not_counted(yeoksam: Panel) -> None:
+    """가겠다고 한 손님이 댄 흠은 발길을 돌린 이유가 아니다.
+
+    프롬프트로 세 번 고쳐봤지만 모델은 계속 `price` 를 골랐다 — 동네 평균과
+    같은 9,500원 광고에도 12명 전원이 그랬다. 모델에게 부탁하는 대신
+    집계에서 코드가 거른다.
+    """
+    evals = [_eval(p, intent=85, resistance="price") for p in yeoksam.personas]
+    result = aggregate(yeoksam, evals, ad_id=AD_ID)
+
+    assert result.resistance_share == {}
+    assert result.top_resistance == []
+
+
+def test_resistance_from_reluctant_customers_is_counted(yeoksam: Panel) -> None:
+    """안 가겠다는 손님의 걸림돌은 그대로 센다 — 게이트가 과하면 안 된다."""
+    evals = [_eval(p, intent=30, resistance="price") for p in yeoksam.personas]
+    result = aggregate(yeoksam, evals, ad_id=AD_ID)
+
+    assert result.top_resistance == ["price"]
+    assert result.resistance_share["price"] == pytest.approx(1.0)
+
+
+def test_resistance_threshold_matches_the_prompt_anchor(yeoksam: Panel) -> None:
+    """경계가 척도 앵커의 "61~80 한번 가볼까"와 같아야 한다.
+
+    두 곳이 다른 기준을 쓰면 프롬프트가 시킨 것과 집계가 세는 것이 어긋난다.
+    """
+    from app_core.panel.aggregate import RESISTANCE_INTENT_MAX
+    from app_core.panel.evaluator import SYSTEM
+
+    assert RESISTANCE_INTENT_MAX == 60
+    assert "61~80" in SYSTEM
+    assert "61 이상으로 줬다면 `none`" in SYSTEM
+
+    at_edge = [_eval(p, intent=60, resistance="price") for p in yeoksam.personas]
+    assert aggregate(yeoksam, at_edge, ad_id=AD_ID).top_resistance == ["price"]
+
+    over = [_eval(p, intent=61, resistance="price") for p in yeoksam.personas]
+    assert aggregate(yeoksam, over, ad_id=AD_ID).top_resistance == []
+
+
+def test_filtered_resistance_keeps_comments_and_scores(yeoksam: Panel) -> None:
+    """집계 신호에서만 뺀다 — 코멘트와 점수는 그대로 남아야 한다."""
+    evals = [_eval(p, intent=85, resistance="price") for p in yeoksam.personas]
+    result = aggregate(yeoksam, evals, ad_id=AD_ID)
+
+    assert len(result.persona_comments) == len(yeoksam.personas)
+    assert all(c.resistance == "price" for c in result.persona_comments)
+    assert result.scores["intent"] == 85.0

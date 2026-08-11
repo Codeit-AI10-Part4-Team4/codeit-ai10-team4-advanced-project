@@ -912,6 +912,6 @@ def test_resistance_is_tied_to_the_persona_own_intent() -> None:
     모두에게 걸림돌 하나를 억지로 고르게 하면 모델이 제일 방어하기 쉬운 답을
     찍는다. 점수는 `standing` 으로 갈리기 시작했으니 걸림돌을 거기 묶는다.
     """
-    assert "기본은 `none` 이다" in evaluator.SYSTEM
+    assert "61 이상으로 줬다면 `none`" in evaluator.SYSTEM
     assert "avg_ticket` 과 견줘봐라" in evaluator.SYSTEM
     assert "억지로 흠을 찾지 마라" in evaluator.SYSTEM

@@ -39,6 +39,21 @@ DEFAULT_SIGMA_MAX: Final = 20.0
 #: 결과에 싣는 저항 요인 개수.
 TOP_RESISTANCE_N: Final = 3
 
+#: 이 방문 의향을 넘긴 손님의 걸림돌은 세지 않는다.
+#:
+#: 프롬프트로 세 번 고쳐봤지만(처지에 묶기·임계값·기본값 none) 모델은 계속
+#: `price` 를 골랐다 — 동네 평균과 같은 9,500원 광고에도 12명 전원이 그랬다.
+#: 광고에 적힌 숫자가 제일 짚기 쉬운 흠이라 그렇다.
+#:
+#: **그래서 모델에게 부탁하는 대신 코드가 정한다.** 걸림돌은 "발길을 돌린
+#: 이유"이므로, 가겠다고 한 손님이 댄 흠은 그 이유가 아니다. 경계 61 은 척도
+#: 앵커의 "61~80 한번 가볼까"와 같은 선이다 — 두 곳이 다른 기준을 쓰면
+#: 프롬프트와 집계가 어긋난다.
+#:
+#: 이 규칙은 코멘트를 지우지 않는다. 점수와 코멘트는 그대로 남고, "무엇이
+#: 걸리는가"라는 **집계 신호에서만** 뺀다.
+RESISTANCE_INTENT_MAX: Final = 60
+
 #: 점수를 낼 최소 인원. 이보다 적으면 가중 평균이 사실상 한두 명의 목소리라
 #: 점수는 내되 신뢰도 사유에 남긴다. 탈락이 몰린 날 "12명 패널" 이라는 말이
 #: 거짓이 되지 않게 하는 장치다.
@@ -137,9 +152,10 @@ def aggregate(
         max_std = max(max_std, _weighted_std(pairs, mean))
 
     # 저항 요인은 경계 페르소나까지 포함해 센다 — 다양성이 이들의 존재 이유다.
+    # 다만 가겠다고 한 손님(intent > RESISTANCE_INTENT_MAX)의 흠은 빼고 센다.
     tally: defaultdict[str, float] = defaultdict(float)
     for persona, ev in valid:
-        if ev.resistance != "none":
+        if ev.resistance != "none" and ev.intent <= RESISTANCE_INTENT_MAX:
             tally[ev.resistance] += persona.weight
     ranked = sorted(tally.items(), key=lambda kv: -kv[1])
     top_resistance = [label for label, _ in ranked][:TOP_RESISTANCE_N]
