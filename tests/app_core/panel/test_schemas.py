@@ -14,6 +14,7 @@ from app_core.panel.schemas import (
     METRIC_FIELDS,
     OPTIONAL_SHARE_FIELDS,
     SHARE_FIELDS,
+    FeatureRef,
     Panel,
     PersonaEval,
 )
@@ -253,3 +254,62 @@ def test_population_fields_have_safe_defaults(yeoksam_raw: dict[str, Any]) -> No
     assert (f.worker_pop, f.resident_pop, f.household_cnt, f.apt_cnt) == (0, 0, 0, 0)
     assert f.work_ratio is None
     assert f.apt_avg_price is None
+
+
+# --- 불량 수치 방어 (2026-08-11 자체 공격에서 발견) ---------------------------
+
+
+def test_nan_share_is_rejected(yeoksam_raw: dict[str, Any]) -> None:
+    """NaN 은 모든 비교가 거짓이라 합계 검사(`abs(sum-1) > tol`)를 **통과한다.**
+
+    막지 않으면 가중 평균 전체가 NaN 으로 오염되고, 터지는 지점은 입력에서
+    한참 멀어서 찾기 어렵다. 실제로 뚫리는 것을 확인하고 막았다.
+    """
+    data = copy.deepcopy(yeoksam_raw)
+    data["features"]["gender_share"] = {"M": float("nan"), "F": 0.5}
+    with pytest.raises(ValidationError, match="유한한 수"):
+        Panel.model_validate(data)
+
+
+def test_negative_share_cannot_hide_in_valid_sum(yeoksam_raw: dict[str, Any]) -> None:
+    """{-0.5, 1.5} 는 합이 정확히 1이라 합계 검사만으로는 못 잡는다."""
+    data = copy.deepcopy(yeoksam_raw)
+    data["features"]["gender_share"] = {"M": -0.5, "F": 1.5}
+    with pytest.raises(ValidationError, match="유한한 수"):
+        Panel.model_validate(data)
+
+
+@pytest.mark.parametrize("bad", [float("inf"), float("-inf"), 1.5, -0.001])
+def test_out_of_range_share_value_rejected(yeoksam_raw: dict[str, Any], bad: float) -> None:
+    data = copy.deepcopy(yeoksam_raw)
+    data["features"]["age_share"]["30"] = bad
+    with pytest.raises(ValidationError):
+        Panel.model_validate(data)
+
+
+def test_optional_share_also_validates_values(yeoksam_raw: dict[str, Any]) -> None:
+    """배후지 비중도 있을 때는 같은 기준으로 검증한다."""
+    data = copy.deepcopy(yeoksam_raw)
+    data["features"]["back_age_share"] = {"20": float("nan"), "30": 0.5}
+    with pytest.raises(ValidationError, match="유한한 수"):
+        Panel.model_validate(data)
+
+
+def test_feature_ref_rejects_non_finite() -> None:
+    """NaN 근거는 대조가 조용히 항상 실패한다 — 입구에서 끊는다."""
+    with pytest.raises(ValidationError, match="유한한 수"):
+        FeatureRef(path="age_share.30", value=float("nan"))
+
+
+def test_persona_eval_comment_hard_cap() -> None:
+    """폭주 코멘트의 마지막 방벽. `_parse` 절단(300)이 먼저, 이 400 이 최후다."""
+    with pytest.raises(ValidationError):
+        PersonaEval(
+            persona_id="p01",
+            attention=1,
+            message=1,
+            intent=1,
+            resistance="none",
+            comment="가" * 401,
+            evidence=[{"path": "avg_ticket", "value": 9546}],  # type: ignore[list-item]
+        )

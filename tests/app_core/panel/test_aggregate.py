@@ -212,3 +212,93 @@ def test_failed_ids_are_counted_as_excluded(yeoksam: Panel) -> None:
     result = aggregate(yeoksam, evals, ad_id=AD_ID, failed_ids=dropped)
     assert result.excluded_cnt == 2
     assert set(dropped) <= set(result.excluded_ids)
+
+
+# --- 표본·쏠림·중복 방어 (2026-08-11 자체 공격에서 발견) -----------------------
+
+
+def test_single_survivor_is_not_confident(yeoksam: Panel) -> None:
+    """1명만 통과했는데 confidence ok 면 "12명 패널"이라는 말이 거짓이 된다."""
+    survivor = next(p for p in yeoksam.personas if not p.is_boundary)
+    result = aggregate(yeoksam, [_eval(survivor)], ad_id=AD_ID)
+
+    assert result.confidence == "low"
+    text = " ".join(result.confidence_reasons)
+    assert "표본이 작음" in text
+    assert "쏠림" in text  # 1명이면 비중 100%
+
+
+def test_enough_survivors_are_confident(yeoksam: Panel) -> None:
+    """전원 통과면 표본·쏠림 사유가 붙지 않아야 한다 — 게이트 과잉 방지."""
+    result = aggregate(yeoksam, _all_valid(yeoksam), ad_id=AD_ID)
+    text = " ".join(result.confidence_reasons)
+    assert "표본이 작음" not in text
+    assert "쏠림" not in text
+
+
+def test_duplicate_persona_response_counts_once(yeoksam: Panel) -> None:
+    """같은 페르소나 응답이 두 번 오면 가중치가 두 배가 된다 — 첫 응답만 쓴다."""
+    evals = _all_valid(yeoksam, attention=50)
+    dup = _eval(yeoksam.personas[0], attention=100)
+    result = aggregate(yeoksam, [*evals, dup], ad_id=AD_ID)
+
+    assert result.scores["attention"] == 50.0
+    assert result.excluded_cnt == 0
+
+
+def test_extra_reasons_lower_confidence(yeoksam: Panel) -> None:
+    """호출 단계의 사유(시간 초과)가 집계 사유와 합쳐져야 한다."""
+    result = aggregate(
+        yeoksam,
+        _all_valid(yeoksam, attention=70),
+        ad_id=AD_ID,
+        extra_reasons=["응답 시간 초과로 3명을 평가하지 못함"],
+    )
+    assert result.confidence == "low"
+    assert "시간 초과" in result.confidence_reasons[0]
+
+
+def test_elapsed_ms_is_carried(yeoksam: Panel) -> None:
+    result = aggregate(yeoksam, _all_valid(yeoksam), ad_id=AD_ID, elapsed_ms=1234)
+    assert result.elapsed_ms == 1234
+
+
+# --- 무작위 입력 불변식 --------------------------------------------------------
+
+
+@pytest.mark.parametrize("seed", range(10))
+def test_fuzz_invariants(yeoksam: Panel, seed: int) -> None:
+    """어떤 유효 입력이 와도 깨지면 안 되는 성질들.
+
+    특정 시나리오 테스트가 못 덮는 조합을 무작위로 훑는다. 시드 고정이라
+    실패하면 항상 같은 입력으로 재현된다.
+    """
+    import random
+
+    rnd = random.Random(seed)
+    anchor = next(p for p in yeoksam.personas if not p.is_boundary)
+    labels = ["price", "message", "visual", "relevance", "none"]
+
+    evals = []
+    for persona in yeoksam.personas:
+        if persona.persona_id != anchor.persona_id and rnd.random() < 0.25:
+            continue  # 무작위 결번 — 탈락·부분 응답 상황 재현
+        evals.append(
+            _eval(
+                persona,
+                attention=rnd.randrange(101),
+                message=rnd.randrange(101),
+                intent=rnd.randrange(101),
+                resistance=rnd.choice(labels),
+            )
+        )
+
+    result = aggregate(yeoksam, evals, ad_id=AD_ID)
+
+    for value in result.scores.values():
+        assert 0.0 <= value <= 100.0
+    assert sum(result.resistance_share.values()) <= 1.001
+    assert len(result.top_resistance) <= 3
+    weights = [c.weight for c in result.persona_comments]
+    assert weights == sorted(weights, reverse=True)
+    assert result.excluded_cnt == 0

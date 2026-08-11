@@ -16,8 +16,9 @@
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+import time
+from concurrent.futures import Future, ThreadPoolExecutor, wait
+from typing import Any, Final
 
 from pydantic import ValidationError
 
@@ -46,6 +47,20 @@ MAX_WORKERS = 8
 
 #: 실패한 페르소나만 다시 부른다. 07 §8 은 1회 재시도로 못박았다.
 RETRY_ONCE = 1
+
+#: 평가 전체 마감(초). 07 R4 의 30초 예산에서 대조·요약·집계 몫을 남긴 값이다.
+#: 마감을 넘긴 페르소나는 실패로 세고, 신뢰도 사유에 남긴다 — 부분 패널의
+#: 점수를 온전한 패널인 척 보여주지 않기 위해서다.
+DEFAULT_DEADLINE_S: Final = 25.0
+
+#: LLM 응답에서 서버가 채우는 키. 모델이 이 키를 에코해도(따라 적어도)
+#: 오류로 만들지 않는다 — 서버 값이 이긴다. 에코는 흔한 행동이라 이걸 안
+#: 벗기면 멀쩡한 평가가 TypeError 로 죽고 재시도(유료)가 낭비된다.
+_SERVER_SIDE_KEYS: Final = frozenset({"persona_id"})
+
+#: 사장님 화면에 들어가는 자유 텍스트의 절단 상한. 폭주 출력을 좋은 답이
+#: 길다는 이유로 재시도(유료)하느니 자르는 쪽(무료)이 낫다.
+_TEXT_CAPS: Final = {"comment": 300, "resistance_detail": 300}
 
 SYSTEM = """너는 아래 특성의 손님이다. 광고를 보고 솔직하게 평가하라.
 
@@ -170,11 +185,22 @@ def build_user_prompt(
 
 
 def _parse(raw: dict[str, Any], persona_id: str) -> PersonaEval | None:
-    """스키마 관문. 형식이 깨지면 None — 부른 쪽이 재시도를 판단한다."""
+    """스키마 관문. 형식이 깨지면 None — 부른 쪽이 재시도를 판단한다.
+
+    관문을 넘기 전에 두 가지를 정리한다. 서버가 채우는 키(`persona_id`)는
+    모델이 에코해도 벗겨내고, 자유 텍스트는 상한에서 자른다. 둘 다 "고칠 수
+    있는 위반을 재시도로 보내지 않는다"는 같은 원칙이다 — 재시도는 유료다.
+    """
     if not raw:
         return None
+    cleaned = {k: v for k, v in raw.items() if k not in _SERVER_SIDE_KEYS}
+    for key, cap in _TEXT_CAPS.items():
+        value = cleaned.get(key)
+        if isinstance(value, str) and len(value) > cap:
+            logger.debug("텍스트 절단 %s.%s (%d자)", persona_id, key, len(value))
+            cleaned[key] = value[:cap]
     try:
-        return PersonaEval(persona_id=persona_id, **raw)
+        return PersonaEval(persona_id=persona_id, **cleaned)
     except (ValidationError, TypeError) as exc:
         logger.debug("스키마 실패 %s: %s", persona_id, exc)
         return None
@@ -215,6 +241,27 @@ def _evaluate_one(
     return None
 
 
+def _safe_evaluate_one(
+    client: ChatClient,
+    persona: Persona,
+    features: TradeAreaFeatures,
+    store: Store,
+    brief: AdBrief,
+    copy: CopyCandidate,
+) -> PersonaEval | None:
+    """`_evaluate_one` 의 예외 방벽.
+
+    스레드 안에서 던져진 예외는 `Future.result()` 까지 숨어 있다가 거기서
+    다시 터진다 — 잡지 않으면 네트워크 순단 **한 건**이 나머지 11명의 결과까지
+    통째로 버린다. 실패는 그 손님 한 명의 제외로 끝나야 한다.
+    """
+    try:
+        return _evaluate_one(client, persona, features, store, brief, copy)
+    except Exception:
+        logger.exception("평가 호출 실패 %s — 이 손님만 제외", persona.persona_id)
+        return None
+
+
 def _summarize(client: ChatClient, panel: Panel, evals: list[PersonaEval]) -> list[str]:
     """저항 요인과 코멘트를 개선 제안으로 옮긴다 (07 §7.3).
 
@@ -235,7 +282,7 @@ def _summarize(client: ChatClient, panel: Panel, evals: list[PersonaEval]) -> li
 
     raw = client.complete_json(SUMMARY_SYSTEM, "## 손님 반응\n" + "\n".join(lines))
     items = raw.get("suggestions") or []
-    return [str(s).strip() for s in items if isinstance(s, str) and s.strip()][:3]
+    return [str(s).strip()[:200] for s in items if isinstance(s, str) and s.strip()][:3]
 
 
 def evaluate(
@@ -248,6 +295,7 @@ def evaluate(
     client: ChatClient | None = None,
     summarize: bool = True,
     sigma_max: float = DEFAULT_SIGMA_MAX,
+    deadline_s: float = DEFAULT_DEADLINE_S,
 ) -> EvaluationResult:
     """광고물 1건을 패널에게 평가받는다.
 
@@ -260,34 +308,50 @@ def evaluate(
         client: 테스트용 주입구. 없으면 `MODEL_PROFILE` 을 따른다.
         summarize: 개선 제안 요약 콜을 쓸지.
         sigma_max: 분산 체크 임계값.
+        deadline_s: 전체 마감(초). 넘긴 페르소나는 실패로 세고 사유에 남긴다.
 
     Raises:
         AggregationError: 두 관문을 통과한 응답이 하나도 없을 때.
     """
     chat = client or get_client()
     features = panel.features
+    started = time.perf_counter()
 
     # 콜 상한을 넘으면 가중치가 큰 순으로 자른다 — 점수 기여가 큰 쪽을 남긴다.
     targets = sorted(panel.personas, key=lambda p: -p.weight)[:MAX_EVAL_CALLS]
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        results = list(
-            pool.map(
-                lambda p: _evaluate_one(chat, p, features, store, brief, copy),
-                targets,
-            )
+    # `with` 를 쓰지 않는 이유: 블록을 나갈 때 실행 중인 스레드를 **기다린다.**
+    # 마감을 넘긴 호출을 기다리면 마감이 마감이 아니게 되므로 버리고 나온다.
+    # 버려진 호출은 백그라운드에서 끝나며 토큰은 든다 — 마감을 넘겼을 때만.
+    pool = ThreadPoolExecutor(max_workers=MAX_WORKERS)
+    try:
+        futures: dict[Future[PersonaEval | None], Persona] = {
+            pool.submit(_safe_evaluate_one, chat, p, features, store, brief, copy): p
+            for p in targets
+        }
+        done, pending = wait(futures, timeout=deadline_s)
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+    # _safe_evaluate_one 이 예외를 전부 삼키므로 result() 는 던지지 않는다.
+    outcome = {f: f.result() for f in done}
+    evals = [r for r in outcome.values() if r is not None]
+    failed_ids = [futures[f].persona_id for f, r in outcome.items() if r is None]
+    timed_out = [futures[f].persona_id for f in pending]
+
+    extra_reasons: list[str] = []
+    if timed_out:
+        extra_reasons.append(
+            f"응답 시간 초과로 {len(timed_out)}명을 평가하지 못함 ({deadline_s:.0f}초 한도)"
         )
 
-    evals = [r for r in results if r is not None]
-    # 재시도까지 실패해 응답 자체가 없는 페르소나. 집계에 넘겨야 `excluded_cnt` 가
-    # 두 관문의 실패를 모두 센다 — 앞단 실패를 빼면 투명성 지표가 거짓이 된다.
-    failed_ids = [p.persona_id for p, r in zip(targets, results, strict=True) if r is None]
     logger.info(
-        "패널 평가 %s: 요청 %d, 통과 %d, 탈락 %d",
+        "패널 평가 %s: 요청 %d, 통과 %d, 실패 %d, 시간초과 %d",
         ad_id or "(무명)",
         len(targets),
         len(evals),
         len(failed_ids),
+        len(timed_out),
     )
 
     # 대조는 LLM 을 안 쓴다. 평가가 몇 명 살아남았든 항상 같은 문장이 나오므로
@@ -297,13 +361,22 @@ def evaluate(
         for n in contrast(features, brief, copy)
     ]
 
-    suggestions = _summarize(chat, panel, evals) if summarize and evals else []
+    suggestions: list[str] = []
+    if summarize and evals:
+        try:
+            suggestions = _summarize(chat, panel, evals)
+        except Exception:
+            # 요약은 부가물이다. 여기서 터졌다고 이미 끝난 평가를 버리면 안 된다.
+            logger.exception("제안 요약 실패 %s — 제안 없이 반환", ad_id or "(무명)")
+
     return aggregate(
         panel,
         evals,
         ad_id=ad_id,
         suggestions=suggestions,
-        failed_ids=failed_ids,
+        failed_ids=failed_ids + timed_out,
         contrast_notes=notes,
+        extra_reasons=extra_reasons,
+        elapsed_ms=int((time.perf_counter() - started) * 1000),
         sigma_max=sigma_max,
     )

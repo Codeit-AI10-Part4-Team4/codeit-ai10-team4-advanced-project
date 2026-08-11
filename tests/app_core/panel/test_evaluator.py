@@ -390,3 +390,115 @@ def test_resistance_share_empty_when_nobody_objects(yeoksam: Panel, shop, brief,
     result = evaluate(yeoksam, shop, brief, copy, client=client)
     assert result.resistance_share == {}
     assert result.top_resistance == []
+
+
+# --- 예외 격리·마감·에코 (2026-08-11 자체 공격에서 발견) ------------------------
+
+
+def test_client_exception_excludes_only_that_persona(yeoksam: Panel, shop, brief, copy) -> None:
+    """네트워크 순단 한 건이 12명 전체를 죽이면 안 된다.
+
+    스레드 안 예외는 `Future.result()` 에서 다시 터진다 — 방벽이 없으면
+    통과한 11명의 결과까지 통째로 버려진다. 실제로 죽는 것을 확인하고 막았다.
+    """
+    target = yeoksam.personas[0].demo
+
+    def reply(persona_id: str, _calls: list[str]) -> dict[str, Any]:
+        if persona_id == target:
+            raise ConnectionError("네트워크 순단")
+        return _good({p.demo: p for p in yeoksam.personas}[persona_id])
+
+    result = evaluate(yeoksam, shop, brief, copy, client=FakeClient(reply))
+
+    assert result.excluded_cnt == 1
+    assert yeoksam.personas[0].persona_id in result.excluded_ids
+    assert len(result.persona_comments) == len(yeoksam.personas) - 1
+
+
+def test_deadline_flags_timed_out_personas(yeoksam: Panel, shop, brief, copy) -> None:
+    """마감을 넘긴 페르소나는 실패로 세고, 신뢰도 사유에 남는다.
+
+    부분 패널의 점수를 온전한 패널인 척 보여주지 않기 위해서다.
+    """
+    import time as _time
+
+    target = yeoksam.personas[0].demo
+
+    def reply(persona_id: str, _calls: list[str]) -> dict[str, Any]:
+        if persona_id == target:
+            _time.sleep(0.8)
+        return _good({p.demo: p for p in yeoksam.personas}[persona_id])
+
+    result = evaluate(yeoksam, shop, brief, copy, client=FakeClient(reply), deadline_s=0.2)
+
+    assert yeoksam.personas[0].persona_id in result.excluded_ids
+    assert any("시간 초과" in r for r in result.confidence_reasons)
+    assert result.confidence == "low"
+
+
+def test_all_timed_out_raises(yeoksam: Panel, shop, brief, copy) -> None:
+    import time as _time
+
+    def reply(_persona_id: str, _calls: list[str]) -> dict[str, Any]:
+        _time.sleep(0.5)
+        return {}
+
+    with pytest.raises(AggregationError):
+        evaluate(yeoksam, shop, brief, copy, client=FakeClient(reply), deadline_s=0.05)
+
+
+def test_elapsed_ms_is_measured(yeoksam: Panel, shop, brief, copy) -> None:
+    """R4 30초 예산을 지켰는지 결과가 스스로 말해야 한다."""
+    result = evaluate(yeoksam, shop, brief, copy, client=FakeClient(_reply_by_demo(yeoksam)))
+    assert result.elapsed_ms >= 0
+
+
+def test_persona_id_echo_is_tolerated(yeoksam: Panel, shop, brief, copy) -> None:
+    """모델이 persona_id 를 에코하면 TypeError 로 죽고 재시도가 낭비됐다.
+
+    서버 값이 이기고, 에코는 벗겨낸다. 재시도도 없어야 한다.
+    """
+    by_demo = {p.demo: p for p in yeoksam.personas}
+
+    def reply(persona_id: str, _calls: list[str]) -> dict[str, Any]:
+        payload = _good(by_demo[persona_id])
+        payload["persona_id"] = "spoofed"
+        return payload
+
+    client = FakeClient(reply)
+    result = evaluate(yeoksam, shop, brief, copy, client=client)
+
+    assert result.excluded_cnt == 0
+    assert len(client.calls) == len(yeoksam.personas) + 1  # 재시도 없음
+    assert "spoofed" not in {c.persona_id for c in result.persona_comments}
+
+
+def test_runaway_comment_is_truncated_not_retried(yeoksam: Panel, shop, brief, copy) -> None:
+    """10KB 코멘트는 자르고 받는다 — 좋은 답이 길다는 이유로 재시도(유료)하지 않는다."""
+    by_demo = {p.demo: p for p in yeoksam.personas}
+
+    def reply(persona_id: str, _calls: list[str]) -> dict[str, Any]:
+        return _good(by_demo[persona_id], comment="가" * 10000)
+
+    client = FakeClient(reply)
+    result = evaluate(yeoksam, shop, brief, copy, client=client)
+
+    assert result.excluded_cnt == 0
+    assert all(len(c.comment) <= 300 for c in result.persona_comments)
+    assert len(client.calls) == len(yeoksam.personas) + 1  # 재시도 없음
+
+
+def test_summary_failure_does_not_void_scores(yeoksam: Panel, shop, brief, copy) -> None:
+    """요약은 부가물이다 — 요약 콜이 터져도 이미 끝난 평가를 버리면 안 된다."""
+
+    class Boom(FakeClient):
+        def complete_json(self, system: str, user: str) -> dict:
+            if system.startswith("손님들의 평가를"):
+                raise RuntimeError("요약 실패")
+            return super().complete_json(system, user)
+
+    result = evaluate(yeoksam, shop, brief, copy, client=Boom(_reply_by_demo(yeoksam)))
+
+    assert result.suggestions == []
+    assert result.scores
+    assert result.excluded_cnt == 0

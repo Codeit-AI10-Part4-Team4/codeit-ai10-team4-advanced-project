@@ -17,6 +17,7 @@ LLM은 서사(narrative)와 평가(PersonaEval)만 만든다. 그래서 이 파�
 
 from __future__ import annotations
 
+from math import isfinite
 from typing import Final, Literal
 
 from pydantic import (
@@ -77,6 +78,15 @@ class FeatureRef(BaseModel):
 
     path: str = Field(min_length=1)
     value: float
+
+    @field_validator("value")
+    @classmethod
+    def _finite(cls, v: float) -> float:
+        # NaN 은 자기 자신과도 다르다 — 대조가 조용히 항상 실패하게 되고,
+        # 로그에서 "왜 늘 탈락하지"를 오래 헤매게 된다. 입구에서 끊는다.
+        if not isfinite(v):
+            raise ValueError(f"근거 값은 유한한 수여야 합니다: {v!r}")
+        return v
 
 
 class TradeAreaFeatures(BaseModel):
@@ -154,6 +164,15 @@ class TradeAreaFeatures(BaseModel):
     def _sums_to_one(cls, v: dict[str, float], info: ValidationInfo) -> dict[str, float]:
         if not v:
             raise ValueError(f"{info.field_name}가 비어 있습니다")
+        for key, val in v.items():
+            # NaN 은 모든 비교가 거짓이라 아래 합계 검사를 **통과해 버린다**
+            # (nan > tol == False). 음수도 마찬가지다 — {-0.5, 1.5} 는 합이 1이다.
+            # 여기서 안 막으면 가중 평균 전체가 오염되고, 터지는 지점은 여기서
+            # 한참 멀어서 찾기 어렵다.
+            if not isfinite(val) or not 0.0 <= val <= 1.0:
+                raise ValueError(
+                    f"{info.field_name}[{key}] 가 0~1 의 유한한 수가 아닙니다: {val!r}"
+                )
         total = sum(v.values())
         if abs(total - 1.0) > SHARE_SUM_TOL:
             raise ValueError(f"{info.field_name} 비중 합이 1.0이 아닙니다 (합계 {total:.4f})")
@@ -167,6 +186,11 @@ class TradeAreaFeatures(BaseModel):
         """없으면 그냥 통과. 있으면 합이 1이어야 한다."""
         if v is None:
             return None
+        for key, val in v.items():
+            if not isfinite(val) or not 0.0 <= val <= 1.0:
+                raise ValueError(
+                    f"{info.field_name}[{key}] 가 0~1 의 유한한 수가 아닙니다: {val!r}"
+                )
         total = sum(v.values())
         if not v or abs(total - 1.0) > SHARE_SUM_TOL:
             raise ValueError(f"{info.field_name} 비중 합이 1.0이 아닙니다 (합계 {total:.4f})")
@@ -242,8 +266,10 @@ class PersonaEval(BaseModel):
     message: int = Field(ge=0, le=100)
     intent: int = Field(ge=0, le=100)
     resistance: Resistance
-    resistance_detail: str = ""
-    comment: str = Field(min_length=1)
+    resistance_detail: str = Field(default="", max_length=400)
+    #: 사장님이 읽는 한 문장. 폭주 출력이 화면과 요약 콜을 망가뜨리지 않게
+    #: 상한을 둔다. `_parse` 가 300 에서 먼저 자르므로 이 400 은 마지막 방벽이다.
+    comment: str = Field(min_length=1, max_length=400)
     #: 필수. 비어 있으면 스키마 단계에서 탈락한다.
     evidence: list[FeatureRef] = Field(min_length=1)
 
@@ -317,3 +343,5 @@ class EvaluationResult(BaseModel):
     #: 업종 폴백 여부. 화면에 "이 동네 전체 손님 기준" 배지를 띄우는 근거.
     is_category_fallback: bool = False
     demo_coverage: float
+    #: 평가 전체에 걸린 시간(ms). 07 R4 의 30초 예산을 지켰는지 결과가 스스로 말한다.
+    elapsed_ms: int = 0

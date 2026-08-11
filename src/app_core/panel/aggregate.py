@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from math import sqrt
 from typing import Final
@@ -29,12 +30,23 @@ from app_core.panel.schemas import (
     PersonaEval,
 )
 
+logger = logging.getLogger(__name__)
+
 #: 가중 표준편차가 이 값을 넘으면 신뢰도를 낮음으로 본다. 0~100 스케일.
 #: 초기값이며 재현성 실험으로 조정할 것.
 DEFAULT_SIGMA_MAX: Final = 20.0
 
 #: 결과에 싣는 저항 요인 개수.
 TOP_RESISTANCE_N: Final = 3
+
+#: 점수를 낼 최소 인원. 이보다 적으면 가중 평균이 사실상 한두 명의 목소리라
+#: 점수는 내되 신뢰도 사유에 남긴다. 탈락이 몰린 날 "12명 패널" 이라는 말이
+#: 거짓이 되지 않게 하는 장치다.
+MIN_SCORED_PERSONAS: Final = 3
+
+#: 재정규화 후 한 명이 가질 수 있는 비중 상한. 탈락으로 표본이 줄면 남은 한
+#: 명이 절반을 넘을 수 있는데, 그 점수는 패널이 아니라 개인의 취향이다.
+WEIGHT_CONCENTRATION_MAX: Final = 0.5
 
 
 class AggregationError(ValueError):
@@ -58,6 +70,8 @@ def aggregate(
     suggestions: list[str] | None = None,
     failed_ids: list[str] | None = None,
     contrast_notes: list[ContrastNote] | None = None,
+    extra_reasons: list[str] | None = None,
+    elapsed_ms: int = 0,
     sigma_max: float = DEFAULT_SIGMA_MAX,
     include_boundary_in_scores: bool = False,
 ) -> EvaluationResult:
@@ -73,6 +87,9 @@ def aggregate(
             페르소나. 스키마·근거 재시도까지 실패한 경우다. 여기서 안 받으면
             `excluded_cnt` 가 앞단 실패를 놓쳐 투명성 지표가 거짓이 된다.
         contrast_notes: LLM 없이 만든 대조 문장. 집계는 만들지 않고 실어 나른다.
+        extra_reasons: 호출 단계에서 이미 확정된 신뢰도 사유 (예: 시간 초과).
+            집계가 아는 사유(폴백·커버리지·분산·표본)와 합쳐진다.
+        elapsed_ms: 평가 전체 소요 시간. 결과에 그대로 실린다.
         sigma_max: 이 값을 넘는 가중 표준편차면 `confidence="low"`.
         include_boundary_in_scores: 경계 페르소나를 점수에 넣을지.
             기본값 False가 07 §7.1의 설계다.
@@ -85,7 +102,14 @@ def aggregate(
     valid: list[tuple[Persona, PersonaEval]] = []
     excluded_ids: list[str] = list(failed_ids or [])
 
+    seen_ids: set[str] = set()
     for ev in evals:
+        if ev.persona_id in seen_ids:
+            # 같은 페르소나의 두 번째 응답. 두 번 세면 그 손님의 가중치가
+            # 두 배가 된다 — 상류 버그를 조용히 증폭하느니 버리고 로그로 남긴다.
+            logger.debug("중복 응답 무시 %s", ev.persona_id)
+            continue
+        seen_ids.add(ev.persona_id)
         persona = panel.by_id(ev.persona_id)
         if persona is None or evidence_failures(features, ev.evidence):
             excluded_ids.append(ev.persona_id)
@@ -140,7 +164,14 @@ def aggregate(
     # 달라져야 하므로 사유를 따로 남긴다.
     # 업종 폴백(is_category_fallback)은 여기 넣지 않는다 — 정밀도가 낮아질 뿐
     # "우리 동네" 그라운딩은 유지되므로 신뢰 불가가 아니다 (07 §4.5).
-    reasons: list[str] = []
+    reasons: list[str] = list(extra_reasons or [])
+    if len(scored) < MIN_SCORED_PERSONAS:
+        reasons.append(
+            f"통과한 손님이 {len(scored)}명뿐이라 표본이 작음 (기준 {MIN_SCORED_PERSONAS}명)"
+        )
+    top_weight = max(w for w, _ in normalized)
+    if top_weight > WEIGHT_CONCENTRATION_MAX:
+        reasons.append(f"한 손님의 비중이 {top_weight:.0%}라 결과가 그쪽으로 쏠림")
     if features.is_fallback:
         reasons.append("동네 데이터 없이 서울 평균으로 평가함")
     if features.low_coverage:
@@ -170,4 +201,5 @@ def aggregate(
         is_fallback=features.is_fallback,
         is_category_fallback=features.is_category_fallback,
         demo_coverage=features.demo_coverage,
+        elapsed_ms=elapsed_ms,
     )
