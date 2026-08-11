@@ -24,6 +24,7 @@ import json
 import os
 import statistics
 import sys
+from hashlib import sha1
 from pathlib import Path
 from typing import NamedTuple
 
@@ -168,8 +169,19 @@ def run_pairs(k: int) -> int:
 SHEET_COLUMNS = ["ad_key", "headline", "sub", "price", "사람점수_0_100"]
 
 
+def blind_key(key: str) -> str:
+    """시트에 실을 가림용 식별자.
+
+    광고 키를 그대로 쓰면 `time_good` · `price_bad` 처럼 **정답이 첫 칸에
+    보인다**. 섞어도 소용없다 — 채우는 사람이 답을 보고 매기게 된다.
+    되돌릴 필요는 없고 `--score` 에서 같은 함수로 대조만 하면 되므로
+    단방향 해시로 충분하다.
+    """
+    return sha1(key.encode()).hexdigest()[:8]
+
+
 def make_sheet(path: Path) -> int:
-    """사람이 블라인드로 채울 시트. 순서를 섞어 광고 키를 감춘다."""
+    """사람이 블라인드로 채울 시트. 순서를 섞고 키를 가린다."""
     import random
 
     ads = [ad for pair in PAIRS for ad in (pair.better, pair.worse)]
@@ -178,7 +190,7 @@ def make_sheet(path: Path) -> int:
         writer = csv.writer(fp)
         writer.writerow(SHEET_COLUMNS)
         for ad in ads:
-            writer.writerow([ad.key, ad.copy.headline, ad.copy.sub, ad.brief.price, ""])
+            writer.writerow([blind_key(ad.key), ad.copy.headline, ad.copy.sub, ad.brief.price, ""])
     print(f"{path} 를 만들었습니다. 팀원들이 각자 채운 뒤:")
     print(f"  MODEL_PROFILE=openai python eval/accuracy.py --score {path}")
     print("\n채울 때 규칙 — 광고만 보고 0~100 으로 매기세요.")
@@ -194,7 +206,9 @@ def score_against_humans(path: Path, k: int) -> int:
         return 1
 
     panel, store = load_panel(), sample_store()
-    by_key = {ad.key: ad for pair in PAIRS for ad in (pair.better, pair.worse)}
+    # 시트에는 가림용 해시가 실린다. 예전에 만든 시트(원래 키)도 그대로 읽는다.
+    ads_all = [ad for pair in PAIRS for ad in (pair.better, pair.worse)]
+    by_key = {ad.key: ad for ad in ads_all} | {blind_key(ad.key): ad for ad in ads_all}
 
     human, machine = [], []
     for row in rows:
