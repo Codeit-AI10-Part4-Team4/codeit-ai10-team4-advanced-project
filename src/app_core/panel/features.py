@@ -153,10 +153,25 @@ def _shares(values: dict[str, float]) -> dict[str, float]:
     return {k: round(v / total, 4) for k, v in values.items()}
 
 
+#: 업종 매출을 그대로 믿기 위한 최소 분기 결제 건수.
+#:
+#: 실측 — 같은 업종의 중앙 객단가 대비 상대 편차:
+#:     30건 미만   중앙 0.709 / p90 8.96배   ← 자릿수가 틀린다
+#:     30~99      중앙 0.558 / p90 5.29배
+#:     100~299    중앙 0.424 / p90 2.94배
+#:     300~999    중앙 0.362 / p90 1.97배   ← 여기서 p90 이 2 아래로
+#:     5천 이상    중앙 0.242 / p90 0.84배   ← 노이즈 바닥(동네별 실제 차이)
+#:
+#: 결제 6건으로 낸 평균을 "이 동네 평균"이라고 사장님께 말할 수는 없다.
+#: 버리지 않고 상권 전체로 폴백한다 — 폴백하면 표본이 중앙값 3,498배 늘고,
+#: 화면에는 이미 "이 동네 전체 손님 기준" 배지가 뜬다.
+MIN_SALES_CNT: Final = 300
+
+
 def _sales_row(
     con: duckdb.DuckDBPyConnection, area_cd: str, codes: tuple[str, ...]
 ) -> tuple[Any, bool]:
-    """업종 매출 합계. 해당 업종이 그 상권에 없으면 상권 전체로 폴백한다.
+    """업종 매출 합계. 그 상권에 업종이 없거나 **표본이 너무 적으면** 전체로 폴백한다.
 
     커버리지가 낮은 업종(부동산중개는 상권의 1%)에서 에러를 내는 대신,
     업종 축만 빼고 '이 동네 전체 손님'으로 평가를 이어간다 (§4.5).
@@ -174,7 +189,7 @@ def _sales_row(
             f"SELECT {cols} FROM sales WHERE area_cd = ? AND category_cd IN ({ph})",
             [area_cd, *codes],
         ).fetchone()
-        if row and row[0]:
+        if row and row[0] and row[1] >= MIN_SALES_CNT:
             return row, False
     row = con.execute(f"SELECT {cols} FROM sales WHERE area_cd = ?", [area_cd]).fetchone()
     if not row or not row[0]:

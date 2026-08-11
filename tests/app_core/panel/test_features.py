@@ -100,3 +100,31 @@ def test_데이터_파일이_없으면_사장님_언어로_안내한다(monkeypa
     monkeypatch.setattr(features, "DB_PATH", Path("data/없는파일.duckdb"))
     with pytest.raises(NoTradeAreaError, match="상권 데이터 파일이 없습니다"):
         build_features("", "cafe", coord=YEOKSAM)
+
+
+def test_표본이_적으면_상권_전체로_폴백한다() -> None:
+    """결제 6건으로 낸 평균을 '이 동네 평균'이라고 말할 수는 없다.
+
+    실측: 30건 미만 구간의 객단가는 업종 중앙값에서 p90 8.96배 벗어난다.
+    """
+    import duckdb
+
+    from app_core.panel.features import MIN_SALES_CNT, _sales_row
+
+    con = duckdb.connect(str(DB_PATH), read_only=True)
+    try:
+        small = con.execute(
+            "SELECT area_cd, category_cd FROM sales WHERE cnt < ? ORDER BY cnt LIMIT 1",
+            [MIN_SALES_CNT],
+        ).fetchone()
+        assert small, "표본이 적은 행이 하나도 없다 — 임계값을 다시 봐야 한다"
+        _, fallback = _sales_row(con, small[0], (small[1],))
+        assert fallback is True
+    finally:
+        con.close()
+
+
+def test_표본이_충분하면_업종_값을_쓴다() -> None:
+    f = build_features("", "cafe", coord=YEOKSAM)
+    assert f["is_category_fallback"] is False
+    assert f["avg_ticket"] > 0
