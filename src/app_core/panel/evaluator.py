@@ -16,7 +16,9 @@
 from __future__ import annotations
 
 import logging
+import statistics
 import time
+from collections import Counter
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from typing import Any, Final
 
@@ -28,6 +30,7 @@ from app_core.panel.contrast import contrast
 from app_core.panel.evidence import evidence_failures
 from app_core.panel.narrator import MOTIVE_KO, PRICE_KO, TIME_KO
 from app_core.panel.schemas import (
+    METRIC_FIELDS,
     ContrastNote,
     EvaluationResult,
     Panel,
@@ -60,6 +63,15 @@ _SERVER_SIDE_KEYS: Final = frozenset({"persona_id"})
 
 #: 사장님 화면에 들어가는 자유 텍스트의 절단 상한. 폭주 출력을 좋은 답이
 #: 길다는 이유로 재시도(유료)하느니 자르는 쪽(무료)이 낫다.
+#: 같은 손님을 몇 번 물어볼지. LLM 의 절대 점수는 같은 입력에도 흔들린다
+#: (실측, 아인님: 같은 광고 3회에 53.4 / 53.5 / 63.4). 여러 번 물어 **중앙값**을
+#: 쓰면 한 번의 튐이 결과를 흔들지 못한다. 표준편차는 대략 √k 로 줄어든다.
+#:
+#: 전원에게 k=3 을 쓰면 12명 × 3 = 36콜로 상한(20)을 넘는다. 그래서 **가중치가
+#: 큰 손님부터** 남는 예산만큼만 반복한다 — 가중 평균을 실제로 움직이는 쪽의
+#: 분산을 줄이는 것이 같은 콜로 얻는 이득이 가장 크다.
+DEFAULT_CONSISTENCY_K: Final = 3
+
 _TEXT_CAPS: Final = {"comment": 300, "resistance_detail": 300}
 
 SYSTEM = """너는 아래 특성의 손님이다. 광고를 보고 솔직하게 평가하라.
@@ -71,6 +83,15 @@ SYSTEM = """너는 아래 특성의 손님이다. 광고를 보고 솔직하게 
   attention  이 광고가 눈에 걸리는가 (0~100)
   message    무엇을 파는지 바로 알겠는가 (0~100)
   intent     가볼 마음이 드는가 (0~100)
+
+**점수 기준** — 숫자만 주면 사람마다 척도가 달라진다. 아래에 맞춰 매겨라.
+   0~20   그냥 지나친다. 눈에 들어오지도 않았다
+  21~40   보긴 했는데 마음이 움직이지 않는다
+  41~60   괜찮네 정도. 지금 당장은 아니다
+  61~80   한번 가볼까 싶다
+  81~100  지금 가고 싶다. 저장하거나 남에게 보낸다
+
+  **60점대에 몰아 쓰지 마라.** 안 끌리면 20점대를, 확 끌리면 90점대를 쓴다.
 
 **resistance** — 가장 큰 걸림돌을 **딱 하나** 고른다.
   price      가격이 부담되거나 값어치를 모르겠다
@@ -129,6 +150,19 @@ SUMMARY_SYSTEM = """손님들의 평가를 사장님이 바로 쓸 수 있는 **
 {"suggestions": ["제안 1", "제안 2"]}"""
 
 
+def offered_paths(features: TradeAreaFeatures, persona: Persona) -> frozenset[str]:
+    """이 손님에게 실제로 보여준 숫자의 경로.
+
+    프롬프트와 근거 게이트가 **같은 목록**을 봐야 한다. 따로 관리하면 한쪽만
+    바뀌었을 때 멀쩡한 근거가 탈락하거나 엉뚱한 근거가 통과한다.
+    """
+    paths = {ref.path for ref in persona.evidence}
+    paths |= {"avg_ticket", "avg_ticket_pct", "competitor_cnt", "weekend_ratio"}
+    if features.work_ratio is not None:
+        paths.add("work_ratio")
+    return frozenset(paths)
+
+
 def _feature_lines(features: TradeAreaFeatures, persona: Persona) -> str:
     """평가에 쓸 숫자만 골라 준다.
 
@@ -136,15 +170,14 @@ def _feature_lines(features: TradeAreaFeatures, persona: Persona) -> str:
     통과해버린다. 그래서 **이 페르소나 자신의 근거 + 상권 공통 값**만 준다.
     `match_distance_m`·`demo_coverage` 는 인용 금지라 애초에 넣지 않는다.
     """
-    lines = [f"- {ref.path} = {ref.value}" for ref in persona.evidence]
-    lines += [
-        f"- avg_ticket = {features.avg_ticket}",
-        f"- avg_ticket_pct = {features.avg_ticket_pct}",
-        f"- competitor_cnt = {features.competitor_cnt}",
-        f"- weekend_ratio = {features.weekend_ratio}",
-    ]
-    if features.work_ratio is not None:
-        lines.append(f"- work_ratio = {features.work_ratio}")
+    from app_core.panel.evidence import resolve
+
+    lines = []
+    for path in sorted(offered_paths(features, persona)):
+        resolved = resolve(features, path)
+        if resolved is not None:
+            value = int(resolved.value) if resolved.exact else round(resolved.value, 4)
+            lines.append(f"- {path} = {value}")
     return "\n".join(lines)
 
 
@@ -216,6 +249,7 @@ def _evaluate_one(
 ) -> PersonaEval | None:
     """한 명을 평가한다. 두 관문 중 하나라도 실패하면 1회만 다시 부른다."""
     user = build_user_prompt(persona, features, store, brief, copy)
+    allowed = offered_paths(features, persona)
     hint = ""
 
     for attempt in range(RETRY_ONCE + 1):
@@ -228,17 +262,67 @@ def _evaluate_one(
             )
             continue
 
-        failures = evidence_failures(features, result.evidence)
+        # 그 손님에게 보여준 숫자만 근거로 인정한다 — 값이 맞아도 남의 것이면
+        # "정확한 인용"일 뿐 자기 판단의 근거가 아니다.
+        failures = evidence_failures(features, result.evidence, allowed)
         if not failures:
             return result
 
         logger.debug("근거 대조 실패 %s (시도 %d): %s", persona.persona_id, attempt + 1, failures)
         paths = ", ".join(f.path for f in failures)
-        hint = _retry_hint(
-            f"근거로 든 수치가 실제 값과 달랐다 ({paths}). "
-            "'우리 동네 숫자'에 적힌 값을 **그대로** 옮겨 적어라."
-        )
+        if any(f.reason == "off_prompt" for f in failures):
+            hint = _retry_hint(
+                f"'우리 동네 숫자' 에 없는 항목을 근거로 들었다 ({paths}). "
+                "**그 목록에 적힌 것만** 인용할 수 있다."
+            )
+        else:
+            hint = _retry_hint(
+                f"근거로 든 수치가 실제 값과 달랐다 ({paths}). "
+                "'우리 동네 숫자'에 적힌 값을 **그대로** 옮겨 적어라."
+            )
     return None
+
+
+def _merge_samples(samples: list[PersonaEval]) -> PersonaEval:
+    """같은 손님의 여러 응답을 하나로 합친다.
+
+    점수는 **중앙값** — 평균이 아니다. 한 번의 극단값(53·53·63 의 63)이
+    평균은 끌고 가지만 중앙값은 못 흔든다.
+
+    코멘트·근거는 지어내지 않고 **중앙값에 가장 가까운 응답의 것**을 쓴다.
+    합성 문장을 만들면 그 문장은 아무도 하지 않은 말이 된다.
+    """
+    if len(samples) == 1:
+        return samples[0]
+
+    medians = {
+        name: round(statistics.median(getattr(s, name) for s in samples)) for name in METRIC_FIELDS
+    }
+    representative = min(
+        samples,
+        key=lambda s: sum(abs(getattr(s, n) - medians[n]) for n in METRIC_FIELDS),
+    )
+    # 저항 요인은 수치가 아니라 라벨이라 중앙값이 없다 — 최빈값을 쓴다.
+    resistance = Counter(s.resistance for s in samples).most_common(1)[0][0]
+    return representative.model_copy(update={**medians, "resistance": resistance})
+
+
+def _sample_plan(targets: list[Persona], k: int) -> dict[str, int]:
+    """누구를 몇 번 물어볼지. 남는 콜을 가중치 큰 순으로 나눠준다.
+
+    요약 콜 1개를 남겨두고 계산한다.
+    """
+    if k <= 1:
+        return {p.persona_id: 1 for p in targets}
+    budget = MAX_EVAL_CALLS - len(targets) - 1
+    plan = {p.persona_id: 1 for p in targets}
+    for persona in targets:  # 이미 가중치 내림차순
+        extra = min(k - 1, budget)
+        if extra <= 0:
+            break
+        plan[persona.persona_id] += extra
+        budget -= extra
+    return plan
 
 
 def _safe_evaluate_one(
@@ -248,6 +332,7 @@ def _safe_evaluate_one(
     store: Store,
     brief: AdBrief,
     copy: CopyCandidate,
+    samples: int = 1,
 ) -> PersonaEval | None:
     """`_evaluate_one` 의 예외 방벽.
 
@@ -255,11 +340,18 @@ def _safe_evaluate_one(
     다시 터진다 — 잡지 않으면 네트워크 순단 **한 건**이 나머지 11명의 결과까지
     통째로 버린다. 실패는 그 손님 한 명의 제외로 끝나야 한다.
     """
-    try:
-        return _evaluate_one(client, persona, features, store, brief, copy)
-    except Exception:
-        logger.exception("평가 호출 실패 %s — 이 손님만 제외", persona.persona_id)
+    collected: list[PersonaEval] = []
+    for _ in range(max(1, samples)):
+        try:
+            one = _evaluate_one(client, persona, features, store, brief, copy)
+        except Exception:
+            logger.exception("평가 호출 실패 %s — 이 표본만 버림", persona.persona_id)
+            continue
+        if one is not None:
+            collected.append(one)
+    if not collected:
         return None
+    return _merge_samples(collected)
 
 
 def _summarize(client: ChatClient, panel: Panel, evals: list[PersonaEval]) -> list[str]:
@@ -296,6 +388,7 @@ def evaluate(
     summarize: bool = True,
     sigma_max: float = DEFAULT_SIGMA_MAX,
     deadline_s: float = DEFAULT_DEADLINE_S,
+    consistency_k: int = DEFAULT_CONSISTENCY_K,
 ) -> EvaluationResult:
     """광고물 1건을 패널에게 평가받는다.
 
@@ -309,6 +402,8 @@ def evaluate(
         summarize: 개선 제안 요약 콜을 쓸지.
         sigma_max: 분산 체크 임계값.
         deadline_s: 전체 마감(초). 넘긴 페르소나는 실패로 세고 사유에 남긴다.
+        consistency_k: 같은 손님을 몇 번 물어 중앙값을 쓸지. 남는 콜 예산만큼
+            가중치가 큰 손님부터 적용된다. 1 이면 끈다.
 
     Raises:
         AggregationError: 두 관문을 통과한 응답이 하나도 없을 때.
@@ -325,8 +420,18 @@ def evaluate(
     # 버려진 호출은 백그라운드에서 끝나며 토큰은 든다 — 마감을 넘겼을 때만.
     pool = ThreadPoolExecutor(max_workers=MAX_WORKERS)
     try:
+        plan = _sample_plan(targets, consistency_k)
         futures: dict[Future[PersonaEval | None], Persona] = {
-            pool.submit(_safe_evaluate_one, chat, p, features, store, brief, copy): p
+            pool.submit(
+                _safe_evaluate_one,
+                chat,
+                p,
+                features,
+                store,
+                brief,
+                copy,
+                plan[p.persona_id],
+            ): p
             for p in targets
         }
         done, pending = wait(futures, timeout=deadline_s)
@@ -346,9 +451,10 @@ def evaluate(
         )
 
     logger.info(
-        "패널 평가 %s: 요청 %d, 통과 %d, 실패 %d, 시간초과 %d",
+        "패널 평가 %s: 요청 %d(콜 %d), 통과 %d, 실패 %d, 시간초과 %d",
         ad_id or "(무명)",
         len(targets),
+        sum(plan.values()),
         len(evals),
         len(failed_ids),
         len(timed_out),

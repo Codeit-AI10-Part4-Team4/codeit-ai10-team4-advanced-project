@@ -8,7 +8,12 @@ import pytest
 
 from app_core.panel import evaluator
 from app_core.panel.aggregate import AggregationError
-from app_core.panel.evaluator import MAX_EVAL_CALLS, build_user_prompt, evaluate
+from app_core.panel.evaluator import (
+    MAX_EVAL_CALLS,
+    build_user_prompt,
+    evaluate,
+    offered_paths,
+)
 from app_core.panel.schemas import Panel, Persona
 from app_core.schema import AdBrief, CopyCandidate, Store, StoreInput
 
@@ -94,10 +99,10 @@ def test_all_personas_evaluated(yeoksam: Panel, shop, brief, copy) -> None:
     assert len(result.persona_comments) == len(yeoksam.personas)
 
 
-def test_call_count_is_one_per_persona_plus_summary(yeoksam: Panel, shop, brief, copy) -> None:
-    """콜 예산이 걸려 있다 — 한 명당 1콜 + 요약 1콜이어야 한다 (07 R4)."""
+def test_call_count_without_consistency(yeoksam: Panel, shop, brief, copy) -> None:
+    """자기일관성을 끄면 한 명당 1콜 + 요약 1콜이다 (07 R4)."""
     client = FakeClient(_reply_by_demo(yeoksam))
-    evaluate(yeoksam, shop, brief, copy, client=client)
+    evaluate(yeoksam, shop, brief, copy, client=client, consistency_k=1)
 
     assert len(client.calls) == len(yeoksam.personas) + 1
     assert client.calls.count("summary") == 1
@@ -347,7 +352,7 @@ def test_contrast_notes_survive_the_evidence_gate(yeoksam: Panel, shop, brief, c
 def test_contrast_is_llm_free(yeoksam: Panel, shop, brief, copy) -> None:
     """대조는 콜을 쓰지 않는다 — 예산에 영향이 없어야 한다."""
     client = FakeClient(_reply_by_demo(yeoksam))
-    evaluate(yeoksam, shop, brief, copy, client=client)
+    evaluate(yeoksam, shop, brief, copy, client=client, consistency_k=1)
     assert len(client.calls) == len(yeoksam.personas) + 1  # 평가 + 요약뿐
 
 
@@ -466,7 +471,7 @@ def test_persona_id_echo_is_tolerated(yeoksam: Panel, shop, brief, copy) -> None
         return payload
 
     client = FakeClient(reply)
-    result = evaluate(yeoksam, shop, brief, copy, client=client)
+    result = evaluate(yeoksam, shop, brief, copy, client=client, consistency_k=1)
 
     assert result.excluded_cnt == 0
     assert len(client.calls) == len(yeoksam.personas) + 1  # 재시도 없음
@@ -481,7 +486,7 @@ def test_runaway_comment_is_truncated_not_retried(yeoksam: Panel, shop, brief, c
         return _good(by_demo[persona_id], comment="가" * 10000)
 
     client = FakeClient(reply)
-    result = evaluate(yeoksam, shop, brief, copy, client=client)
+    result = evaluate(yeoksam, shop, brief, copy, client=client, consistency_k=1)
 
     assert result.excluded_cnt == 0
     assert all(len(c.comment) <= 300 for c in result.persona_comments)
@@ -502,3 +507,145 @@ def test_summary_failure_does_not_void_scores(yeoksam: Panel, shop, brief, copy)
     assert result.suggestions == []
     assert result.scores
     assert result.excluded_cnt == 0
+
+
+# --- 정확도: 근거의 질 · 척도 앵커 · 자기일관성 (V6) ---------------------------
+
+
+def test_evidence_must_come_from_this_persona(yeoksam: Panel, shop, brief, copy) -> None:
+    """값이 맞아도 **그 손님에게 보여주지 않은** 숫자는 근거가 아니다.
+
+    이게 없으면 60대 손님이 "30대가 38%라서"를 근거로 대도 통과한다.
+    인용은 정확하지만 자기 판단의 근거는 아니다.
+    """
+    old = next(p for p in yeoksam.personas if p.demo.startswith("60"))
+    foreign = "age_share.30"
+    assert foreign not in offered_paths(yeoksam.features, old)
+
+    def reply(persona_id: str, _calls: list[str]) -> dict[str, Any]:
+        persona = {p.demo: p for p in yeoksam.personas}[persona_id]
+        if persona.persona_id == old.persona_id:
+            # 값 자체는 실제값과 정확히 일치한다 — 그래도 탈락해야 한다
+            return _good(
+                persona,
+                evidence=[{"path": foreign, "value": yeoksam.features.age_share["30"]}],
+            )
+        return _good(persona)
+
+    result = evaluate(yeoksam, shop, brief, copy, client=FakeClient(reply), consistency_k=1)
+    assert old.persona_id in result.excluded_ids
+
+
+def test_off_prompt_hint_tells_the_model_what_to_use(yeoksam: Panel, shop, brief, copy) -> None:
+    """재시도 지시가 "값이 틀렸다"가 아니라 "목록에 없다"여야 고칠 수 있다."""
+    old = next(p for p in yeoksam.personas if p.demo.startswith("60"))
+    seen: list[str] = []
+
+    def reply(persona_id: str, _calls: list[str]) -> dict[str, Any]:
+        persona = {p.demo: p for p in yeoksam.personas}[persona_id]
+        if persona.persona_id == old.persona_id:
+            return _good(
+                persona,
+                evidence=[{"path": "age_share.30", "value": yeoksam.features.age_share["30"]}],
+            )
+        return _good(persona)
+
+    class Recording(FakeClient):
+        def complete_json(self, system: str, user: str) -> dict:
+            if not system.startswith("손님들의 평가를"):
+                seen.append(user)
+            return super().complete_json(system, user)
+
+    evaluate(yeoksam, shop, brief, copy, client=Recording(reply), consistency_k=1)
+    hints = [u for u in seen if "직전 응답이 규칙을 어겼다" in u]
+    assert hints
+    assert "목록에 적힌 것만" in hints[0] or "그 목록에 적힌 것만" in hints[0]
+
+
+def test_offered_paths_match_the_prompt(yeoksam: Panel) -> None:
+    """프롬프트와 게이트가 같은 목록을 봐야 한다 — 따로 관리하면 어긋난다."""
+    for persona in yeoksam.personas:
+        block = evaluator._feature_lines(yeoksam.features, persona)
+        in_prompt = {line.split(" = ")[0].removeprefix("- ") for line in block.splitlines()}
+        assert in_prompt == offered_paths(yeoksam.features, persona), persona.persona_id
+
+
+def test_prompt_gives_score_anchors() -> None:
+    """0~100 만 주면 척도가 사람마다 달라진다 — 구간 뜻을 준다."""
+    assert "점수 기준" in evaluator.SYSTEM
+    assert "81~100" in evaluator.SYSTEM
+    assert "60점대에 몰아 쓰지 마라" in evaluator.SYSTEM
+
+
+def test_consistency_uses_median_not_mean(yeoksam: Panel, shop, brief, copy) -> None:
+    """한 번의 튐이 결과를 흔들면 안 된다.
+
+    53 / 53 / 63 → 중앙값 53. 평균이면 56.3 으로 끌려간다
+    (아인님 실측에서 실제로 나온 값이다).
+    """
+    top = max(yeoksam.personas, key=lambda p: p.weight)
+    scores = {top.demo: [53, 53, 63]}
+
+    def reply(persona_id: str, calls: list[str]) -> dict[str, Any]:
+        persona = {p.demo: p for p in yeoksam.personas}[persona_id]
+        if persona_id in scores:
+            n = calls.count(persona_id) - 1
+            value = scores[persona_id][min(n, 2)]
+            return _good(persona, attention=value, message=value, intent=value)
+        return _good(persona, attention=53, message=53, intent=53)
+
+    result = evaluate(yeoksam, shop, brief, copy, client=FakeClient(reply), consistency_k=3)
+    assert result.scores["attention"] == 53.0
+
+
+def test_consistency_respects_the_call_budget(yeoksam: Panel, shop, brief, copy) -> None:
+    """반복이 예산을 넘으면 안 된다 — 요약 1콜까지 계산에 넣는다 (07 R4)."""
+    client = FakeClient(_reply_by_demo(yeoksam))
+    evaluate(yeoksam, shop, brief, copy, client=client, consistency_k=3)
+    assert len(client.calls) <= MAX_EVAL_CALLS
+
+
+def test_consistency_goes_to_heaviest_personas_first(yeoksam: Panel) -> None:
+    """남는 콜은 가중 평균을 실제로 움직이는 쪽에 쓴다."""
+    targets = sorted(yeoksam.personas, key=lambda p: -p.weight)
+    plan = evaluator._sample_plan(targets, 3)
+
+    assert plan[targets[0].persona_id] >= plan[targets[-1].persona_id]
+    assert sum(plan.values()) <= MAX_EVAL_CALLS - 1
+
+
+def test_consistency_can_be_disabled(yeoksam: Panel) -> None:
+    targets = sorted(yeoksam.personas, key=lambda p: -p.weight)
+    assert set(evaluator._sample_plan(targets, 1).values()) == {1}
+
+
+def test_merged_comment_is_a_real_response(yeoksam: Panel, shop, brief, copy) -> None:
+    """합성 문장을 만들면 아무도 하지 않은 말이 된다 — 실제 응답 중 하나를 쓴다."""
+    top = max(yeoksam.personas, key=lambda p: p.weight)
+    said = {"첫 번째 말", "두 번째 말", "세 번째 말"}
+
+    def reply(persona_id: str, calls: list[str]) -> dict[str, Any]:
+        persona = {p.demo: p for p in yeoksam.personas}[persona_id]
+        payload = _good(persona)
+        if persona.persona_id == top.persona_id:
+            payload["comment"] = list(said)[min(calls.count(persona_id) - 1, 2)]
+        return payload
+
+    result = evaluate(yeoksam, shop, brief, copy, client=FakeClient(reply), consistency_k=3)
+    comment = next(c.comment for c in result.persona_comments if c.persona_id == top.persona_id)
+    assert comment in said
+
+
+def test_one_bad_sample_does_not_lose_the_persona(yeoksam: Panel, shop, brief, copy) -> None:
+    """표본 하나가 예외로 죽어도 나머지로 합쳐야 한다."""
+    top = max(yeoksam.personas, key=lambda p: p.weight)
+
+    def reply(persona_id: str, calls: list[str]) -> dict[str, Any]:
+        persona = {p.demo: p for p in yeoksam.personas}[persona_id]
+        if persona.persona_id == top.persona_id and calls.count(persona_id) == 2:
+            raise ConnectionError("두 번째 표본만 순단")
+        return _good(persona)
+
+    result = evaluate(yeoksam, shop, brief, copy, client=FakeClient(reply), consistency_k=3)
+    assert result.excluded_cnt == 0
+    assert top.persona_id in {c.persona_id for c in result.persona_comments}

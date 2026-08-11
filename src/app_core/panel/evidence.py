@@ -8,6 +8,11 @@ LLM이 근거 수치를 창작하면 그 응답은 집계에서 빠진다.
 - 정수 필드(`avg_ticket`, `competitor_cnt`) → 정확 일치
 - 존재하지 않는 경로 → 탈락
 - 인용 금지 필드 → 탈락 (아래 `_NON_CITABLE`)
+- 프롬프트에 주지 않은 경로 → 탈락 (`allowed_paths`)
+
+마지막 규칙이 근거의 **질**을 만든다. 값이 맞는지만 보면 60대 손님이
+"30대가 38%라서"를 근거로 대도 통과한다 — 인용은 정확하지만 자기 판단의
+근거는 아니다. 그 손님에게 실제로 보여준 숫자만 인정한다.
 """
 
 from __future__ import annotations
@@ -35,7 +40,7 @@ _MAPPING_FIELDS: Final = frozenset(MAPPING_FIELDS)
 #: 둘 다 결과 화면에는 그대로 노출된다(`confidence_reasons` 및 출처 필드).
 _NON_CITABLE: Final = frozenset({"match_distance_m", "demo_coverage"})
 
-FailureReason = Literal["unknown_path", "not_citable", "value_mismatch"]
+FailureReason = Literal["unknown_path", "not_citable", "off_prompt", "value_mismatch"]
 
 
 class ResolvedValue(NamedTuple):
@@ -86,7 +91,11 @@ def _within_tolerance(cited: float, actual: float) -> bool:
     return abs(cited - actual) <= RELATIVE_TOLERANCE * abs(actual)
 
 
-def check_ref(features: TradeAreaFeatures, ref: FeatureRef) -> EvidenceFailure | None:
+def check_ref(
+    features: TradeAreaFeatures,
+    ref: FeatureRef,
+    allowed_paths: frozenset[str] | None = None,
+) -> EvidenceFailure | None:
     """근거 한 건을 대조한다. 통과하면 None.
 
     `resolve()` 는 "무슨 값인가"만 답하고, 인용해도 되는 값인지는 여기서 본다.
@@ -95,6 +104,11 @@ def check_ref(features: TradeAreaFeatures, ref: FeatureRef) -> EvidenceFailure |
     """
     if ref.path.partition(".")[0] in _NON_CITABLE:
         return EvidenceFailure(ref.path, ref.value, None, "not_citable")
+
+    # 그 손님에게 보여준 숫자만 근거가 된다. 값이 맞아도 자기 것이 아니면
+    # "정확한 인용"일 뿐 "자기 판단의 근거"가 아니다.
+    if allowed_paths is not None and ref.path not in allowed_paths:
+        return EvidenceFailure(ref.path, ref.value, None, "off_prompt")
 
     resolved = resolve(features, ref.path)
     if resolved is None:
@@ -110,13 +124,25 @@ def check_ref(features: TradeAreaFeatures, ref: FeatureRef) -> EvidenceFailure |
     return EvidenceFailure(ref.path, ref.value, resolved.value, "value_mismatch")
 
 
-def evidence_failures(features: TradeAreaFeatures, refs: list[FeatureRef]) -> list[EvidenceFailure]:
-    """실패한 근거를 전부 모아 돌려준다. 빈 리스트면 통과."""
-    return [f for ref in refs if (f := check_ref(features, ref)) is not None]
+def evidence_failures(
+    features: TradeAreaFeatures,
+    refs: list[FeatureRef],
+    allowed_paths: frozenset[str] | None = None,
+) -> list[EvidenceFailure]:
+    """실패한 근거를 전부 모아 돌려준다. 빈 리스트면 통과.
+
+    `allowed_paths` 를 주면 그 손님에게 보여준 경로만 인정한다. 안 주면
+    값의 정확성만 본다 — 집계처럼 프롬프트를 모르는 자리에서 쓴다.
+    """
+    return [f for ref in refs if (f := check_ref(features, ref, allowed_paths)) is not None]
 
 
-def evidence_match(features: TradeAreaFeatures, refs: list[FeatureRef]) -> bool:
-    """근거가 전부 실제값과 맞는지. 근거가 하나도 없으면 실패로 본다."""
+def evidence_match(
+    features: TradeAreaFeatures,
+    refs: list[FeatureRef],
+    allowed_paths: frozenset[str] | None = None,
+) -> bool:
+    """근거가 전부 규칙을 지키는지. 근거가 하나도 없으면 실패로 본다."""
     if not refs:
         return False
-    return not evidence_failures(features, refs)
+    return not evidence_failures(features, refs, allowed_paths)
