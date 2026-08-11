@@ -1,0 +1,38 @@
+# 빌드 컨텍스트에서 제외 — 이미지 크기와 빌드 시간을 줄인다
+
+.git
+.gitignore
+.gitattributes
+.github
+
+# 파이썬 아티팩트
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# 가상환경 — 컨테이너 안에서 새로 설치한다
+.venv/
+venv/
+
+# 개인 설정
+.claude/
+.vscode/
+.idea/
+
+# 모델·데이터 — 볼륨으로 마운트한다
+models/
+data/
+outputs/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+
+# 노트북 체크포인트
+.ipynb_checkpoints/
+
+# 문서는 런타임에 필요 없지만, src/ 주석이 참조하므로 남겨둔다
+# docs/

@@ -11,3 +11,34 @@
   이유를 커밋 메시지에 명시하세요.
 - 골든셋 CSV는 `.gitignore`의 `!golden_dataset*.csv` 예외로 커밋 가능합니다
   (그 외 데이터 파일은 커밋 금지).
+
+---
+
+# 패널 지표 (`panel_metrics.py`)
+
+**현재 버전 V1** · 최종 수정 2026-08-06 · 담당 이수호
+
+AI 손님 패널의 점수가 실제 사람 평가를 얼마나 따라가는지 재는 순수 함수 모음.
+`pearson` / `spearman` / `mean_absolute_error`, 외부 의존성 없음.
+
+위 규칙의 `metrics.py` 권장 이름 대신 `panel_metrics.py`를 쓴다. 생성 파이프라인 쪽에도
+별도 지표가 생길 예정이라 파트별로 파일을 나눈다.
+
+## 쓰는 곳
+
+팀원이 광고 시안을 블라인드로 5점 평가한 값을 정답으로 놓고, 패널 점수와의 상관을 본다.
+**"이 평가를 믿어도 되나"에 대한 유일한 외부 근거**라 발표 자료에 그대로 들어간다.
+라벨은 모이는 대로 `eval/golden_dataset/`에 둔다.
+
+## 알려진 제약
+
+`eval/`은 src 레이아웃 밖이라 설치 대상이 아니고, 그대로는 import 되지 않는다.
+현재는 `tests/conftest.py`가 `sys.path`에 넣어 우회한다.
+팀 합의 후 `pyproject.toml`의 `[tool.pytest.ini_options] pythonpath`에 `"eval"`을
+추가하면 그 우회는 지워도 된다.
+
+## 변경 이력
+
+| 버전 | 날짜 | 변경 | 이유 |
+|---|---|---|---|
+| **V1** | 2026-08-06 | `panel_metrics.py` 최초 추가 (pearson·spearman·mae) | 사람 평가 대조 실험을 라벨 수집 즉시 돌릴 수 있게 미리 준비 |

@@ -1,0 +1,372 @@
+{
+  "features": {
+    "area_cd": "3120197",
+    "area_nm": "역삼역",
+    "area_type": "발달상권",
+    "gu_nm": "강남구",
+    "dong_nm": "역삼1동",
+    "match_distance_m": 49.7,
+    "quarter": "20261",
+    "category_cds": [
+      "CS100010"
+    ],
+    "category_nm": "커피-음료",
+    "is_category_fallback": false,
+    "demo_coverage": 0.714,
+    "gender_share": {
+      "M": 0.4933,
+      "F": 0.5067
+    },
+    "age_share": {
+      "10": 0.0035,
+      "20": 0.1617,
+      "30": 0.3823,
+      "40": 0.221,
+      "50": 0.1508,
+      "60": 0.0807
+    },
+    "time_share": {
+      "00-06": 0.0007,
+      "06-11": 0.1608,
+      "11-14": 0.4789,
+      "14-17": 0.1907,
+      "17-21": 0.1498,
+      "21-24": 0.0191
+    },
+    "foot_age_share": {
+      "10": 0.0386,
+      "20": 0.2164,
+      "30": 0.3003,
+      "40": 0.2268,
+      "50": 0.1264,
+      "60": 0.0915
+    },
+    "back_age_share": null,
+    "weekend_ratio": 0.138,
+    "avg_ticket": 9546,
+    "avg_ticket_pct": 0.674,
+    "competitor_cnt": 185,
+    "open_cnt": 5,
+    "close_cnt": 4,
+    "worker_pop": 84399,
+    "resident_pop": 5764,
+    "work_ratio": 0.936,
+    "household_cnt": 4404,
+    "apt_cnt": 82,
+    "apt_avg_price": 326468462
+  },
+  "personas": [
+    {
+      "persona_id": "p01",
+      "demo": "10대 남성",
+      "axes": {
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "evening"
+      },
+      "weight": 0.0017,
+      "is_boundary": false,
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 10대 남성. 주로 저녁 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
+      "evidence": [
+        {
+          "path": "gender_share.M",
+          "value": 0.4933
+        },
+        {
+          "path": "age_share.10",
+          "value": 0.0035
+        },
+        {
+          "path": "time_share.17-21",
+          "value": 0.1498
+        }
+      ]
+    },
+    {
+      "persona_id": "p02",
+      "demo": "10대 여성",
+      "axes": {
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "evening"
+      },
+      "weight": 0.0018,
+      "is_boundary": false,
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 10대 여성. 주로 저녁 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
+      "evidence": [
+        {
+          "path": "gender_share.F",
+          "value": 0.5067
+        },
+        {
+          "path": "age_share.10",
+          "value": 0.0035
+        },
+        {
+          "path": "time_share.17-21",
+          "value": 0.1498
+        }
+      ]
+    },
+    {
+      "persona_id": "p03",
+      "demo": "20대 남성",
+      "axes": {
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "morning"
+      },
+      "weight": 0.0798,
+      "is_boundary": true,
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 20대 남성. 주로 아침 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
+      "evidence": [
+        {
+          "path": "gender_share.M",
+          "value": 0.4933
+        },
+        {
+          "path": "age_share.20",
+          "value": 0.1617
+        },
+        {
+          "path": "foot_age_share.20",
+          "value": 0.2164
+        }
+      ]
+    },
+    {
+      "persona_id": "p04",
+      "demo": "20대 여성",
+      "axes": {
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "afternoon"
+      },
+      "weight": 0.0819,
+      "is_boundary": true,
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 20대 여성. 주로 오후 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
+      "evidence": [
+        {
+          "path": "gender_share.F",
+          "value": 0.5067
+        },
+        {
+          "path": "age_share.20",
+          "value": 0.1617
+        },
+        {
+          "path": "foot_age_share.20",
+          "value": 0.2164
+        }
+      ]
+    },
+    {
+      "persona_id": "p05",
+      "demo": "30대 남성",
+      "axes": {
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "weekday_lunch"
+      },
+      "weight": 0.1886,
+      "is_boundary": false,
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 30대 남성. 주로 점심 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
+      "evidence": [
+        {
+          "path": "gender_share.M",
+          "value": 0.4933
+        },
+        {
+          "path": "age_share.30",
+          "value": 0.3823
+        },
+        {
+          "path": "time_share.11-14",
+          "value": 0.4789
+        }
+      ]
+    },
+    {
+      "persona_id": "p06",
+      "demo": "30대 여성",
+      "axes": {
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "weekday_lunch"
+      },
+      "weight": 0.1937,
+      "is_boundary": false,
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 30대 여성. 주로 점심 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
+      "evidence": [
+        {
+          "path": "gender_share.F",
+          "value": 0.5067
+        },
+        {
+          "path": "age_share.30",
+          "value": 0.3823
+        },
+        {
+          "path": "time_share.11-14",
+          "value": 0.4789
+        }
+      ]
+    },
+    {
+      "persona_id": "p07",
+      "demo": "40대 남성",
+      "axes": {
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "afternoon"
+      },
+      "weight": 0.109,
+      "is_boundary": false,
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 40대 남성. 주로 오후 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
+      "evidence": [
+        {
+          "path": "gender_share.M",
+          "value": 0.4933
+        },
+        {
+          "path": "age_share.40",
+          "value": 0.221
+        },
+        {
+          "path": "time_share.14-17",
+          "value": 0.1907
+        }
+      ]
+    },
+    {
+      "persona_id": "p08",
+      "demo": "40대 여성",
+      "axes": {
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "weekday_lunch"
+      },
+      "weight": 0.112,
+      "is_boundary": false,
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 40대 여성. 주로 점심 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
+      "evidence": [
+        {
+          "path": "gender_share.F",
+          "value": 0.5067
+        },
+        {
+          "path": "age_share.40",
+          "value": 0.221
+        },
+        {
+          "path": "time_share.11-14",
+          "value": 0.4789
+        }
+      ]
+    },
+    {
+      "persona_id": "p09",
+      "demo": "50대 남성",
+      "axes": {
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "morning"
+      },
+      "weight": 0.0744,
+      "is_boundary": false,
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 50대 남성. 주로 아침 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
+      "evidence": [
+        {
+          "path": "gender_share.M",
+          "value": 0.4933
+        },
+        {
+          "path": "age_share.50",
+          "value": 0.1508
+        },
+        {
+          "path": "time_share.06-11",
+          "value": 0.1608
+        }
+      ]
+    },
+    {
+      "persona_id": "p10",
+      "demo": "50대 여성",
+      "axes": {
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "morning"
+      },
+      "weight": 0.0764,
+      "is_boundary": false,
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 50대 여성. 주로 아침 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
+      "evidence": [
+        {
+          "path": "gender_share.F",
+          "value": 0.5067
+        },
+        {
+          "path": "age_share.50",
+          "value": 0.1508
+        },
+        {
+          "path": "time_share.06-11",
+          "value": 0.1608
+        }
+      ]
+    },
+    {
+      "persona_id": "p11",
+      "demo": "60대 남성",
+      "axes": {
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "evening"
+      },
+      "weight": 0.0398,
+      "is_boundary": false,
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 60대 남성. 주로 저녁 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
+      "evidence": [
+        {
+          "path": "gender_share.M",
+          "value": 0.4933
+        },
+        {
+          "path": "age_share.60",
+          "value": 0.0807
+        },
+        {
+          "path": "time_share.17-21",
+          "value": 0.1498
+        }
+      ]
+    },
+    {
+      "persona_id": "p12",
+      "demo": "60대 여성",
+      "axes": {
+        "price_sens": "mid",
+        "motive": "habitual",
+        "time": "evening"
+      },
+      "weight": 0.0409,
+      "is_boundary": false,
+      "narrative": "역삼역 상권(출퇴근하는 사람이 많은 동네)의 60대 여성. 주로 저녁 시간대에 움직이고, 이 동네 커피-음료 객단가는 9,546원이다.",
+      "evidence": [
+        {
+          "path": "gender_share.F",
+          "value": 0.5067
+        },
+        {
+          "path": "age_share.60",
+          "value": 0.0807
+        },
+        {
+          "path": "time_share.17-21",
+          "value": 0.1498
+        }
+      ]
+    }
+  ]
+}

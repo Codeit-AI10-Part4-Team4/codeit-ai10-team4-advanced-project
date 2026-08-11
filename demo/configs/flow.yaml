@@ -1,0 +1,187 @@
+# 대화 흐름 정의 — 질문 트리를 코드가 아닌 데이터로 둔다.
+#
+# 매 질문마다 **선택지와 자유 입력을 함께** 제시한다 (mixed-initiative).
+# 경로를 고르게 하지 않는다 — "말로 할까 골라서 할까"라는 질문 자체가 부담이다.
+#   · 선택지 = 힌트. 뭘 물어보는지 보고 말로 풀어 쓸 수 있다
+#   · 자유 입력은 아무 슬롯이나 채운다. 채워진 질문은 건너뛴다
+#
+# kind
+#   choice    선택지 버튼        text   한 줄 입력
+#   upload    파일 업로드        items  가격·조건 표
+#   route     질문 없이 분기만    result 결과 화면
+#
+# 필드
+#   store        답을 저장할 상태 키 (= 슬롯 이름)
+#   nl_fillable  자연어에서 채울 수 있는 슬롯 → 이미 채워졌으면 질문을 건너뛴다
+#   source       선택지를 레지스트리에서 자동 생성 (industries/styles/formats)
+#   decides      이 답이 무엇을 결정하는지 — 화면에 표시된다
+#   only         이 갈래에서만 묻는 질문 (copy | image)
+#   hidden       사이드바에 표시하지 않음
+
+# ── 1. 무엇을 만들까 ───────────────────────────────────────
+- id: root
+  kind: choice
+  step: 1
+  short: 무엇을 만들까?
+  ask: 무엇을 만들어 드릴까요?
+  decides: 최종 산출물과 이후 질문 경로
+  branch: true
+  store: goal
+  nl_fillable: true
+  next: industry          # 자연어에서 이미 채워졌을 때 건너뛸 대상
+  options:
+    - { label: "📝 광고 문구 만들기", value: copy, next: industry }
+    - { label: "🖼️ 광고 이미지 만들기", value: image, next: industry }
+
+# ── 4. 업종 ───────────────────────────────────────────────
+- id: industry
+  kind: choice
+  step: 2
+  short: 어떤 가게?
+  ask: 어떤 가게를 하고 계세요?
+  decides: 배경 소재 · 문구 말투 · **적용 법령**
+  store: industry
+  nl_fillable: true
+  source: industries
+  next: ask_photo
+
+# ── 5. 사진 유무 — 파이프라인이 갈린다 (말로는 채울 수 없다) ────
+- id: ask_photo
+  kind: choice
+  step: 3
+  short: 제품 사진?
+  ask:
+    copy: 홍보하실 상품 사진이 있으신가요?
+    image: |
+      광고에 넣을 제품 사진이 있으신가요?
+
+      사진이 있으면 **제품은 그대로 두고 배경·조명만** 바꿔드려요.
+  decides: 제품 보존이냐, 배경만 생성이냐
+  branch: true
+  store: has_photo
+  options:
+    - { label: "📷 있어요", value: true, next: upload_photo }
+    - { label: "없어요", value: false, next: after_photo }
+
+- id: upload_photo
+  kind: upload
+  step: 3
+  hidden: true
+  ask: 사진을 올려주세요.
+  store: photo
+  next: after_photo
+
+- id: after_photo
+  kind: route
+  hidden: true
+  route:
+    - { when: { goal: image }, then: ask_reference }
+    - { then: ask_product }
+
+# ── 6. 레퍼런스 — 이미지 갈래만 ────────────────────────────
+- id: ask_reference
+  kind: choice
+  step: 4
+  short: 참고 이미지?
+  only: image
+  ask: |
+    "이런 느낌으로 만들어주세요" 하고 참고할 이미지가 있으신가요?
+
+    분위기와 색감만 가져옵니다. 제품은 사장님 사진 그대로예요.
+  decides: 생성 모드 4가지 중 무엇으로 갈지 **확정**
+  branch: true
+  store: has_reference
+  options:
+    - { label: "🎨 있어요", value: true, next: upload_reference }
+    - { label: "없어요", value: false, next: ask_product }
+
+- id: upload_reference
+  kind: upload
+  step: 4
+  hidden: true
+  ask: 참고할 이미지를 올려주세요.
+  store: reference
+  next: ask_product
+
+# ── 7. 무엇을 홍보 ────────────────────────────────────────
+- id: ask_product
+  kind: text
+  step: 5
+  short: 무엇을 홍보?
+  ask: 무엇을 홍보하실 건가요?
+  placeholder: "예: 크로플, 삼겹살, 여름 특강"
+  decides: 이미지·문구의 주제
+  note: 사진을 올리시면 VLM 이 읽어서 자동으로 채웁니다. 지금은 직접 입력.
+  store: product
+  nl_fillable: true
+  next: ask_format
+
+# ── 8. 규격 ───────────────────────────────────────────────
+- id: ask_format
+  kind: choice
+  step: 6
+  short: 어디에 쓸까?
+  ask:
+    copy: 어디에 올리실 건가요?
+    image: 어디에 쓰실 건가요?
+  decides: 캔버스 크기 · 글자수 상한 · **옥외광고물법 적용 여부**
+  store: format
+  nl_fillable: true
+  source: formats
+  next: ask_style
+
+# ── 9. 스타일 ─────────────────────────────────────────────
+- id: ask_style
+  kind: choice
+  step: 7
+  short: 어떤 느낌?
+  ask: 어떤 느낌으로 만들어드릴까요?
+  decides: 색상 팔레트 · 조명 톤 · 문구 어조
+  store: style
+  nl_fillable: true
+  source: styles
+  next: after_style
+
+- id: after_style
+  kind: route
+  hidden: true
+  route:
+    - { when: { goal: image }, then: ask_overlay }
+    - { then: ask_items }
+
+# ── 10. 글자 얹기 — 두 갈래가 만나는 지점 ───────────────────
+- id: ask_overlay
+  kind: choice
+  step: 8
+  short: 글자도 넣을까?
+  only: image
+  ask: |
+    만든 이미지에 **글자도 얹어드릴까요?**
+
+    글자를 넣으시면 문구도 함께 만들어 드려요.
+  decides: 문구 갈래와 합류할지
+  branch: true
+  store: with_text
+  options:
+    - { label: "✍️ 글자도 넣어주세요", value: true, next: ask_items }
+    - { label: "이미지만 주세요", value: false, next: result }
+
+# ── 11. 가격·조건 — 합류 지점 ──────────────────────────────
+- id: ask_items
+  kind: items
+  step: 9
+  short: 가격·조건
+  merge: true
+  ask: |
+    꼭 들어가야 할 **가격이나 조건**이 있나요?
+
+    가격은 사장님이 알려주신 것만 씁니다. 저희가 지어내지 않아요.
+  decides: 광고에 표기할 숫자 (AI 가 생성하지 않는 값)
+  store: items
+  next: result
+
+# ── 12. 결과 ──────────────────────────────────────────────
+- id: result
+  kind: result
+  step: 10
+  short: 결과

@@ -31,8 +31,10 @@ jobs:
 
       # mypy가 core 의존성(fastapi/pydantic)의 타입을 해석하려면 패키지가 설치돼 있어야 한다.
       # 무거운 extra는 설치하지 않아 CI를 가볍게 유지 — 그쪽 모듈은 [tool.mypy] overrides로 처리.
+      # panel 은 예외로 설치한다: duckdb 가 없으면 mypy 가 features.py 를 아예 못 읽고,
+      # pytest 는 panel 테스트를 import 단계에서 떨군다. 휠 합계 29MB 로 가볍다.
       - name: Install package + static analysis tools
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,panel]"
 
       - name: ruff lint
         run: ruff check src tests
@@ -57,6 +59,6 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,panel]"
 
       - run: pytest -v

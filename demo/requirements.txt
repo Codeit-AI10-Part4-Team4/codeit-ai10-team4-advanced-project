@@ -1,0 +1,20 @@
+# ===== 프로토타입 실행에 필요한 전부 =====
+streamlit>=1.40.0
+pillow>=10.0.0
+pyyaml>=6.0
+pandas>=2.0.0          # st.data_editor (가격·조건 입력)
+
+# ===== 이후 단계: 이미지 생성 모델 =====
+# 로컬(RTX 3060Ti 8GB) 개발 → GCP VM 배포 시 설치.
+# CUDA 버전에 맞는 torch 를 먼저 설치할 것.
+# torch>=2.3.0
+# diffusers>=0.30.0
+# transformers>=4.43.0
+# accelerate>=0.33.0
+# rembg>=2.0.0                 # 누끼 (제품 분리)
+
+# ===== 이후 단계: 광고 규제 RAG =====
+# rfp-rag-extractor 의 하이브리드 검색 구조를 이식할 예정.
+# chromadb>=0.5.0
+# rank_bm25>=0.2.2
+# sentence-transformers>=3.0.0  # bge-m3
