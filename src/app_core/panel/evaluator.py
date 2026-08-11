@@ -103,6 +103,16 @@ SYSTEM = """너는 아래 특성의 손님이다. 광고를 보고 솔직하게 
   **넷 중 하나를 그대로 적는다.** `"price"` 처럼 한 단어만 넣는다.
   두 개 이상을 세로줄이나 쉼표로 잇거나 목록으로 주면 그 응답은 버려진다.
 
+  **네가 매긴 방문 의향과 앞뒤가 맞아야 한다.**
+  `intent` 를 60 이상으로 줬다면 `none` 을 골라라 — 가겠다고 해놓고 걸림돌을
+  대는 것은 말이 안 된다. 걸림돌은 **네가 안 가는 이유**이지 광고의 흠이 아니다.
+
+  **가격이 이 동네 평균과 비슷하면 `price` 가 아니다.** 위 "우리 동네 숫자"의
+  `avg_ticket` 과 견줘봐라. 비슷한데 비싸다고 하면 그건 이 동네 얘기가 아니다.
+
+  **네 처지에서 고른다.** 이 동네가 놓치고 있는 층이라면 "나와 상관없다"
+  (relevance)가 더 정확할 때가 많다. 억지로 흠을 찾지 마라.
+
   ※ 광고 이미지는 보지 않았다. **visual 은 고르지 마라.**
 
 **evidence** — 왜 그렇게 느꼈는지를 아래 "우리 동네 숫자"에서 골라 인용한다.
@@ -170,6 +180,46 @@ def _amounts(text: str) -> set[int]:
         except ValueError:
             continue
     return out
+
+
+#: "있는 만큼 사는가" 판정 경계. `narrator` 와 같은 값을 쓴다 — 서사와 평가가
+#: 다른 기준으로 같은 손님을 설명하면 모델이 헷갈린다.
+_POOL_HIGH: Final = 1.15
+_POOL_LOW: Final = 0.85
+
+
+def standing(features: TradeAreaFeatures, persona: Persona) -> str:
+    """이 손님이 동네에서 **핵심 고객인지 놓치는 층인지**.
+
+    12명이 받는 정보 중 실제로 다른 것은 나이·성별과 이 위치뿐이다.
+    축(price_sens·motive)은 상권 단위라 전원 같다.
+
+    실측(2026-08-11)에서 손님 편차가 **0.0** 으로 나왔다 — 12명이 한 명도
+    빠짐없이 같은 점수를 냈다는 뜻이고, "12명 패널"이 사실상 1명이었다.
+    자기가 이 동네에서 어떤 위치인지를 문장으로 주면 갈리는지 본다.
+
+    `age_share / max(유동, 배후지)` 는 "닿을 수 있었는데 샀는가"를 뜻한다.
+    """
+    age = persona.demo[:2]
+    pool = max(
+        features.foot_age_share.get(age, 0.0),
+        (features.back_age_share or {}).get(age, 0.0),
+    )
+    share = features.age_share.get(age, 0.0)
+    if pool <= 0 or share <= 0:
+        return "너는 이 동네 데이터에 거의 잡히지 않는 층이다."
+    ratio = share / pool
+    if ratio >= _POOL_HIGH:
+        return (
+            f"너는 이 동네 **핵심 고객**이다 — 지나다니는 비중보다 실제로 사는 "
+            f"비중이 {ratio:.1f}배 높다. 이런 가게를 자주 이용하는 편이다."
+        )
+    if ratio <= _POOL_LOW:
+        return (
+            f"너는 이 동네가 **놓치고 있는 층**이다 — 지나다니긴 하지만 실제로는 "
+            f"그 비중의 {ratio:.1f}배만큼만 산다. 이런 가게에 잘 들르지 않는다."
+        )
+    return "너는 있는 만큼 사는, 평범한 비중의 손님이다."
 
 
 def mentioned_slot(copy: CopyCandidate) -> str | None:
@@ -261,7 +311,8 @@ def build_user_prompt(
     return (
         f"## 나\n{persona.demo}. {persona.narrative}\n"
         f"{TIME_KO.get(axes.time, axes.time)}에 주로 움직이고, "
-        f"{MOTIVE_KO[axes.motive]} 편, {PRICE_KO[axes.price_sens]} 동네에 산다.\n\n"
+        f"{MOTIVE_KO[axes.motive]} 편, {PRICE_KO[axes.price_sens]} 동네에 산다.\n"
+        f"{standing(features, persona)}\n\n"
         f"## 우리 동네 숫자 (evidence 는 여기서만 고른다)\n"
         f"{_feature_lines(features, persona, copy)}\n\n"
         f"## 광고물\n{_ad_lines(store, brief, copy)}"

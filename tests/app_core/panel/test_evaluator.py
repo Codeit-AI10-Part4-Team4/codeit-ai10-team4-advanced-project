@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 import pytest
@@ -851,3 +852,66 @@ def test_time_words_are_shared_with_contrast() -> None:
     from app_core.panel import contrast as C
 
     assert evaluator.TIME_WORDS is C.TIME_WORDS
+
+
+# --- 손님별 위치를 평가에 전달 (2026-08-11 계측에서 나온 것) --------------------
+
+
+def test_standing_distinguishes_core_from_missed(yeoksam: Panel) -> None:
+    """실측: 손님 편차가 0.0 이었다 — 12명이 한 명도 빠짐없이 같은 점수를 냈다.
+
+    "12명 패널"이 사실상 1명이었다는 뜻이다. 12명이 받는 정보 중 실제로 다른
+    것은 나이·성별과 이 위치뿐이라, 위치를 문장으로 준다.
+    """
+    core = next(p for p in yeoksam.personas if p.demo.startswith("30"))
+    missed = next(p for p in yeoksam.personas if p.demo.startswith("10"))
+
+    assert "핵심 고객" in evaluator.standing(yeoksam.features, core)
+    assert "놓치고 있는 층" in evaluator.standing(yeoksam.features, missed)
+
+
+def test_standing_actually_splits_the_panel(yeoksam: Panel) -> None:
+    """전원 같은 문장을 받으면 넣으나 마나다 — 실제로 갈리는지 본다."""
+    said = {evaluator.standing(yeoksam.features, p) for p in yeoksam.personas}
+    assert len(said) >= 3, "12명이 최소 세 갈래로는 나뉘어야 한다"
+
+
+def test_standing_reaches_the_prompt(yeoksam: Panel, shop, brief, copy) -> None:
+    core = next(p for p in yeoksam.personas if p.demo.startswith("30"))
+    missed = next(p for p in yeoksam.personas if p.demo.startswith("10"))
+
+    assert "핵심 고객" in build_user_prompt(core, yeoksam.features, shop, brief, copy)
+    assert "놓치고 있는 층" in build_user_prompt(missed, yeoksam.features, shop, brief, copy)
+
+
+def test_standing_handles_missing_backyard(yeoksam: Panel) -> None:
+    """발달상권은 배후지가 없다 — `None` 매핑에서 터지면 안 된다."""
+    assert yeoksam.features.back_age_share is None
+    for persona in yeoksam.personas:
+        assert evaluator.standing(yeoksam.features, persona)
+
+
+def test_standing_thresholds_match_the_narrator(yeoksam: Panel) -> None:
+    """서사와 평가가 다른 기준으로 같은 손님을 설명하면 모델이 헷갈린다."""
+    from app_core.panel import narrator
+
+    source = inspect.getsource(narrator._pool_ratio)
+    assert "1.15" in source and str(evaluator._POOL_HIGH) == "1.15"
+    assert "0.85" in source and str(evaluator._POOL_LOW) == "0.85"
+
+
+def test_resistance_prompt_ties_to_the_persona() -> None:
+    """실측: 걸림돌이 좋은 광고에서도 전원 price 였다 — 정보가 0 이다."""
+    assert "네 처지에서 고른다" in evaluator.SYSTEM
+    assert "억지로 흠을 찾지 마라" in evaluator.SYSTEM
+
+
+def test_resistance_is_tied_to_the_persona_own_intent() -> None:
+    """실측: 9,500원 광고(동네 평균 9,546원)에 12명 전원이 price 를 골랐다.
+
+    모두에게 걸림돌 하나를 억지로 고르게 하면 모델이 제일 방어하기 쉬운 답을
+    찍는다. 점수는 `standing` 으로 갈리기 시작했으니 걸림돌을 거기 묶는다.
+    """
+    assert "intent` 를 60 이상으로 줬다면 `none`" in evaluator.SYSTEM
+    assert "avg_ticket` 과 견줘봐라" in evaluator.SYSTEM
+    assert "억지로 흠을 찾지 마라" in evaluator.SYSTEM
