@@ -1,0 +1,86 @@
+"""골든셋으로 NLU 추출 정확도를 잰다.
+
+    MODEL_PROFILE=openai python eval/run_nlu_eval.py
+    MODEL_PROFILE=openai python eval/run_nlu_eval.py --source real   출처별로 나눠 보기
+
+실 API 를 호출하므로 pytest 에는 넣지 않는다 (AGENTS.md — 외부 API 호출은
+비용·비결정성 때문에 테스트에서 mock). 프롬프트를 고칠 때마다 손으로 돌린다.
+
+**한 번 재고 끝낼 것이 아니라, 고치기 전후를 비교하는 데 쓴다.**
+점수만 보지 말고 아래 "틀린 것" 목록을 봐야 무엇을 고칠지 알 수 있다.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+from pathlib import Path
+
+from app_core import chat
+from app_core.schema import AdBriefDraft, Store
+from eval.metrics import SLOTS, failures, overall_accuracy, slot_accuracy
+
+GOLDEN_SET = Path(__file__).parent / "golden_dataset_nlu.csv"
+
+#: 발화만 평가한다. 가게는 고정 — 업종이 바뀌면 변수가 하나 더 늘어난다.
+STORE = Store(id=1, user_id=1, industry="chicken", name="교촌치킨", address="서울시 강남구 역삼동")
+
+
+def load_golden(source: str | None = None) -> list[dict[str, str]]:
+    with GOLDEN_SET.open(encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.DictReader(f))
+    return [r for r in rows if source is None or r["source"] == source]
+
+
+def expected_of(row: dict[str, str]) -> dict:
+    """CSV 빈칸의 뜻: 그 슬롯은 **안 뽑혀야** 한다."""
+    return {
+        "product": row["product"] or None,
+        "price": int(row["price"]) if row["price"] else None,
+        "situation": row["situation"],
+        "tone": row["tone"],
+    }
+
+
+def predict(utterance: str) -> dict:
+    """발화 하나를 빈 주문서에 넣었을 때 뽑히는 값.
+
+    대화 맥락 없이 한 턴만 본다 — 맥락이 섞이면 무엇 때문에 틀렸는지 알 수 없다.
+    """
+    draft = chat.respond(AdBriefDraft(goal="copy"), utterance, STORE).draft
+    return {slot: getattr(draft, slot) for slot in SLOTS}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--source", help="real | observed | constructed")
+    args = parser.parse_args()
+
+    rows = load_golden(args.source)
+    if not rows:
+        raise SystemExit(f"해당하는 케이스가 없습니다: {args.source}")
+
+    expectations = [expected_of(r) for r in rows]
+    predictions = [predict(r["utterance"]) for r in rows]
+
+    print(f"{len(rows)}개 발화" + (f" (source={args.source})" if args.source else ""))
+    print()
+    for slot, acc in slot_accuracy(predictions, expectations).items():
+        print(f"  {slot:10s} {acc:5.0%}")
+    print(f"\n  {'전체 일치':10s} {overall_accuracy(predictions, expectations):5.0%}")
+
+    wrong = failures(predictions, expectations)
+    if not wrong:
+        print("\n틀린 것 없음")
+        return
+
+    print(f"\n{'─' * 60}\n틀린 것 {len(wrong)}건\n")
+    for i, slots in wrong:
+        print(f'  "{rows[i]["utterance"]}"   [{rows[i]["source"]}]')
+        for slot, (got, want) in slots.items():
+            print(f"      {slot:10s} 뽑음={got!r}  정답={want!r}")
+        print()
+
+
+if __name__ == "__main__":
+    main()

@@ -63,6 +63,8 @@ pkgs/
 # --- Environment Variables & Cloud Secrets (Security) ---
 .env
 .env.*
+# 템플릿은 커밋한다 (키는 비어 있음)
+!.env.example
 .secrets
 *.pem
 *.p12

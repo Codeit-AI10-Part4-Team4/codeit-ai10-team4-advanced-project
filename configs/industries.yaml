@@ -1,0 +1,147 @@
+# 업종 목록
+#
+# 가게 등록 화면의 선택지이자, 저장 전 검증 기준이다.
+# 업종을 늘릴 때 여기에 항목만 추가하면 되고 코드는 고치지 않는다.
+#
+# label 은 프롬프트에도 들어간다 — LLM 이 읽는 이름이므로
+# 사람이 알아보는 말로 쓸 것 ("cafe" 가 아니라 "카페·디저트").
+#
+# 순서 = 화면에 뜨는 순서. 사업체가 많은 업종을 위로 둔다.
+# 근거: 국세청 100대 생활업종 (2023년 말) — 한식음식점 41만, 부동산중개업 14.6만.
+#   ⚠️ 전체 1위인 통신판매업(60.7만)은 뺐다. 온라인 판매라 오프라인 동네 매장이 아니다.
+#   정확한 30위까지의 순위는 원본 데이터가 필요하다. 지금은 대략적인 규모 순이다.
+#
+# 목록에 없는 업종은 맨 아래 other(기타)로 받고 사장님이 직접 적는다.
+
+# ── 음식 ────────────────────────────────────────────────
+- id: korean_food
+  label: 한식음식점
+  emoji: "🍚"
+
+- id: cafe
+  label: 카페·디저트
+  emoji: "☕"
+
+- id: snack
+  label: 분식·간이음식
+  emoji: "🍢"
+
+- id: chicken
+  label: 치킨전문점
+  emoji: "🍗"
+
+- id: pub
+  label: 호프·주점
+  emoji: "🍺"
+
+- id: bakery
+  label: 제과점·베이커리
+  emoji: "🥐"
+
+- id: chinese_food
+  label: 중식음식점
+  emoji: "🥟"
+
+- id: grill
+  label: 고기·구이전문점
+  emoji: "🥩"
+
+- id: japanese_food
+  label: 일식·횟집
+  emoji: "🍣"
+
+- id: pizza_burger
+  label: 피자·햄버거
+  emoji: "🍕"
+
+- id: western_food
+  label: 양식음식점
+  emoji: "🍝"
+
+# ── 소매 ────────────────────────────────────────────────
+- id: convenience
+  label: 편의점
+  emoji: "🏪"
+
+- id: clothing
+  label: 옷가게
+  emoji: "👕"
+
+- id: cosmetics
+  label: 화장품 가게
+  emoji: "💄"
+
+- id: grocery
+  label: 슈퍼마켓·식료품
+  emoji: "🛒"
+
+- id: butcher
+  label: 정육점
+  emoji: "🥓"
+
+- id: produce
+  label: 청과·채소
+  emoji: "🍎"
+
+- id: sidedish
+  label: 반찬가게
+  emoji: "🥗"
+
+- id: flower
+  label: 꽃집·화원
+  emoji: "💐"
+
+- id: petshop
+  label: 애견샵·펫용품
+  emoji: "🐶"
+
+- id: optician
+  label: 안경점
+  emoji: "👓"
+
+# ── 서비스 ──────────────────────────────────────────────
+- id: salon
+  label: 미용실
+  emoji: "💇"
+
+- id: nail
+  label: 네일·속눈썹
+  emoji: "💅"
+
+- id: skincare
+  label: 피부관리·에스테틱
+  emoji: "🧖"
+
+- id: academy
+  label: 학원·교습소
+  emoji: "📚"
+
+- id: fitness
+  label: 헬스장·필라테스
+  emoji: "🏋️"
+
+- id: laundry
+  label: 세탁소
+  emoji: "🧺"
+
+- id: realestate
+  label: 부동산중개
+  emoji: "🏠"
+
+- id: carrepair
+  label: 자동차정비
+  emoji: "🔧"
+
+- id: pharmacy
+  label: 약국
+  emoji: "💊"
+
+- id: photostudio
+  label: 사진관
+  emoji: "📷"
+
+# ── 그 밖 ───────────────────────────────────────────────
+# 목록에 없는 업종. 사장님이 직접 적은 값을 industry_note 에 받는다.
+- id: other
+  label: 기타 (직접 입력)
+  emoji: "✏️"

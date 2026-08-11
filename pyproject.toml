@@ -7,42 +7,99 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "codeit-ai10-team4-advanced-project"
 version = "0.1.0"
-description = "TODO: 프로젝트 한 줄 설명"
+description = "동네 매장 소상공인을 위한 광고 문구·이미지 생성 서비스"
 requires-python = ">=3.12"
 
 # 런타임 의존성 — "어디서나 필요한 최소 집합"만 유지할 것.
+# ⚠️ torch·diffusers 같은 무거운 것을 여기 넣지 말 것. CI 가 느려지고
+#    GPU 없는 팀원까지 2GB 넘는 휠을 받게 된다. → 아래 ml extra 로.
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
+    "pillow>=10.0.0",         # 레이아웃 합성 — 한글을 이미지에 얹는다
+    "pyyaml>=6.0",            # 업종 레지스트리
+    "sqlalchemy>=2.0.0",      # DB. 테스트는 SQLite, 운영은 PostgreSQL
 ]
 
-# 개발 및 테스트 추가 의존성
+# ── 설치 방법 ────────────────────────────────────────────────
+#   전원 공통          pip install -e ".[dev,ui]"
+#   NLU·문구 담당      pip install -e ".[dev,ui,llm,db]"
+#   이미지 생성 담당    pip install -e ".[dev,ui,ml]"      ← GPU 필요
+#
+#   담당에 따라 다른 것만 깔면 된다. GPU 가 없는 사람은 ml 을 빼면
+#   torch 를 받지 않는다.
+# ─────────────────────────────────────────────────────────────
 [project.optional-dependencies]
+
+# 전원 — 개발·테스트 (CI 가 설치하는 것)
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "httpx>=0.27.0",          # FastAPI TestClient 백엔드
     "ruff>=0.6.0",
     "mypy>=1.10.0",
+    "types-PyYAML>=6.0.0",    # PyYAML 은 인라인 타입이 없어 스텁 필요
     "nbconvert>=7.0.0",       # 노트북 → 스크립트 변환
     "ipykernel>=6.0.0",       # venv를 노트북 커널로 등록
 ]
-# ── 무거운 도메인 의존성(torch 계열, DB 클라이언트 등)은 core dependencies에 넣지 말고
-#    아래처럼 별도 extra로 분리하세요. CI/기본 설치를 가볍게 유지하는 장치입니다.
-#    필요 시: pip install -e ".[ml]"
-# ml = [
-#     "torch>=2.0.0",
-#     "sentence-transformers>=2.2.0",
+
+# 전원 — 챗봇 화면
+ui = [
+    "streamlit>=1.49.0",      # width="stretch" API 사용
+    "pandas>=2.0.0",          # st.data_editor
+]
+
+# NLU·문구 생성 담당 — 가볍다. GPU 불필요
+llm = [
+    "openai>=1.40.0",
+]
+
+# PostgreSQL 드라이버. 테스트는 SQLite 로 돌아서 CI 엔 필요 없다.
+db = [
+    "psycopg[binary]>=3.2.0",
+]
+
+# 이미지 생성 담당 — 무겁다(수 GB). GPU 필요
+# ⚠️ torch 는 CUDA 버전에 맞는 휠을 먼저 설치할 것:
+#      pip install torch --index-url https://download.pytorch.org/whl/cu124
+#    그 뒤에 pip install -e ".[ml]" 하면 이미 설치된 torch 를 재사용한다.
+ml = [
+    "torch>=2.3.0",
+    "diffusers>=0.30.0",
+    "transformers>=4.43.0",
+    "accelerate>=0.33.0",     # GPU 배치·오프로딩 (8GB 대응)
+    # 누끼 — 제품 분리. onnxruntime 백엔드를 extra 로 명시해야 동작한다.
+    # cpu 를 쓰는 이유: 8GB VRAM 을 SDXL 에 몰아주기 위해서다.
+    # 누끼는 한 번만 돌고 빠르므로 CPU 로도 충분하다.
+    "rembg[cpu]>=2.0.0",
+    "safetensors>=0.4.0",
+]
+
+# 광고 규제 RAG — 코퍼스 구축 후 활성화
+# rag = [
+#     "chromadb>=0.5.0",
+#     "rank-bm25>=0.2.2",
+#     "sentence-transformers>=3.0.0",   # bge-m3
 # ]
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.lint]
+# EXE002: "실행 권한인데 shebang 이 없다"
+# Windows 에서 Docker 로 코드를 바인드 마운트하면 모든 파일이 -rwxrwxrwx 로 보여
+# 전 파일이 걸린다. 리눅스 체크아웃(CI)에서는 발생하지 않는 환경 아티팩트다.
+ignore = ["EXE002"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# tests/ 가 src/ 를 미러링하므로 tests/api/test_store.py 와 tests/app_core/test_store.py
+# 처럼 파일명이 겹친다. 기본 import 방식은 이걸 같은 모듈로 보고 충돌을 낸다.
+addopts = "--import-mode=importlib"
 
 # src 레이아웃: src/ 하위의 패키지(api, app_core)를 최상위 import 이름으로 노출.
 # 따라서 코드는 `import app_core` / `from api import ...` 형태로 사용한다 (src. 접두어 없음).
@@ -66,7 +123,18 @@ no_implicit_optional = true
 # disallow_untyped_defs = true
 # disallow_incomplete_defs = true
 
-# 타입 스텁이 없는 무거운 extra 의존성은 아래 overrides로 예외 처리하세요.
-# [[tool.mypy.overrides]]
-# module = ["torch.*", "sentence_transformers.*"]
-# ignore_missing_imports = true
+# 타입 스텁이 없는 무거운 extra 의존성은 overrides 로 예외 처리한다.
+# ⚠️ CI 는 `.[dev]` 만 설치하므로 ml·llm extra 는 아예 없는 상태다.
+#    이 예외가 없으면 src/ 에서 import 하는 순간 mypy 가 실패한다.
+[[tool.mypy.overrides]]
+module = [
+    "torch.*",
+    "diffusers.*",
+    "transformers.*",
+    "accelerate.*",
+    "rembg.*",
+    "streamlit.*",
+    "pandas.*",
+    "openai.*",
+]
+ignore_missing_imports = true
