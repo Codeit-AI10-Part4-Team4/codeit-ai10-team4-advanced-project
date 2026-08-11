@@ -12,7 +12,11 @@ import streamlit as st
 from pydantic import ValidationError
 
 from app_core import ads, auth, chat, config, copy_gen, registry, stores
-from app_core.schema import AdBriefDraft, Store, StoreInput
+from app_core.panel.aggregate import AggregationError
+from app_core.panel.contrast import weakest
+from app_core.panel.features import NoTradeAreaError
+from app_core.panel.review import review
+from app_core.schema import AdBrief, AdBriefDraft, CopyCandidate, Store, StoreInput
 
 # DB·API 키 설정을 읽는다. app_core 를 쓰기 전에 해야 한다.
 config.load_env()
@@ -138,7 +142,64 @@ def copy_view(store: Store, draft: AdBriefDraft) -> None:
                 st.write(candidate.sub)
             if st.button("이걸로 할게요", key=f"pick_copy{i}"):
                 ads.choose_copy(st.session_state.ad_id, candidate.headline)
+                st.session_state.picked = candidate
                 st.success("선택했습니다")
+
+    picked = st.session_state.get("picked")
+    if picked is not None:
+        panel_view(store, brief, picked)
+
+
+def panel_view(store: Store, brief: AdBrief, copy: CopyCandidate) -> None:
+    """고른 문구를 동네 손님들에게 보여준다 (07 §5.1 — 3건 전부면 비용 3배).
+
+    화면은 **대조를 먼저, 점수를 나중에** 놓는다. 대조는 서울시 수치에서
+    뺄셈·나눗셈으로 나와 근거를 그대로 댈 수 있고(A등급), 점수는 LLM 판단이라
+    좋은 광고끼리는 잘 갈리지 않는다(실측: 4쌍 8회 중 7회가 55.0).
+    """
+    st.divider()
+    if not st.button("동네 손님들 반응 보기", type="primary", key="run_panel"):
+        return
+
+    try:
+        with st.spinner("이 동네 손님들에게 보여주는 중..."):
+            result = review(store, brief, copy, ad_id=str(st.session_state.get("ad_id", "")))
+    except NoTradeAreaError as exc:
+        st.warning(str(exc))
+        return
+    except AggregationError as exc:
+        st.error(f"손님 반응을 모으지 못했습니다. 다시 눌러주세요. ({exc})")
+        return
+
+    st.caption(
+        f"{result.area_nm} · {result.quarter[:4]}년 {result.quarter[4]}분기 기준 · "
+        "매장에 직접 오는 손님 기준입니다 (배달·온라인 비중이 크면 참고만 하세요)"
+    )
+
+    worst = weakest(result.contrast_notes)
+    for note in result.contrast_notes:
+        if worst is not None and note.kind == worst.kind:
+            st.warning(f"**가장 어긋나는 곳** — {note.text}")
+        else:
+            st.info(note.text)
+
+    cols = st.columns(3)
+    for col, (key, label) in zip(
+        cols,
+        [("attention", "눈에 띔"), ("message", "뜻이 통함"), ("intent", "가보고 싶음")],
+        strict=True,
+    ):
+        col.metric(label, f"{result.scores[key]:.0f}")
+    if result.confidence == "low":
+        st.caption("⚠️ " + " / ".join(result.confidence_reasons))
+
+    for line in result.suggestions:
+        st.write(f"- {line}")
+
+    with st.expander(f"손님 {len(result.persona_comments)}명이 한 말"):
+        for c in result.persona_comments:
+            mark = " · 이 동네에서 잘 안 사는 층" if c.is_boundary else ""
+            st.write(f"**{c.demo}** ({c.weight * 100:.0f}%{mark}) — {c.comment}")
 
 
 def chat_view(store: Store) -> None:

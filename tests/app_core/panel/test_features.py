@@ -86,3 +86,17 @@ def test_서울_변두리는_통과한다() -> None:
     """실측 최원거리(도봉동 산자락 2,349m)가 상한 3,000m 안에 있다."""
     f = build_features("", "cafe", coord=(127.0155, 37.6893))  # 도봉구 도봉동
     assert f["match_distance_m"] < 3_000
+
+
+def test_데이터_파일이_없으면_사장님_언어로_안내한다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """data/ 는 gitignore 라 클론만 한 팀원에게는 파일이 없다.
+
+    막지 않으면 duckdb 의 IOException 이 전체 경로와 함께 화면에 그대로 뜬다.
+    """
+    from pathlib import Path
+
+    from app_core.panel import features
+
+    monkeypatch.setattr(features, "DB_PATH", Path("data/없는파일.duckdb"))
+    with pytest.raises(NoTradeAreaError, match="상권 데이터 파일이 없습니다"):
+        build_features("", "cafe", coord=YEOKSAM)

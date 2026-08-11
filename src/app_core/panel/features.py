@@ -231,6 +231,14 @@ def build_features(
     coord 를 주면 지오코딩을 건너뛴다 (카카오 키 없이 개발·테스트할 때).
     """
     lon, lat = coord if coord else geocode(address)
+    if db is None and not DB_PATH.exists():
+        # data/ 는 gitignore 라 클론만 한 팀원에게는 파일이 없다. 막지 않으면
+        # duckdb 의 IOException 이 전체 경로와 함께 화면에 그대로 뜬다.
+        raise NoTradeAreaError(
+            f"상권 데이터 파일이 없습니다 ({DB_PATH}). "
+            "서울 열린데이터광장 CSV 를 data/raw/ 에 넣고 "
+            "`python etl/load_csv.py` 를 한 번 실행해주세요."
+        )
     con = duckdb.connect(str(db or DB_PATH), read_only=True)
     try:
         area = match_area(con, lon, lat)
