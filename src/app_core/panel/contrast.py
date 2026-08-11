@@ -216,6 +216,14 @@ def contrast(features: TradeAreaFeatures, brief: AdBrief, copy: CopyCandidate) -
     return [n for n in notes if n is not None]
 
 
+#: 이 값 아래여야 "어긋난다"고 말한다.
+#:
+#: `weakest()` 는 최솟값을 그냥 돌려주므로, 다 잘 맞는 광고에서도 하나가 뽑힌다.
+#: 실제 화면에서 6,000원 광고(객단가 9,546원 → 적합도 1.0)에 "가장 어긋나는
+#: 곳: 가격"이 떴다. **잘 맞는데 경고를 띄우면 나머지 경고도 안 믿게 된다.**
+WEAK_FIT: Final = 0.7
+
+
 def weakest(notes: list[Note]) -> Note | None:
     """가장 어긋난 항목 하나. 잴 것이 없으면 None.
 

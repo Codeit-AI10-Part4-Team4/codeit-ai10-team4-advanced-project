@@ -526,7 +526,7 @@ def evaluate(
     # 대조는 LLM 을 안 쓴다. 평가가 몇 명 살아남았든 항상 같은 문장이 나오므로
     # 실패율과 무관하게 화면에 근거 A등급 재료를 깔아준다.
     notes = [
-        ContrastNote(kind=n.kind, text=n.text, evidence=list(n.evidence))
+        ContrastNote(kind=n.kind, text=n.text, evidence=list(n.evidence), fit=n.fit)
         for n in contrast(features, brief, copy)
     ]
 

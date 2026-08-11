@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from app_core import ads, auth, chat, config, copy_gen, registry, stores
 from app_core.panel.aggregate import AggregationError
-from app_core.panel.contrast import weakest
+from app_core.panel.contrast import WEAK_FIT, weakest
 from app_core.panel.features import NoTradeAreaError
 from app_core.panel.review import review
 from app_core.schema import AdBrief, AdBriefDraft, CopyCandidate, Store, StoreInput
@@ -176,7 +176,11 @@ def panel_view(store: Store, brief: AdBrief, copy: CopyCandidate) -> None:
         "매장에 직접 오는 손님 기준입니다 (배달·온라인 비중이 크면 참고만 하세요)"
     )
 
+    # 다 잘 맞는 광고에서도 최솟값은 하나 나온다. 잘 맞는데 경고를 띄우면
+    # 나머지 경고도 안 믿게 되므로 WEAK_FIT 아래일 때만 강조한다.
     worst = weakest(result.contrast_notes)
+    if worst is not None and (worst.fit is None or worst.fit >= WEAK_FIT):
+        worst = None
     for note in result.contrast_notes:
         if worst is not None and note.kind == worst.kind:
             st.warning(f"**가장 어긋나는 곳** — {note.text}")

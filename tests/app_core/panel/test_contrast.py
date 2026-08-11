@@ -215,3 +215,32 @@ def test_새벽은_을을_쓴다() -> None:
     """'새벽를 말합니다' 로 나오던 것."""
     note = timing_note(_features(), CopyCandidate(headline="새벽 감성 크로플"))
     assert note is not None and "새벽을 말합니다" in note.text
+
+
+def test_결과에_실을_때_적합도가_빠지지_않는다() -> None:
+    """`Note` → `ContrastNote` 변환에서 fit 이 누락돼 화면이 죽었다.
+
+    테스트 391개가 통과하는데도 실제 화면에서만 터졌다 — 여기서 막는다.
+    """
+    from app_core.panel.schemas import ContrastNote
+
+    for n in contrast(_features(), BRIEF, CopyCandidate(headline="새벽 감성 크로플")):
+        moved = ContrastNote(kind=n.kind, text=n.text, evidence=list(n.evidence), fit=n.fit)
+        assert moved.fit == n.fit, n.kind
+
+
+def test_잘_맞는_광고에는_경고를_띄우지_않는다() -> None:
+    """weakest 는 최솟값을 그냥 준다 — 다 잘 맞아도 하나가 뽑힌다.
+
+    실제 화면에서 6,000원 광고(객단가 9,546원 → 적합도 1.0)에
+    "가장 어긋나는 곳: 가격"이 떴다. 화면은 WEAK_FIT 으로 한 번 더 거른다.
+    """
+    from app_core.panel.contrast import WEAK_FIT
+
+    cheap = weakest(contrast(_features(), BRIEF, CopyCandidate(headline="갓 구운 크로플")))
+    assert cheap is not None and cheap.fit == 1.0
+    assert cheap.fit >= WEAK_FIT  # → 화면이 강조하지 않는다
+
+    off = weakest(contrast(_features(), BRIEF, CopyCandidate(headline="새벽 감성 크로플")))
+    assert off is not None and off.fit is not None
+    assert off.fit < WEAK_FIT  # → 강조한다

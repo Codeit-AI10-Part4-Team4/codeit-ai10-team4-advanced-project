@@ -294,11 +294,17 @@ class ContrastNote(BaseModel):
     이 문장들은 흔들리지 않으므로, 화면에서 신뢰의 바닥을 깔아준다.
     """
 
-    #: price / timing / weekend / composition
+    #: price / timing / weekend / composition / competition
     kind: str
     #: 사장님이 그대로 읽는 문장
     text: str
     evidence: list[FeatureRef] = Field(default_factory=list)
+    #: 0~1 적합도. **해당 없으면 None** — 광고가 시점을 말하지 않았는데 시점
+    #: 적합도를 매길 수는 없다. 화면이 `contrast.weakest()` 로 "가장 어긋나는
+    #: 곳"을 고를 때 쓴다.
+    #: ⚠️ 아인님이 추가(2026-08-11). 이게 없어서 화면이 AttributeError 로 죽었다 —
+    #: 테스트 391개가 통과하는데도 실제 화면에서만 터졌다.
+    fit: float | None = None
 
 
 class PersonaComment(BaseModel):
