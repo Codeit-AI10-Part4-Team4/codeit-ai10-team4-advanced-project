@@ -7,6 +7,7 @@
     MODEL_PROFILE=openai python eval/accuracy.py            # 판별력 (라벨 불필요)
     MODEL_PROFILE=openai python eval/accuracy.py --sheet    # 사람 평가용 시트 만들기
     MODEL_PROFILE=openai python eval/accuracy.py --score labels.csv   # 사람과 대조
+    MODEL_PROFILE=openai python eval/accuracy.py --ablate standing    # 그 요소가 값을 하는가
 
 **판별력이 낮으면 점수는 노이즈다.** 쌍을 못 가르는데 절대 점수가 62.4 라고
 말하는 것은 의미가 없다. 이 지표가 먼저다.
@@ -21,9 +22,11 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
 import statistics
 import sys
+from collections import Counter
 from hashlib import sha1
 from pathlib import Path
 from typing import NamedTuple
@@ -189,7 +192,10 @@ def run_pairs(k: int) -> int:
         cells = []
         for label, ad in (("좋음", pair.better), ("나쁨", pair.worse)):
             share = scores[ad.key].resistance_share
-            top = " ".join(f"{k} {v:.0%}" for k, v in list(share.items())[:2]) or "없음"
+            # 반올림해서 0% 로 찍히는 항목은 빼고 보여준다 — "price 100%
+            # relevance 0%" 는 읽는 사람을 헷갈리게 한다.
+            shown = [(k, v) for k, v in share.items() if v >= 0.005][:2]
+            top = " ".join(f"{k} {v:.0%}" for k, v in shown) or "없음"
             cells.append(f"{label} {top}")
         print(f"  {pair.name:<8} {cells[0]:<28} {cells[1]}")
 
@@ -269,11 +275,102 @@ def score_against_humans(path: Path, k: int) -> int:
     return 0
 
 
+# ── 절제(ablation) — 프롬프트 요소 하나가 실제로 값을 하는가 ──────────────────
+#
+# 프롬프트는 넣기는 쉽고 빼기는 어렵다. "넣었더니 좋아진 것 같다"는 근거가
+# 아니라서, 요소 하나를 끄고 같은 입력으로 돌려 **무엇이 달라지는지** 잰다.
+# 안 달라지면 뺀다 — 값을 못 하는 문장은 토큰만 쓰고 다음 사람을 헷갈리게 한다.
+
+
+def _entropy(labels: list[str]) -> float:
+    """0 이면 전원 같은 답, 1 이면 고르게 갈림."""
+    if len(labels) < 2:
+        return 0.0
+    counts = Counter(labels)
+    total = len(labels)
+    raw = -sum((c / total) * math.log(c / total) for c in counts.values())
+    return raw / math.log(len(counts)) if len(counts) > 1 else 0.0
+
+
+def _bigrams(text: str) -> set[str]:
+    squashed = "".join(text.split())
+    return {squashed[i : i + 2] for i in range(len(squashed) - 1)}
+
+
+def _mean_similarity(texts: list[str]) -> float:
+    """코멘트끼리 얼마나 닮았는가. 1 에 가까우면 12명이 같은 말을 한 것이다.
+
+    문자열이 달라도 의미가 같은 경우를 잡으려는 것이라 글자 2-gram 을 쓴다.
+    """
+    grams = [_bigrams(t) for t in texts if t.strip()]
+    pairs = [len(a & b) / len(a | b) for i, a in enumerate(grams) for b in grams[i + 1 :] if a | b]
+    return statistics.fmean(pairs) if pairs else 0.0
+
+
+def _profile(result: EvaluationResult) -> dict[str, float]:
+    comments = [c.comment for c in result.persona_comments]
+    return {
+        "손님 편차": result.max_metric_std,
+        "저항 다양성": _entropy([c.resistance for c in result.persona_comments]),
+        "코멘트 유사도": _mean_similarity(comments),
+        "코멘트 고유수": float(len(set(comments))),
+    }
+
+
+def run_ablation(element: str, k: int) -> int:
+    """`element` 를 끄고 켠 결과를 나란히 놓는다."""
+    import app_core.panel.evaluator as EV
+
+    if element != "standing":
+        print(f"모르는 요소입니다: {element!r} (지금은 standing 만)")
+        return 1
+
+    panel, store = load_panel(), sample_store()
+    ad = PAIRS[0].better
+    original = EV.standing
+
+    print(f"요소 {element!r} · 광고 {ad.key} · 콜 {2 * (len(panel.personas) + 1)}회")
+    print("판정 지표는 **손님 편차** 다 — 실측에서 0.0 이었다(12명이 같은 점수).\n")
+
+    profiles = {}
+    for label, fn in (("켬", original), ("끔", lambda *_: "")):
+        EV.standing = fn  # type: ignore[assignment]
+        try:
+            result = evaluate(
+                panel, store, ad.brief, ad.copy, ad_id=f"{ad.key}-{label}", consistency_k=k
+            )
+        except AggregationError as exc:
+            print(f"  [{label}] 전원 탈락 — {exc}")
+            EV.standing = original  # type: ignore[assignment]
+            return 2
+        profiles[label] = _profile(result)
+    EV.standing = original  # type: ignore[assignment]
+
+    print(f"{'=' * 62}")
+    print(f"  {'지표':<14} {'켬':>8} {'끔':>8} {'차이':>8}")
+    print(f"{'=' * 62}")
+    for name in profiles["켬"]:
+        on, off = profiles["켬"][name], profiles["끔"][name]
+        print(f"  {name:<14} {on:>8.3f} {off:>8.3f} {on - off:>+8.3f}")
+    print(f"{'=' * 62}")
+    print()
+
+    spread_on = profiles["켬"]["손님 편차"]
+    if spread_on > 1.0:
+        print("  손님 편차가 살아났다 — 12명이 서로 다르게 답하기 시작했다.")
+        print("  이게 '12명 패널'이라는 말이 참이 되는 조건이다.")
+    else:
+        print("  손님 편차가 여전히 바닥이다. 이 문장으로는 안 갈린다 —")
+        print("  **빼는 것이 맞다.** 값을 못 하는 문장은 토큰만 쓴다.")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="패널 판별력·사람 대조 측정")
     parser.add_argument("--sheet", nargs="?", const="eval/labels.csv", metavar="CSV")
     parser.add_argument("--score", metavar="CSV")
     parser.add_argument("--k", type=int, default=1, help="자기일관성 표본 수")
+    parser.add_argument("--ablate", metavar="ELEMENT", help="프롬프트 요소 절제 실험")
     args = parser.parse_args()
 
     if args.sheet:
@@ -286,6 +383,8 @@ def main() -> int:
 
     if args.score:
         return score_against_humans(Path(args.score), args.k)
+    if args.ablate:
+        return run_ablation(args.ablate, args.k)
     return run_pairs(args.k)
 
 
