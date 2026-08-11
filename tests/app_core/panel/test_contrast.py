@@ -16,6 +16,7 @@ from app_core.panel.contrast import (
     contrast,
     price_note,
     timing_note,
+    weakest,
     weekend_note,
 )
 from app_core.panel.evidence import evidence_failures
@@ -139,3 +140,47 @@ def test_대조는_같은_입력에_같은_출력이다() -> None:
 @pytest.mark.parametrize("word", ["아침", "점심", "오후", "저녁", "야식"])
 def test_시점_단어를_알아챈다(word: str) -> None:
     assert timing_note(_features(), CopyCandidate(headline=f"{word}에 드세요")) is not None
+
+
+def test_적합도는_해당되는_항목에만_붙는다() -> None:
+    f = _features()
+    plain = CopyCandidate(headline="갓 구운 크로플")  # 시점·주말 언급 없음
+    kinds = {n.kind: n.fit for n in contrast(f, BRIEF, plain)}
+    assert kinds["price"] is not None
+    assert "timing" not in kinds and "weekend" not in kinds
+    assert kinds["composition"] is None  # 타깃을 모르니 적합도를 못 매긴다
+
+
+def test_비싼_쪽만_감점한다() -> None:
+    """객단가는 결제 1건 평균이라 품목 하나가 그보다 싼 건 정상이다."""
+    f = _features()  # avg_ticket 9546
+
+    def fit(price: int) -> float | None:
+        note = price_note(f, AdBrief(goal="copy", product="크로플", price=price))
+        return note.fit if note else None
+
+    assert fit(2000) == 1.0
+    assert fit(9500) == 1.0
+    assert fit(45000) is not None and fit(45000) < 0.3  # 4.7배
+
+
+def test_새벽을_알아챈다() -> None:
+    """00-06 을 TIME_WORDS 에 빠뜨려 '새벽 감성 크로플'이 미언급으로 처리됐었다."""
+    note = timing_note(_features(), CopyCandidate(headline="새벽 감성 크로플"))
+    assert note is not None
+    # 적합도는 가장 많이 팔리는 시간대 대비다 — 0.01 / 0.48 = 0.02
+    assert note.fit is not None and note.fit < 0.05
+
+
+def test_가장_어긋난_항목을_고른다() -> None:
+    f = _features()
+    copy = CopyCandidate(headline="새벽 감성 크로플")  # 시점이 최악, 가격은 정상
+    w = weakest(contrast(f, BRIEF, copy))
+    assert w is not None and w.kind == "timing"
+
+
+def test_잴_것이_없으면_None_이다() -> None:
+    """0점과 '못 잼'은 다르다."""
+    f = _features()
+    brief = AdBrief(goal="copy", product="크로플", price=0)  # 가격 미표기
+    assert weakest(contrast(f, brief, CopyCandidate(headline="갓 구운 크로플"))) is None

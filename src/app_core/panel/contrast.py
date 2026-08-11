@@ -16,6 +16,7 @@ LLM 이 없다. 순수 함수라 같은 입력이면 항상 같은 출력이고,
 
 from __future__ import annotations
 
+from math import log2
 from typing import Final, NamedTuple
 
 from app_core.panel.schemas import FeatureRef, TradeAreaFeatures
@@ -24,6 +25,9 @@ from app_core.schema import AdBrief, CopyCandidate
 #: 광고 문구에서 시점을 알아채는 말. 짐작이 아니라 **문면**이다 —
 #: 이 단어가 문구에 있으면 광고가 그 시간대를 말한 것이 맞다.
 TIME_WORDS: Final[dict[str, tuple[str, ...]]] = {
+    # 00-06 을 빠뜨렸다가 "새벽 감성 크로플" 광고를 시점 미언급으로 처리했다.
+    # `SLOT_KO` 에는 있는데 여기에만 없어서 눈에 안 띄었다.
+    "00-06": ("새벽", "동틀", "해 뜨기 전", "첫차"),
     "06-11": ("아침", "모닝", "브런치", "출근", "조식"),
     "11-14": ("점심", "런치", "정오"),
     "14-17": ("오후", "티타임", "간식"),
@@ -42,11 +46,16 @@ SLOT_KO: Final[dict[str, str]] = {
 
 
 class Note(NamedTuple):
-    """대조 한 건. `text` 는 사장님이 그대로 읽는 문장이다."""
+    """대조 한 건. `text` 는 사장님이 그대로 읽는 문장이다.
+
+    `fit` 은 0~1 의 적합도. **해당 없으면 None** 이고, 그 항목은 점수에서 빠진다
+    (광고가 시점을 말하지 않았는데 시점 적합도를 매길 수는 없다).
+    """
 
     kind: str
     text: str
     evidence: list[FeatureRef]
+    fit: float | None = None
 
 
 def _text(copy: CopyCandidate) -> str:
@@ -75,7 +84,25 @@ def price_note(features: TradeAreaFeatures, brief: AdBrief) -> Note | None:
             FeatureRef(path="avg_ticket", value=float(features.avg_ticket)),
             FeatureRef(path="avg_ticket_pct", value=features.avg_ticket_pct),
         ],
+        fit=_price_fit(brief.price, features.avg_ticket),
     )
+
+
+def _price_fit(price: int, avg_ticket: int) -> float | None:
+    """객단가 대비 광고 가격. **싼 쪽은 감점하지 않는다.**
+
+    객단가는 결제 1건(여러 개를 산 경우 포함)의 평균이라, 품목 하나가 그보다
+    싼 것은 정상이다. 반대로 객단가를 크게 넘으면 이 동네에서 이례적이다.
+    한쪽만 감점하는 이유가 그것이다.
+
+    2배마다 1/3씩 깎는다 — 45,000원(4.7배)이 0.26, 12,000원(1.26배)이 0.89.
+    """
+    if avg_ticket <= 0 or price <= 0:
+        return None
+    ratio = price / avg_ticket
+    if ratio <= 1.0:
+        return 1.0
+    return max(0.0, 1.0 - log2(ratio) / 3.0)
 
 
 def timing_note(features: TradeAreaFeatures, copy: CopyCandidate) -> Note | None:
@@ -94,10 +121,14 @@ def timing_note(features: TradeAreaFeatures, copy: CopyCandidate) -> Note | None
         line += (
             f" 가장 많이 팔리는 때는 {SLOT_KO[top]}로 {features.time_share[top] * 100:.0f}%입니다."
         )
+    # 가장 많이 팔리는 시간대를 만점으로 놓고 그 대비로 잰다. LLM 점수는 이걸
+    # 거의 못 갈랐다 (실측: 점심 55.0 vs 새벽 53.5, 재실행 흔들림과 같은 크기).
+    top_share = features.time_share[top]
     return Note(
         kind="timing",
         text=line,
         evidence=[FeatureRef(path=f"time_share.{slot}", value=share)],
+        fit=round(share / top_share, 4) if top_share > 0 else None,
     )
 
 
@@ -112,6 +143,9 @@ def weekend_note(features: TradeAreaFeatures, copy: CopyCandidate) -> Note | Non
             f"{features.weekend_ratio * 100:.0f}%가 주말에 나옵니다."
         ),
         evidence=[FeatureRef(path="weekend_ratio", value=features.weekend_ratio)],
+        # 주말은 7일 중 2일이니 28.6%가 "요일 수만큼"이다. 그보다 많이 팔리면
+        # 주말 광고가 맞는 동네다. 역삼 카페 0.138 → 0.48, 홍대 한식 0.44 → 1.0.
+        fit=round(min(1.0, features.weekend_ratio / (2 / 7)), 4),
     )
 
 
@@ -144,3 +178,21 @@ def contrast(features: TradeAreaFeatures, brief: AdBrief, copy: CopyCandidate) -
         composition_note(features),
     ]
     return [n for n in notes if n is not None]
+
+
+def weakest(notes: list[Note]) -> Note | None:
+    """가장 어긋난 항목 하나. 잴 것이 없으면 None.
+
+    **평균을 내지 않는다.** 한 번 만들었다가 지웠는데, 항목마다 "해당 없음"이
+    생기는 구조라 평균이 왜곡된다 — 실측에서 이렇게 뒤집혔다.
+
+        "퇴근길에 하나"      시점 언급 O → 저녁 0.31 → 평균 66
+        "10대 필수템 크로플"  시점 언급 X → 항목이 빠짐 → 평균 100
+
+    **시점을 말한 광고만 감점당한다.** 사람이 보면 앞쪽이 나은 광고인데
+    점수는 뒤집힌다. 항목을 말하지 않은 쪽이 유리해지는 점수는 쓸 수 없다.
+    한 숫자가 필요하면 "가장 어긋난 항목"을 쓰는 편이 정직하고, 사장님도
+    평균값보다 "무엇을 고칠지"를 알 수 있다.
+    """
+    scored = [n for n in notes if n.fit is not None]
+    return min(scored, key=lambda n: n.fit or 0.0) if scored else None
