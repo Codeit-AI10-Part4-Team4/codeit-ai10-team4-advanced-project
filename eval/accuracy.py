@@ -137,32 +137,72 @@ def run_pairs(k: int) -> int:
                 print(f"  [{ad.key}] 전원 탈락 — {exc}")
                 return 2
 
-    print(f"{'=' * 74}")
-    print(f"  {'쌍':<8} {'좋은 쪽':>8} {'나쁜 쪽':>8} {'차이':>8}   판정   근거")
-    print(f"{'=' * 74}")
+    print(f"{'=' * 78}")
+    print(f"  {'쌍':<8} {'종류':<5} {'좋은 쪽':>7} {'나쁜 쪽':>7} {'차이':>7}  판정  근거")
+    print(f"{'=' * 78}")
 
-    wins, gaps = 0, []
+    by_kind: dict[str, list[float]] = {"상권": [], "보편": []}
     for pair in PAIRS:
         good, bad = _mean_score(scores[pair.better.key]), _mean_score(scores[pair.worse.key])
         gap = good - bad
-        gaps.append(gap)
-        hit = gap > 0
-        wins += hit
+        by_kind.setdefault(pair.kind, []).append(gap)
         print(
-            f"  {pair.name:<8} {good:>8.1f} {bad:>8.1f} {gap:>+8.1f}   "
-            f"{'맞음' if hit else '틀림'}   {pair.why}"
+            f"  {pair.name:<8} {pair.kind:<5} {good:>7.1f} {bad:>7.1f} {gap:>+7.1f}  "
+            f"{'맞음' if gap > 0 else '틀림'}  {pair.why}"
         )
 
-    print(f"{'=' * 74}")
-    print(f"  판별 정확도  {wins}/{len(PAIRS)} = {wins / len(PAIRS) * 100:.0f}%")
-    print(f"  평균 점수차  {statistics.fmean(gaps):+.1f}점")
+    print(f"{'=' * 78}")
+    # 상권 쌍과 보편 쌍을 섞어 하나로 보고하면 틀렸을 때 "동네 데이터가 안 쓰인다"
+    # 인지 "기본기 문제"인지 구분하지 못한다.
+    for kind, gaps in by_kind.items():
+        if not gaps:
+            continue
+        wins = sum(g > 0 for g in gaps)
+        print(
+            f"  {kind} 쌍   판별 {wins}/{len(gaps)} = {wins / len(gaps) * 100:.0f}%"
+            f"   평균 점수차 {statistics.fmean(gaps):+.1f}점"
+        )
+
+    # 평균 하나만 보면 12명 × 3지표의 차이가 전부 지워진다. 실측(2026-08-11):
+    # 좋은 쪽 8개가 54.2~55.0 (폭 0.8) 로 붙어 나왔는데, **모델이 정말 구별을
+    # 못 하는 것**인지 **평균이 지운 것**인지는 아래를 봐야 갈린다.
     print()
-    if wins < len(PAIRS):
-        print("  틀린 쌍이 있다 — 그 축(시간대·가격·타깃·명료성)의 근거가")
-        print("  프롬프트에 충분히 들어가지 않았을 수 있다.")
-    if statistics.fmean(gaps) < 5:
-        print("  점수차가 5점 미만이다. 순서는 맞아도 실제로는 구별하지 못하는 것에")
-        print("  가깝다 — 척도 앵커나 표본 수를 손봐야 한다.")
+    print(f"{'=' * 78}")
+    print("  지표별로 갈라보기 — 평균이 지운 것이 있는가")
+    print(f"{'=' * 78}")
+    print(f"  {'쌍':<8} {'주목':>12} {'전달':>12} {'방문의향':>12}    손님 편차(좋음/나쁨)")
+    for pair in PAIRS:
+        g, b = scores[pair.better.key], scores[pair.worse.key]
+        cells = "".join(
+            f"{g.scores[m] - b.scores[m]:>+12.1f}" for m in ("attention", "message", "intent")
+        )
+        print(f"  {pair.name:<8}{cells}       {g.max_metric_std:>4.1f} / {b.max_metric_std:>4.1f}")
+    print()
+    print("  손님 편차가 작으면 12명이 정말 같은 답을 한 것이고, 크면 개인차가")
+    print("  있는데 평균이 지운 것이다 — 뒤쪽이면 모델이 아니라 계측을 고쳐야 한다.")
+
+    print()
+    print(f"{'=' * 78}")
+    print("  걸림돌 분포 — 나쁜 광고가 '왜' 나쁜지 짚어내는가")
+    print(f"{'=' * 78}")
+    for pair in PAIRS:
+        cells = []
+        for label, ad in (("좋음", pair.better), ("나쁨", pair.worse)):
+            share = scores[ad.key].resistance_share
+            top = " ".join(f"{k} {v:.0%}" for k, v in list(share.items())[:2]) or "없음"
+            cells.append(f"{label} {top}")
+        print(f"  {pair.name:<8} {cells[0]:<28} {cells[1]}")
+
+    ground = by_kind.get("상권", [])
+    print()
+    print("  ※ 실행 간 흔들림이 실측 0.1~3.1점이었다. 차이가 3점 안쪽이면")
+    print("     고친 것이 효과가 있었는지 이 한 번으로는 말할 수 없다.")
+    print()
+    if ground and sum(g > 0 for g in ground) < len(ground):
+        print("  상권 쌍을 틀렸다 — 이 동네 숫자가 평가에 실제로 쓰이지 않고 있다.")
+    if ground and statistics.fmean(ground) < 5:
+        print("  상권 쌍 점수차가 5점 미만이다. 순서는 맞아도 실제로는 구별하지")
+        print("  못하는 것에 가깝다 — 척도 앵커나 표본 수(--k)를 손봐야 한다.")
     return 0
 
 
