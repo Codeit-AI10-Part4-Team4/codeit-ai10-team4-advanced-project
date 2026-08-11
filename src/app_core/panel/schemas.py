@@ -251,6 +251,24 @@ class PersonaEval(BaseModel):
         return {name: getattr(self, name) for name in METRIC_FIELDS}
 
 
+class ContrastNote(BaseModel):
+    """광고가 쓴 말과 동네 실측을 나란히 놓은 문장 한 건.
+
+    `contrast.Note`(NamedTuple)를 결과에 실을 수 있게 옮긴 것이다. 저쪽은 아인님
+    소유라 그대로 두고 여기서 변환한다.
+
+    **LLM 이 만들지 않는다.** 전부 서울시 원본 수치에서 뺄셈·나눗셈으로 나오고
+    같은 입력이면 항상 같은 문장이다 — 근거 등급 A. 페르소나 평가가 흔들려도
+    이 문장들은 흔들리지 않으므로, 화면에서 신뢰의 바닥을 깔아준다.
+    """
+
+    #: price / timing / weekend / composition
+    kind: str
+    #: 사장님이 그대로 읽는 문장
+    text: str
+    evidence: list[FeatureRef] = Field(default_factory=list)
+
+
 class PersonaComment(BaseModel):
     """결과 화면에 뿌릴 페르소나별 한 줄.
 
@@ -276,9 +294,15 @@ class EvaluationResult(BaseModel):
     #: 지표별 가중 표준편차 중 최댓값.
     max_metric_std: float
     top_resistance: list[str]
+    #: 저항 요인별 가중 비중. 화면이 "가격 42% · 메시지 25%"처럼 쓸 수 있게.
+    #: `top_resistance` 는 순서만 주고 크기를 안 줘서, 무엇이 얼마나 걸리는지를
+    #: 사장님에게 못 보여준다. 합은 1 이 아니다 — `none` 을 뺀 값이다.
+    resistance_share: dict[str, float] = Field(default_factory=dict)
     #: 재생성 입력으로 그대로 전달된다 (07 §7.3). 요약 콜이 채운다.
     suggestions: list[str] = Field(default_factory=list)
     persona_comments: list[PersonaComment]
+    #: LLM 없이 나온 대조 문장. 평가가 전멸해도 이건 남는다.
+    contrast_notes: list[ContrastNote] = Field(default_factory=list)
 
     #: 근거 대조·스키마에서 탈락해 집계에서 빠진 수 (투명성).
     excluded_cnt: int = 0

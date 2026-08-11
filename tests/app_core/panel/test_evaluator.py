@@ -309,3 +309,84 @@ def test_evidence_failure_hint_names_the_path(yeoksam: Panel, shop, brief, copy)
     retried = [u for u in seen if "직전 응답이 규칙을 어겼다" in u]
     assert retried
     assert "age_share.30" in retried[0]
+
+
+# --- 대조(contrast) 연결 -------------------------------------------------------
+
+
+def test_contrast_notes_are_carried(yeoksam: Panel, shop, brief, copy) -> None:
+    """LLM 없이 나온 대조 문장이 결과에 실려야 한다.
+
+    화면이 `EvaluationResult` 하나만 보면 되도록 설계했으므로, 여기 없으면
+    화면이 `contrast()` 를 따로 부르며 features 를 다시 들고 다녀야 한다.
+    """
+    client = FakeClient(_reply_by_demo(yeoksam))
+    result = evaluate(yeoksam, shop, brief, copy, client=client)
+
+    kinds = {n.kind for n in result.contrast_notes}
+    assert "composition" in kinds  # 동네 구성은 항상 들어간다
+    assert "price" in kinds  # 9,500원을 넣었으므로
+    assert all(n.text for n in result.contrast_notes)
+
+
+def test_contrast_notes_survive_the_evidence_gate(yeoksam: Panel, shop, brief, copy) -> None:
+    """대조가 인용한 수치도 근거 대조를 통과해야 한다.
+
+    통과 못 하면 우리가 스스로 만든 문장이 우리 검증기에 걸리는 셈이라,
+    사장님에게 보여주는 숫자와 페르소나가 인용하는 숫자가 어긋난 것이다.
+    """
+    from app_core.panel.evidence import evidence_match
+
+    client = FakeClient(_reply_by_demo(yeoksam))
+    result = evaluate(yeoksam, shop, brief, copy, client=client)
+
+    for note in result.contrast_notes:
+        assert evidence_match(yeoksam.features, note.evidence), note.kind
+
+
+def test_contrast_is_llm_free(yeoksam: Panel, shop, brief, copy) -> None:
+    """대조는 콜을 쓰지 않는다 — 예산에 영향이 없어야 한다."""
+    client = FakeClient(_reply_by_demo(yeoksam))
+    evaluate(yeoksam, shop, brief, copy, client=client)
+    assert len(client.calls) == len(yeoksam.personas) + 1  # 평가 + 요약뿐
+
+
+def test_contrast_is_deterministic(yeoksam: Panel, shop, brief, copy) -> None:
+    first = evaluate(yeoksam, shop, brief, copy, client=FakeClient(_reply_by_demo(yeoksam)))
+    second = evaluate(yeoksam, shop, brief, copy, client=FakeClient(_reply_by_demo(yeoksam)))
+    assert [n.text for n in first.contrast_notes] == [n.text for n in second.contrast_notes]
+
+
+def test_price_note_absent_when_price_is_zero(yeoksam: Panel, shop, copy) -> None:
+    """0 원은 '가격 없음'이다. 없는 가격을 동네 객단가와 견주면 안 된다."""
+    free = AdBrief(goal="copy", product="크로플", price=0)
+    result = evaluate(yeoksam, shop, free, copy, client=FakeClient(_reply_by_demo(yeoksam)))
+    assert "price" not in {n.kind for n in result.contrast_notes}
+
+
+# --- 저항 요인 비중 -----------------------------------------------------------
+
+
+def test_resistance_share_is_reported(yeoksam: Panel, shop, brief, copy) -> None:
+    """라벨만으로는 '얼마나' 걸리는지 화면이 못 쓴다."""
+    labels = ["price"] * 6 + ["message"] * 3
+    by_demo = {p.demo: p for p in yeoksam.personas}
+    order = [p.demo for p in yeoksam.personas]
+
+    def reply(demo: str, _calls: list[str]) -> dict[str, Any]:
+        i = order.index(demo)
+        return _good(by_demo[demo], resistance=labels[i] if i < len(labels) else "none")
+
+    result = evaluate(yeoksam, shop, brief, copy, client=FakeClient(reply))
+
+    assert set(result.resistance_share) == {"price", "message"}
+    assert sum(result.resistance_share.values()) == pytest.approx(1.0, abs=1e-3)
+    assert result.resistance_share["price"] > result.resistance_share["message"]
+    assert result.top_resistance[0] == "price"
+
+
+def test_resistance_share_empty_when_nobody_objects(yeoksam: Panel, shop, brief, copy) -> None:
+    client = FakeClient(_reply_by_demo(yeoksam, resistance="none"))
+    result = evaluate(yeoksam, shop, brief, copy, client=client)
+    assert result.resistance_share == {}
+    assert result.top_resistance == []

@@ -23,9 +23,11 @@ from pydantic import ValidationError
 
 from app_core.llm import ChatClient, get_client
 from app_core.panel.aggregate import DEFAULT_SIGMA_MAX, aggregate
+from app_core.panel.contrast import contrast
 from app_core.panel.evidence import evidence_failures
 from app_core.panel.narrator import MOTIVE_KO, PRICE_KO, TIME_KO
 from app_core.panel.schemas import (
+    ContrastNote,
     EvaluationResult,
     Panel,
     Persona,
@@ -288,6 +290,13 @@ def evaluate(
         len(failed_ids),
     )
 
+    # 대조는 LLM 을 안 쓴다. 평가가 몇 명 살아남았든 항상 같은 문장이 나오므로
+    # 실패율과 무관하게 화면에 근거 A등급 재료를 깔아준다.
+    notes = [
+        ContrastNote(kind=n.kind, text=n.text, evidence=list(n.evidence))
+        for n in contrast(features, brief, copy)
+    ]
+
     suggestions = _summarize(chat, panel, evals) if summarize and evals else []
     return aggregate(
         panel,
@@ -295,5 +304,6 @@ def evaluate(
         ad_id=ad_id,
         suggestions=suggestions,
         failed_ids=failed_ids,
+        contrast_notes=notes,
         sigma_max=sigma_max,
     )

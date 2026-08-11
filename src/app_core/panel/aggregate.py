@@ -21,6 +21,7 @@ from app_core.panel.evidence import evidence_failures
 from app_core.panel.schemas import (
     DEMO_COVERAGE_MIN,
     METRIC_FIELDS,
+    ContrastNote,
     EvaluationResult,
     Panel,
     Persona,
@@ -56,6 +57,7 @@ def aggregate(
     ad_id: str,
     suggestions: list[str] | None = None,
     failed_ids: list[str] | None = None,
+    contrast_notes: list[ContrastNote] | None = None,
     sigma_max: float = DEFAULT_SIGMA_MAX,
     include_boundary_in_scores: bool = False,
 ) -> EvaluationResult:
@@ -70,6 +72,7 @@ def aggregate(
         failed_ids: 호출 단계에서 이미 탈락해 `evals` 에 들어오지도 못한
             페르소나. 스키마·근거 재시도까지 실패한 경우다. 여기서 안 받으면
             `excluded_cnt` 가 앞단 실패를 놓쳐 투명성 지표가 거짓이 된다.
+        contrast_notes: LLM 없이 만든 대조 문장. 집계는 만들지 않고 실어 나른다.
         sigma_max: 이 값을 넘는 가중 표준편차면 `confidence="low"`.
         include_boundary_in_scores: 경계 페르소나를 점수에 넣을지.
             기본값 False가 07 §7.1의 설계다.
@@ -114,9 +117,12 @@ def aggregate(
     for persona, ev in valid:
         if ev.resistance != "none":
             tally[ev.resistance] += persona.weight
-    top_resistance = [label for label, _ in sorted(tally.items(), key=lambda kv: -kv[1])][
-        :TOP_RESISTANCE_N
-    ]
+    ranked = sorted(tally.items(), key=lambda kv: -kv[1])
+    top_resistance = [label for label, _ in ranked][:TOP_RESISTANCE_N]
+    # 라벨만 주면 "가격이 걸린다"까지만 말할 수 있다. 얼마나 걸리는지를 화면이
+    # 쓰려면 크기가 필요하다. 통과분 가중치로 정규화한다(`none` 제외).
+    counted = sum(tally.values())
+    resistance_share = {label: round(w / counted, 3) for label, w in ranked} if counted else {}
 
     comments = [
         PersonaComment(
@@ -152,7 +158,9 @@ def aggregate(
         confidence_reasons=reasons,
         max_metric_std=round(max_std, 2),
         top_resistance=top_resistance,
+        resistance_share=resistance_share,
         suggestions=list(suggestions or []),
+        contrast_notes=list(contrast_notes or []),
         persona_comments=comments,
         excluded_cnt=len(excluded_ids),
         excluded_ids=excluded_ids,
