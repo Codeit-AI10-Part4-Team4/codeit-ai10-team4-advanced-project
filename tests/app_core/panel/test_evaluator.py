@@ -649,3 +649,92 @@ def test_one_bad_sample_does_not_lose_the_persona(yeoksam: Panel, shop, brief, c
     result = evaluate(yeoksam, shop, brief, copy, client=FakeClient(reply), consistency_k=3)
     assert result.excluded_cnt == 0
     assert top.persona_id in {c.persona_id for c in result.persona_comments}
+
+
+# --- 제안이 금액을 지어내지 못하게 (2026-08-11 아인님 실측 제보) ----------------
+
+
+def _suggest(client_reply, texts: list[str] | None = None):
+    """요약 콜이 `texts` 를 내놓고, 요약 프롬프트를 기록하는 가짜 클라이언트."""
+
+    class Summarizer(FakeClient):
+        summary_prompt = ""
+
+        def complete_json(self, system: str, user: str) -> dict:
+            if system.startswith("손님들의 평가를"):
+                self.calls.append("summary")
+                self.summary_prompt = user
+                return {"suggestions": texts or []}
+            return super().complete_json(system, user)
+
+    return Summarizer(client_reply)
+
+
+def test_invented_amount_is_dropped(yeoksam: Panel, shop, copy) -> None:
+    """실측: 광고가 6,000원인데 "9,500원에서 8,500원으로"가 3회 중 3회 나왔다.
+
+    페르소나 응답은 근거 대조를 거치는데 제안만 그냥 통과하면, 검증받지 않은
+    숫자가 사장님 화면에 뜬다.
+    """
+    brief = AdBrief(goal="copy", product="크로플", price=6000)
+    client = _suggest(
+        _reply_by_demo(yeoksam),
+        [
+            "크로플 가격을 '9,500원'에서 '8,500원'으로 조정해보세요",
+            "가격을 낮추기보다 세트 구성으로 묶어 보여주세요",
+        ],
+    )
+    result = evaluate(yeoksam, shop, brief, copy, client=client, consistency_k=1)
+    assert result.suggestions == ["가격을 낮추기보다 세트 구성으로 묶어 보여주세요"]
+
+
+def test_real_price_may_be_quoted(yeoksam: Panel, shop, copy) -> None:
+    """게이트가 과하면 쓸 만한 제안까지 사라진다 — 실제 가격은 인용 가능해야 한다."""
+    brief = AdBrief(goal="copy", product="크로플", price=6000)
+    client = _suggest(_reply_by_demo(yeoksam), ["6,000원이라는 점을 헤드라인에 넣어보세요"])
+    result = evaluate(yeoksam, shop, brief, copy, client=client, consistency_k=1)
+    assert result.suggestions == ["6,000원이라는 점을 헤드라인에 넣어보세요"]
+
+
+def test_avg_ticket_may_be_quoted(yeoksam: Panel, shop, copy) -> None:
+    brief = AdBrief(goal="copy", product="크로플", price=6000)
+    avg = yeoksam.features.avg_ticket
+    client = _suggest(
+        _reply_by_demo(yeoksam), [f"이 동네 평균 {avg:,}원보다 싸다는 점을 알려보세요"]
+    )
+    assert evaluate(yeoksam, shop, brief, copy, client=client, consistency_k=1).suggestions
+
+
+def test_summary_prompt_carries_the_real_price(yeoksam: Panel, shop, copy) -> None:
+    """지어낼 이유를 없애는 것이 1차 방어다 — 게이트는 2차다."""
+    brief = AdBrief(goal="copy", product="크로플", price=6000)
+    client = _suggest(_reply_by_demo(yeoksam), [])
+    evaluate(yeoksam, shop, brief, copy, client=client, consistency_k=1)
+
+    assert "6,000원" in client.summary_prompt
+    assert f"{yeoksam.features.avg_ticket:,}원" in client.summary_prompt
+
+
+def test_summary_prompt_says_no_price_when_zero(yeoksam: Panel, shop, copy) -> None:
+    """0 원은 '가격 없음'이다 — 가격 얘기를 꺼내지 말라고 알려준다."""
+    brief = AdBrief(goal="copy", product="크로플", price=0)
+    client = _suggest(_reply_by_demo(yeoksam), [])
+    evaluate(yeoksam, shop, brief, copy, client=client, consistency_k=1)
+    assert "가격이 없다" in client.summary_prompt
+
+
+def test_zero_price_ad_rejects_any_amount(yeoksam: Panel, shop, copy) -> None:
+    brief = AdBrief(goal="copy", product="크로플", price=0)
+    client = _suggest(_reply_by_demo(yeoksam), ["7,000원으로 낮춰보세요"])
+    result = evaluate(yeoksam, shop, brief, copy, client=client, consistency_k=1)
+    assert result.suggestions == []
+
+
+def test_summary_prompt_has_no_fabricated_example() -> None:
+    """예시가 나쁜 행동을 가르친다 — 세로줄 사고와 같은 부류다.
+
+    이전 "좋은 예"가 `'런치 세트 8,900원'` 이었고, 그 8,900원은 어디에도
+    없는 금액이었다. 모델은 그 행동을 배웠다.
+    """
+    assert "8,900원" not in evaluator.SUMMARY_SYSTEM
+    assert "금액을 만들어내지 마라" in evaluator.SUMMARY_SYSTEM
