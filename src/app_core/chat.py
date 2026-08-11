@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pydantic import ValidationError
 
+from app_core import turnlog
 from app_core.llm import ChatClient, get_client
 from app_core.schema import REQUIRED_SLOTS, AdBriefDraft, ChatTurn, Store
 
@@ -194,6 +195,9 @@ def respond(
         # 답을 받았는지와 무관하게 물어본 것으로 친다. 안 그러면 사장님이
         # 답을 피할 때 같은 질문을 계속 하게 된다.
         merged = merged.mark_asked(asking)
+
+    # 실제 발화로 골든셋을 채우려고 남긴다. 실패해도 대화는 계속된다.
+    turnlog.record(utterance, draft, merged, asking, store.industry_label)
 
     options = raw.get("options")
     return ChatTurn(

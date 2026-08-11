@@ -42,12 +42,31 @@ def expected_of(row: dict[str, str]) -> dict:
     }
 
 
-def predict(utterance: str) -> dict:
-    """발화 하나를 빈 주문서에 넣었을 때 뽑히는 값.
+#: 이미 채워진 상태에서만 나오는 발화가 있다 — "아니 6000원이요" 같은 정정.
+#: 빈 주문서에 넣으면 정정인지 최초 입력인지 구분이 안 돼 평가가 성립하지 않는다.
+FILLED_START = AdBriefDraft(
+    goal="copy",
+    product="크로플",
+    price=4500,
+    situation="신메뉴",
+    tone="따뜻한",
+    asked=["situation", "tone"],
+)
 
-    대화 맥락 없이 한 턴만 본다 — 맥락이 섞이면 무엇 때문에 틀렸는지 알 수 없다.
+
+def start_draft(row: dict[str, str]) -> AdBriefDraft:
+    """이 케이스를 어떤 상태에서 시작할지. CSV 의 start 컬럼이 정한다."""
+    if row.get("start") == "filled":
+        return FILLED_START
+    return AdBriefDraft(goal="copy")
+
+
+def predict(row: dict[str, str]) -> dict:
+    """발화 하나를 넣었을 때 나오는 주문서 상태.
+
+    한 턴만 본다 — 여러 턴을 이으면 무엇 때문에 틀렸는지 알 수 없다.
     """
-    draft = chat.respond(AdBriefDraft(goal="copy"), utterance, STORE).draft
+    draft = chat.respond(start_draft(row), row["utterance"], STORE).draft
     return {slot: getattr(draft, slot) for slot in SLOTS}
 
 
@@ -61,7 +80,7 @@ def main() -> None:
         raise SystemExit(f"해당하는 케이스가 없습니다: {args.source}")
 
     expectations = [expected_of(r) for r in rows]
-    predictions = [predict(r["utterance"]) for r in rows]
+    predictions = [predict(r) for r in rows]
 
     print(f"{len(rows)}개 발화" + (f" (source={args.source})" if args.source else ""))
     print()
