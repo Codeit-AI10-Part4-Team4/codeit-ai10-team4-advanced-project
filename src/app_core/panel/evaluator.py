@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import statistics
 import time
 from collections import Counter
@@ -138,16 +139,37 @@ SUMMARY_SYSTEM = """손님들의 평가를 사장님이 바로 쓸 수 있는 **
 
 불평을 나열하지 마라. 사장님이 **문구를 어떻게 고치면 되는지**를 쓴다.
   나쁜 예: "가격이 비싸다는 의견이 많았습니다"
-  좋은 예: "가격을 낮추기보다 '런치 세트 8,900원'처럼 묶음가로 제시해보세요"
+  좋은 예: "가격이 걸린다는 반응이 많으니 양이나 소요 시간을 함께 적어보세요"
+
+**금액을 만들어내지 마라.** 아래 "사실"에 적힌 숫자 말고 다른 금액은 한 글자도
+쓸 수 없다. "얼마로 낮추세요" 같은 제안도 하지 마라 — 가격은 사장님이 정하는
+값이고, 우리는 **가격을 어떻게 보여줄지**만 제안한다.
+  쓸 수 없음: "9,500원에서 8,500원으로 낮춰보세요"
+  쓸 수 있음: "가격을 낮추기보다 세트 구성으로 묶어 보여주세요"
 
 - **2~3개**만. 많으면 아무것도 안 고친다.
-- 광고 문구·가격 표현으로 바꿀 수 있는 것만 쓴다. 메뉴를 바꾸라거나 가게를
+- 광고 문구·표현으로 바꿀 수 있는 것만 쓴다. 메뉴를 바꾸라거나 가게를
   옮기라는 제안은 하지 마라.
 - 주어진 평가에 없는 내용을 지어내지 마라.
 
 아래 JSON 형식으로만 답해라.
 
-{"suggestions": ["제안 1", "제안 2"]}"""
+{"suggestions": ["가격을 낮추기보다 세트 구성으로 묶어 보여주세요"]}"""
+
+
+#: 제안에서 "9,500원" 같은 금액을 찾는다. 사장님 화면에 실제와 다른 금액이
+#: 뜨는 것을 코드로 막기 위한 것이다.
+_AMOUNT_RE: Final = re.compile(r"(\d[\d,]*)\s*원")
+
+
+def _amounts(text: str) -> set[int]:
+    out: set[int] = set()
+    for raw in _AMOUNT_RE.findall(text):
+        try:
+            out.add(int(raw.replace(",", "")))
+        except ValueError:
+            continue
+    return out
 
 
 def offered_paths(features: TradeAreaFeatures, persona: Persona) -> frozenset[str]:
@@ -354,13 +376,27 @@ def _safe_evaluate_one(
     return _merge_samples(collected)
 
 
-def _summarize(client: ChatClient, panel: Panel, evals: list[PersonaEval]) -> list[str]:
+def _summarize(
+    client: ChatClient,
+    panel: Panel,
+    evals: list[PersonaEval],
+    brief: AdBrief,
+) -> list[str]:
     """저항 요인과 코멘트를 개선 제안으로 옮긴다 (07 §7.3).
 
     07 §7 은 패널 모듈의 LLM 콜을 "서사 1콜 + 평가 ≤20콜 둘뿐"으로 적었지만
     `suggestions` 를 만들 콜이 명세에 없다. 12명 코멘트를 그냥 이어 붙이면
     제안이 아니라 불평 목록이 되므로 집계 뒤 1콜을 더 쓴다 (회당 약 $0.0005).
-    아인님 합의 전까지 `summarize=False` 로 끌 수 있게 열어뒀다.
+
+    **금액은 두 겹으로 막는다.** 프롬프트에 실제 가격·객단가를 주어 지어낼
+    이유를 없애고, 그래도 다른 금액이 나오면 그 제안을 버린다.
+
+    페르소나 응답은 근거 대조를 거치는데 제안만 그냥 통과하면, 검증받지 않은
+    숫자가 사장님 화면에 뜬다 — 실측(아인님, 2026-08-11): 광고가 6,000원인데
+    "9,500원에서 8,500원으로"가 3회 중 3회 나왔다. 손님 12명은 6,000원을
+    정확히 쓰고 있었으니 요약 콜만의 문제였다.
+
+    01 문서의 팀 원칙과도 맞다: "가격은 AI 가 생성하지 않고 사장님이 직접 입력".
     """
     by_id = {p.persona_id: p for p in panel.personas}
     lines = [
@@ -372,9 +408,36 @@ def _summarize(client: ChatClient, panel: Panel, evals: list[PersonaEval]) -> li
     if not lines:
         return []
 
-    raw = client.complete_json(SUMMARY_SYSTEM, "## 손님 반응\n" + "\n".join(lines))
-    items = raw.get("suggestions") or []
-    return [str(s).strip()[:200] for s in items if isinstance(s, str) and s.strip()][:3]
+    features = panel.features
+    allowed = {features.avg_ticket}
+    facts = [f"- 이 동네 {features.category_nm} 결제 1건 평균: {features.avg_ticket:,}원"]
+    if brief.show_price:
+        allowed.add(brief.price)
+        facts.insert(0, f"- 광고에 적은 가격: {brief.price:,}원")
+    else:
+        facts.insert(0, "- 광고에 가격이 없다. 가격 얘기를 꺼내지 마라.")
+
+    raw = client.complete_json(
+        SUMMARY_SYSTEM,
+        "## 사실 (이 숫자만 쓸 수 있다)\n"
+        + "\n".join(facts)
+        + "\n\n## 손님 반응\n"
+        + "\n".join(lines),
+    )
+
+    out: list[str] = []
+    for item in raw.get("suggestions") or []:
+        if not isinstance(item, str) or not item.strip():
+            continue
+        text = item.strip()[:200]
+        invented = _amounts(text) - allowed
+        if invented:
+            # 버리고 로그로 남긴다. 고쳐 쓰면 문장이 어색해지고, 무엇보다
+            # 그 제안의 근거 자체가 없던 숫자다.
+            logger.warning("지어낸 금액이 있어 제안을 버림: %s (금액 %s)", text, invented)
+            continue
+        out.append(text)
+    return out[:3]
 
 
 def evaluate(
@@ -470,7 +533,7 @@ def evaluate(
     suggestions: list[str] = []
     if summarize and evals:
         try:
-            suggestions = _summarize(chat, panel, evals)
+            suggestions = _summarize(chat, panel, evals, brief)
         except Exception:
             # 요약은 부가물이다. 여기서 터졌다고 이미 끝난 평가를 버리면 안 된다.
             logger.exception("제안 요약 실패 %s — 제안 없이 반환", ad_id or "(무명)")
