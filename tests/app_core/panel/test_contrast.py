@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from app_core.panel.contrast import (
+    competition_note,
     composition_note,
     contrast,
     price_note,
@@ -184,3 +185,33 @@ def test_잴_것이_없으면_None_이다() -> None:
     f = _features()
     brief = AdBrief(goal="copy", product="크로플", price=0)  # 가격 미표기
     assert weakest(contrast(f, brief, CopyCandidate(headline="갓 구운 크로플"))) is None
+
+
+def test_경쟁은_숫자만_주고_판정하지_않는다() -> None:
+    """경쟁이 많다고 광고가 틀린 것은 아니다 — 맥락이지 점수가 아니다."""
+    note = competition_note(_features(competitor_cnt=176, open_cnt=0, close_cnt=2))
+    assert "176곳" in note.text
+    assert "2곳이 닫았습니다" in note.text
+    assert note.fit is None
+
+
+def test_개폐업이_0이면_그_문장을_빼다() -> None:
+    note = competition_note(_features(competitor_cnt=176, open_cnt=0, close_cnt=0))
+    assert "176곳" in note.text
+    assert "닫았습니다" not in note.text
+
+
+@pytest.mark.parametrize(
+    ("word", "want"),
+    [("커피-음료", "는"), ("한식음식점", "은"), ("치킨전문점", "은"), ("전체 업종", "은")],
+)
+def test_업종명_받침에_맞는_조사를_쓴다(word: str, want: str) -> None:
+    """업종명이 데이터에서 오므로 조사를 미리 정해둘 수 없다."""
+    note = competition_note(_features(category_nm=word, competitor_cnt=10))
+    assert f"{word}{want}" in note.text
+
+
+def test_새벽은_을을_쓴다() -> None:
+    """'새벽를 말합니다' 로 나오던 것."""
+    note = timing_note(_features(), CopyCandidate(headline="새벽 감성 크로플"))
+    assert note is not None and "새벽을 말합니다" in note.text

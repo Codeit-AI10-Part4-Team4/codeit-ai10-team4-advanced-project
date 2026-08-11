@@ -62,6 +62,18 @@ def _text(copy: CopyCandidate) -> str:
     return f"{copy.headline} {copy.sub}"
 
 
+def _josa(word: str, with_batchim: str, without: str) -> str:
+    """받침에 맞는 조사. 업종명이 데이터에서 오므로 미리 정해둘 수 없다.
+
+    안 하면 "커피-음료은" · "새벽를 말합니다" 처럼 나온다. 사장님이 읽을
+    문장이라 그대로 두면 만든 티가 난다.
+    """
+    ch = word.strip()[-1:] or " "
+    if "가" <= ch <= "힣":
+        return with_batchim if (ord(ch) - 0xAC00) % 28 else without
+    return without  # 한글이 아니면(숫자·괄호 등) 받침 없는 쪽으로 둔다
+
+
 def price_note(features: TradeAreaFeatures, brief: AdBrief) -> Note | None:
     """광고에 적은 가격과 이 동네 객단가를 나란히 놓는다.
 
@@ -114,7 +126,7 @@ def timing_note(features: TradeAreaFeatures, copy: CopyCandidate) -> Note | None
     share = features.time_share[slot]
     top = max(features.time_share, key=lambda k: features.time_share[k])
     line = (
-        f"광고가 {SLOT_KO[slot]}를 말합니다. "
+        f"광고가 {SLOT_KO[slot]}{_josa(SLOT_KO[slot], '을', '를')} 말합니다. "
         f"이 동네 {features.category_nm} 매출의 {share * 100:.0f}%가 그 시간대에 나옵니다."
     )
     if top != slot:
@@ -169,13 +181,37 @@ def composition_note(features: TradeAreaFeatures) -> Note:
     )
 
 
+def competition_note(features: TradeAreaFeatures) -> Note:
+    """경쟁 상황. 광고 문구와 무관하게 항상 나온다.
+
+    적합도를 매기지 않는 이유: 경쟁이 많다고 광고가 틀린 것은 아니다.
+    많으면 "뭐가 다른지 말해야 한다", 빠지는 중이면 다른 얘기가 된다 —
+    어느 쪽이 좋고 나쁨이 아니라 사장님이 알아야 할 맥락이다.
+    """
+    cat = features.category_nm
+    line = f"이 동네 {cat}{_josa(cat, '은', '는')} {features.competitor_cnt:,}곳입니다."
+    if features.open_cnt or features.close_cnt:
+        line += (
+            f" 지난 분기에 {features.open_cnt}곳이 새로 열고 {features.close_cnt}곳이 닫았습니다."
+        )
+    return Note(
+        kind="competition",
+        text=line,
+        evidence=[
+            FeatureRef(path="competitor_cnt", value=float(features.competitor_cnt)),
+            FeatureRef(path="close_cnt", value=float(features.close_cnt)),
+        ],
+    )
+
+
 def contrast(features: TradeAreaFeatures, brief: AdBrief, copy: CopyCandidate) -> list[Note]:
-    """대조 전체. 해당 없는 항목은 빠지고, 동네 구성은 항상 들어간다."""
+    """대조 전체. 해당 없는 항목은 빠지고, 동네 구성·경쟁은 항상 들어간다."""
     notes = [
         price_note(features, brief),
         timing_note(features, copy),
         weekend_note(features, copy),
         composition_note(features),
+        competition_note(features),
     ]
     return [n for n in notes if n is not None]
 

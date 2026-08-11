@@ -46,6 +46,8 @@
     "avg_ticket": 9546,
     "avg_ticket_pct": 0.674,
     "competitor_cnt": 185,
+    "open_cnt": 5,
+    "close_cnt": 4,
     "worker_pop": 84399,
     "resident_pop": 5764,
     "work_ratio": 0.936,

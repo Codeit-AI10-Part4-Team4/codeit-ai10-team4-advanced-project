@@ -257,9 +257,13 @@ def build_features(
             [area["area_cd"]],
         ).fetchone()
 
-        store_cnt = _one(
+        # 개업·폐업도 같이 읽는다. 점포 수만으로는 "경쟁이 많다"까지만 알 수 있는데,
+        # 사장님에게 필요한 건 그게 늘어나는 중인지 빠지는 중인지다.
+        # 실측(2026Q1 서울): 카페 개업 738 / 폐업 853, 한식 1,643 / 1,788.
+        store_cnt, open_cnt, close_cnt = _one(
             con.execute(
-                "SELECT coalesce(sum(store_cnt), 0) FROM store WHERE area_cd = ?"
+                "SELECT coalesce(sum(store_cnt), 0), coalesce(sum(open_cnt), 0), "
+                "coalesce(sum(close_cnt), 0) FROM store WHERE area_cd = ?"
                 + (
                     f" AND category_cd IN ({', '.join('?' * len(codes))})"
                     if codes and not fallback
@@ -267,7 +271,7 @@ def build_features(
                 ),
                 [area["area_cd"], *(codes if codes and not fallback else [])],
             )
-        )[0]
+        )
 
         # 상권 성격 — 출퇴근지인가 주거지인가. 시간대 매출로 추론하던 것을 실측으로 대체한다.
         ctx = con.execute(
@@ -319,6 +323,8 @@ def build_features(
             "avg_ticket": ticket,
             "avg_ticket_pct": _ticket_percentile(con, () if fallback else codes, ticket),
             "competitor_cnt": int(store_cnt),
+            "open_cnt": int(open_cnt),
+            "close_cnt": int(close_cnt),
             # 상권 성격: 1에 가까우면 출퇴근 상권, 0에 가까우면 주거 상권
             "worker_pop": int(worker_pop),
             "resident_pop": int(resident_pop),
