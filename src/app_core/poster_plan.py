@@ -12,14 +12,7 @@ import json
 from openai import OpenAI
 from pydantic import BaseModel, Field, field_validator
 
-# 검증된 색 조합. (배경, 진한색, 강조색, 금색)
-PALETTES = {
-    "retro_green": ((243, 233, 210), (44, 58, 46), (150, 38, 30), (198, 154, 60)),
-    "warm_bakery": ((247, 238, 226), (74, 48, 32), (176, 96, 42), (206, 168, 92)),
-    "fresh_mint": ((238, 246, 240), (32, 62, 54), (18, 138, 106), (176, 200, 150)),
-    "modern_dark": ((234, 232, 228), (28, 30, 34), (196, 62, 52), (170, 150, 110)),
-    "soft_pink": ((250, 240, 240), (74, 40, 48), (192, 74, 96), (214, 170, 150)),
-}
+from app_core.palettes import PALETTES
 
 
 class PosterPlan(BaseModel):
