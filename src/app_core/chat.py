@@ -39,6 +39,8 @@ SYSTEM_PROMPT = """너는 동네 가게 사장님이 광고를 만들도록 돕�
      {unknown}
    여기서 **이번 말로 알아낸 것을 빼고** 남는 것을 `still_unknown` 에 적어라.
    머릿속으로만 하지 말고 반드시 적어라. 안 적으면 이미 답한 걸 또 묻게 된다.
+   ⚠️ **1번에서 extracted 에 넣은 항목은 반드시 빼라.** 그게 이번 말로 받은 답이다.
+      extracted 에 price 를 넣었으면 still_unknown 에 "가격"이 있으면 안 된다.
 
 3. `still_unknown` 이 **비었으면** `ask_about` 을 빈 문자열로 두고 질문하지 마라.
    "이제 만들어드릴게요" 하고 끝내라. options 도 빈 배열.
@@ -50,6 +52,10 @@ SYSTEM_PROMPT = """너는 동네 가게 사장님이 광고를 만들도록 돕�
 
    맨 위 항목을 물을 때는 이렇게 물어라 —
    {next_action}
+
+   ⚠️ 위 안내도 **이번 말을 듣기 전** 기준으로 쓰인 것이다. 이번 말로 그 항목의
+      답을 이미 받았다면 저 안내를 따르지 말고, `still_unknown` 의 맨 위를 물어라.
+      **방금 답을 받은 것을 다시 묻는 것이 가장 나쁘다.**
 
 # extracted 규칙 — 가장 중요하다
 - **이번 말에서 새로 알아낸 것만** 넣어라. 이미 알고 있는 것을 되풀이해 넣지 마라.
@@ -123,10 +129,14 @@ SYSTEM_PROMPT = """너는 동네 가게 사장님이 광고를 만들도록 돕�
 **순서를 지켜라.** extracted → still_unknown → ask_about → message → options.
 앞의 것을 쓰지 않고 message 부터 쓰면 이미 답한 것을 또 묻거나 엉뚱한 걸 묻게 된다.
 
+⚠️ 아래는 **자리를 보여주는 틀**이다. 안에 적힌 말을 값으로 베끼지 마라.
+   특히 `still_unknown` 과 `ask_about` 은 위 「할 일」 2·3번에서 **직접 계산한
+   결과**를 적는 자리다. 다 알아냈으면 `[]` 와 `""` 다.
+
 {{
   "extracted": {{"product": "...", "price": 숫자, "situation": "...", "tone": "...", "extra": "..."}},
-  "still_unknown": ["가격", "원하는 느낌"],
-  "ask_about": "가격",
+  "still_unknown": ["아직 모르는 것을 우선순위 순으로", "..."],
+  "ask_about": "위 목록의 맨 위 하나. 목록이 비었으면 빈 문자열",
   "message": "사장님에게 할 말",
   "options": ["선택지1", "선택지2"]
 }}
@@ -169,10 +179,17 @@ ASK_HELPFUL = """**{label}** 을(를) 물어라. 이건 없어도 만들 수는 
      빈 배열로 두지 마라.
    - 다른 건 묻지 마라."""
 
-WRAP_UP = """물어볼 것을 다 물었다. **더 묻지 말고 마무리해라.**
-   - "이제 만들어드릴게요" 한 줄이면 된다. options 는 반드시 빈 배열.
-   - **질문으로 끝내지 마라.** "더 말씀해 주세요"·"필요한 게 있으신가요" 를 붙이지 마라.
-     사장님은 이미 할 말을 다 했다."""
+WRAP_UP = """물어볼 것을 다 물었다. **더 묻지 마라.**
+   - `still_unknown` 은 `[]`, `ask_about` 은 `""`, options 는 빈 배열.
+   - message 는 짧게 마무리만. **질문으로 끝내지 마라.**
+     사장님은 이미 할 말을 다 했다.
+   - 이번 말이 값을 **고치는 말**일 수 있으니 extracted 는 계속 채워라."""
+
+#: 더 물을 게 없을 때 하는 말. LLM 이 아니라 코드가 쓴다 — 아래 respond() 참고.
+DONE_MESSAGE = "필요한 건 다 여쭤봤어요. 이제 만들어드릴게요."
+
+#: LLM 이 message 를 안 준 경우
+FALLBACK_MESSAGE = "조금 더 자세히 말씀해주시겠어요?"
 
 GOAL_LABEL = {"image": "광고 이미지", "copy": "광고 문구"}
 
@@ -262,15 +279,18 @@ def respond(
     # 실제 발화로 골든셋을 채우려고 남긴다. 실패해도 대화는 계속된다.
     turnlog.record(utterance, draft, merged, asking, store.industry_label)
 
+    # 더 물을 게 없으면 **말도 코드가 쓴다.** 무엇을 물을지를 코드가 정하는 것과
+    # 같은 이유다 — 여기서 LLM 에게 맡기면 지시를 어기고 이미 답한 것을 또 묻는다.
+    #
+    # 실제로 그랬다: 프롬프트 아래쪽 JSON 틀에 예시로 적어둔 "가격"·"원하는 느낌"
+    # 을 그대로 베껴서, 다 채워진 뒤에도 그 둘을 번갈아 물었다. 마무리 인사는
+    # 한 줄이라 LLM 이 필요 없고, 코드가 쓰면 이 실패가 아예 불가능해진다.
+    if merged.next_slot() is None:
+        return ChatTurn(message=DONE_MESSAGE, options=[], draft=merged)
+
     options = raw.get("options")
     return ChatTurn(
-        message=str(raw.get("message") or "조금 더 자세히 말씀해주시겠어요?"),
-        # 더 물을 게 없으면 선택지를 지운다 — LLM 이 지시를 어기고 또 물어봐도
-        # 화면에는 안 뜨게 해서 대화가 맴돌지 않게 한다.
-        options=(
-            [str(o) for o in options]
-            if isinstance(options, list) and merged.next_slot() is not None
-            else []
-        ),
+        message=str(raw.get("message") or FALLBACK_MESSAGE),
+        options=[str(o) for o in options] if isinstance(options, list) else [],
         draft=merged,
     )

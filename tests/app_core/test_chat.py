@@ -62,6 +62,37 @@ def test_더_물을_게_없으면_선택지를_지운다(store: Store) -> None:
     assert turn.options == []
 
 
+def test_더_물을_게_없으면_마무리_인사는_코드가_쓴다(store: Store) -> None:
+    """LLM 이 또 질문을 만들어도 화면에는 안 나가야 한다.
+
+    실제로 그랬다 — 프롬프트 JSON 틀의 예시("가격"·"원하는 느낌")를 베껴서
+    다 채워진 뒤에도 그 둘을 번갈아 물었다.
+    """
+    done = draft(product="크로플", price=4500, situation="신메뉴", tone="따뜻한")
+    turn = chat.respond(done, "네", store, FakeClient({"message": "가격은 얼마인가요?"}))
+    assert turn.message == chat.DONE_MESSAGE
+
+
+def test_마지막_슬롯이_이번_턴에_차도_마무리한다(store: Store) -> None:
+    """이번 말로 마지막 칸이 차는 순간이 실제로 터진 지점이다."""
+    almost = draft(product="크로플", price=4500, situation="신메뉴")
+    turn = chat.respond(
+        almost,
+        "매운 감칠맛 강조",
+        store,
+        FakeClient({"extracted": {"tone": "매운 감칠맛 강조"}, "message": "가격은 얼마인가요?"}),
+    )
+    assert turn.message == chat.DONE_MESSAGE
+    assert turn.options == []
+
+
+def test_아직_물을_게_남으면_LLM_말을_그대로_쓴다(store: Store) -> None:
+    turn = chat.respond(
+        draft(product="크로플"), "네", store, FakeClient({"message": "가격은 얼마인가요?"})
+    )
+    assert turn.message == "가격은 얼마인가요?"
+
+
 def test_필수가_남으면_그것부터_물으라고_지시한다(store: Store) -> None:
     client = FakeClient({})
     chat.respond(draft(product="크로플"), "안녕", store, client)
@@ -84,7 +115,7 @@ def test_다_물었으면_마무리하라고_지시한다(store: Store) -> None:
     full = draft(product="크로플", price=4500, situation="신메뉴", tone="따뜻한")
     chat.respond(full, "네", store, client)
     assert client.system is not None
-    assert "더 묻지 말고 마무리해라" in client.system
+    assert "더 묻지 마라" in client.system
 
 
 def test_한_번_물어본_것은_다시_묻지_않는다(store: Store) -> None:
