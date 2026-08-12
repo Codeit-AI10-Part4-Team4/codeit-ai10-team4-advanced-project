@@ -6,13 +6,17 @@
 
 from openai import OpenAI
 
-# 어떤 주문이 와도 공통으로 지킬 조건 — 제품을 얹을 "빈 무대"여야 한다.
-_BASE = "close-up of an empty clean surface in the foreground, blurred interior, soft light"
+# 어떤 주문이 와도 공통으로 지킬 조건 — 제품을 놓을 "빈 탁자"가 앞에 있어야 한다.
+# 실험 근거: 같은 seed 로 3안 비교(notebooks/background_gen_poc.ipynb) — 탁자 클로즈업이
+# 제품 놓을 자리를 가장 잘 만든다. 재질(나무 등)은 넣지 않는다 — 업종마다 어울리는
+# 재질이 달라 편향이 생긴다.
+_BASE = "close-up of an empty tabletop in the foreground, blurred interior behind, soft light"
 
 _SYSTEM = (
-    "You turn Korean ad-order details into one short English prompt "
-    "for a text-to-image background model. Describe only the empty scene and mood. "
-    "Never mention any food, product, text, or people. Output the prompt only."
+    "You turn Korean ad-order details into a short English phrase "
+    "for a text-to-image background model — at most 12 words. "
+    "Describe only the shop's indoor style and mood, no full scene. "
+    "Never mention any food, product, text, or people. Output the phrase only."
 )
 
 
@@ -25,4 +29,4 @@ def build_bg_prompt(industry: str, situation: str = "", tone: str = "") -> str:
         messages=[{"role": "system", "content": _SYSTEM}, {"role": "user", "content": order}],
     )
     text = (res.choices[0].message.content or "").strip()
-    return f"{text}, {_BASE}"
+    return f"{_BASE}, {text}"
