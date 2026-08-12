@@ -1,0 +1,425 @@
+[
+  {
+    "store": "한나절커피",
+    "area": "역삼역",
+    "category": "커피-음료",
+    "product": "아이스 아메리카노",
+    "price": 4500,
+    "before": {
+      "headline": "여름을 시원하게!",
+      "sub": "한나절커피의 아이스 아메리카노 4,500원",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "suggestions": [
+      "가격을 낮추기보다 세트 구성으로 묶어 보여주세요",
+      "주변 카페와의 비교를 쉽게 할 수 있도록 가격 대비 가치를 강조하는 문구를 추가해보세요."
+    ],
+    "top_resistance": [
+      "price",
+      "relevance"
+    ],
+    "confidence": "ok",
+    "excluded_cnt": 0,
+    "panel": {
+      "headline": "여름의 시원함, 한 잔!",
+      "sub": "아이스 아메리카노 4,500원, 세트로 더 즐기세요!",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "control": {
+      "headline": "여름의 청량함을 담다",
+      "sub": "한나절커피의 아이스 아메리카노 4,500원",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "verdict_panel": "변화 없음",
+    "verdict_control": "변화 없음",
+    "secs": 22.4
+  },
+  {
+    "store": "한나절커피",
+    "area": "역삼역",
+    "category": "커피-음료",
+    "product": "크로플 세트",
+    "price": 8900,
+    "before": {
+      "headline": "크로플 세트, 한나절의 달콤함",
+      "sub": "8,900원으로 즐기는 특별한 간식!",
+      "weak": 0.3982,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.3982
+      }
+    },
+    "suggestions": [
+      "가격을 낮추기보다 세트 구성으로 묶어 보여주세요",
+      "크로플의 특별한 점이나 재료를 강조해보세요"
+    ],
+    "top_resistance": [
+      "price"
+    ],
+    "confidence": "ok",
+    "excluded_cnt": 0,
+    "panel": {
+      "headline": "크로플 세트로 여유를!",
+      "sub": "8,900원에 달콤한 크로플과 음료를!",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "control": {
+      "headline": "크로플 세트로 여유를!",
+      "sub": "8,900원에 달콤한 휴식을 즐겨보세요.",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "verdict_panel": "회피(timing)",
+    "verdict_control": "회피(timing)",
+    "secs": 19.3
+  },
+  {
+    "store": "한나절커피",
+    "area": "역삼역",
+    "category": "커피-음료",
+    "product": "원두 드립백",
+    "price": 12000,
+    "before": {
+      "headline": "차분한 한 잔의 여유",
+      "sub": "소중한 사람에게 전하는 따뜻한 선물",
+      "weak": 0.89,
+      "weak_kind": "price",
+      "scored": {
+        "price": 0.89
+      }
+    },
+    "suggestions": [
+      "가격을 낮추기보다 세트 구성으로 묶어 보여주세요",
+      "선물용으로 적합하다는 점을 강조하는 문구를 추가해보세요."
+    ],
+    "top_resistance": [
+      "price"
+    ],
+    "confidence": "ok",
+    "excluded_cnt": 0,
+    "panel": {
+      "headline": "소중한 순간을 위한 선물",
+      "sub": "한나절커피 드립백으로 따뜻한 마음을 전하세요. 12,000원",
+      "weak": 0.89,
+      "weak_kind": "price",
+      "scored": {
+        "price": 0.89
+      }
+    },
+    "control": {
+      "headline": "소중한 순간을 위한 선택",
+      "sub": "12,000원으로 전하는 따뜻한 마음",
+      "weak": 0.89,
+      "weak_kind": "price",
+      "scored": {
+        "price": 0.89
+      }
+    },
+    "verdict_panel": "변화 없음",
+    "verdict_control": "변화 없음",
+    "secs": 18.2
+  },
+  {
+    "store": "홍대반상",
+    "area": "홍대입구역 3번",
+    "category": "한식음식점",
+    "product": "김치찌개",
+    "price": 9000,
+    "before": {
+      "headline": "점심엔 김치찌개 한 그릇!",
+      "sub": "푸근한 맛, 9,000원으로 즐기세요.",
+      "weak": 0.339,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.339
+      }
+    },
+    "suggestions": [
+      "가격을 낮추기보다 세트 구성으로 묶어 보여주세요",
+      "김치찌개와 함께 다른 메뉴를 조합한 할인 프로모션을 제안해보세요"
+    ],
+    "top_resistance": [
+      "price"
+    ],
+    "confidence": "ok",
+    "excluded_cnt": 0,
+    "panel": {
+      "headline": "점심엔 김치찌개 세트!",
+      "sub": "김치찌개와 밥, 반찬까지 9,000원!",
+      "weak": 0.339,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.339
+      }
+    },
+    "control": {
+      "headline": "따뜻한 김치찌개 한 그릇",
+      "sub": "점심 특선, 9,000원으로 푸근함을 느껴보세요.",
+      "weak": 0.339,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.339
+      }
+    },
+    "verdict_panel": "변화 없음",
+    "verdict_control": "변화 없음",
+    "secs": 18.3
+  },
+  {
+    "store": "홍대반상",
+    "area": "홍대입구역 3번",
+    "category": "한식음식점",
+    "product": "제육볶음 정식",
+    "price": 11000,
+    "before": {
+      "headline": "제육볶음 정식 출시!",
+      "sub": "홍대반상에서 맛보는 정통 한식, 11,000원!",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "suggestions": [
+      "가격을 낮추기보다 세트 구성으로 묶어 보여주세요",
+      "제육볶음 정식의 가치를 강조하는 문구를 추가해보세요."
+    ],
+    "top_resistance": [
+      "price"
+    ],
+    "confidence": "ok",
+    "excluded_cnt": 0,
+    "panel": {
+      "headline": "제육볶음 정식 출시!",
+      "sub": "정통 한식의 맛, 11,000원에 즐기세요!",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "control": {
+      "headline": "제육볶음 정식, 도전하라!",
+      "sub": "홍대반상에서 느끼는 진정한 한식, 11,000원!",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "verdict_panel": "변화 없음",
+    "verdict_control": "변화 없음",
+    "secs": 18.8
+  },
+  {
+    "store": "홍대반상",
+    "area": "홍대입구역 3번",
+    "category": "한식음식점",
+    "product": "계란말이",
+    "price": 6000,
+    "before": {
+      "headline": "부드러운 계란말이",
+      "sub": "홍대반상에서 가벼운 한 끼를!",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "suggestions": [
+      "가격을 낮추기보다 세트 구성으로 묶어 보여주세요",
+      "계란말이의 매력을 강조하는 문구를 추가해보세요."
+    ],
+    "top_resistance": [
+      "price",
+      "relevance"
+    ],
+    "confidence": "ok",
+    "excluded_cnt": 0,
+    "panel": {
+      "headline": "부드러운 계란말이 세트!",
+      "sub": "홍대반상에서 가벼운 한 끼, 6,000원!",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "control": {
+      "headline": "계란말이, 한 입의 행복",
+      "sub": "홍대반상에서 가벼운 사이드 메뉴를 즐겨보세요! 6,000원",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "verdict_panel": "변화 없음",
+    "verdict_control": "변화 없음",
+    "secs": 19.6
+  },
+  {
+    "store": "수유통닭",
+    "area": "도봉산입구",
+    "category": "치킨전문점",
+    "product": "후라이드 치킨",
+    "price": 18000,
+    "before": {
+      "headline": "3주년 기념! 후라이드 치킨",
+      "sub": "수유통닭의 특별한 맛, 18,000원!",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "suggestions": [
+      "가격을 낮추기보다 세트 구성으로 묶어 보여주세요",
+      "3주년 기념 이벤트를 강조하며 특별 할인 혜택을 추가해보세요"
+    ],
+    "top_resistance": [
+      "price"
+    ],
+    "confidence": "ok",
+    "excluded_cnt": 0,
+    "panel": {
+      "headline": "3주년 기념! 후라이드 치킨",
+      "sub": "세트 구성으로 더욱 즐거운 18,000원!",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "control": {
+      "headline": "3주년 기념! 후라이드 축제",
+      "sub": "수유통닭의 후라이드 치킨, 18,000원!",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "verdict_panel": "변화 없음",
+    "verdict_control": "변화 없음",
+    "secs": 18.5
+  },
+  {
+    "store": "수유통닭",
+    "area": "도봉산입구",
+    "category": "치킨전문점",
+    "product": "양념치킨 세트",
+    "price": 25000,
+    "before": {
+      "headline": "주말 할인! 양념치킨 세트",
+      "sub": "25,000원에 즐기는 맛있는 주말!",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0,
+        "weekend": 1.0
+      }
+    },
+    "suggestions": [
+      "주말 할인과 함께 가격 대비 가치를 강조하는 문구를 추가해보세요.",
+      "가격을 낮추기보다 세트 구성으로 묶어 보여주세요."
+    ],
+    "top_resistance": [
+      "price"
+    ],
+    "confidence": "ok",
+    "excluded_cnt": 0,
+    "panel": {
+      "headline": "주말 특별 할인! 양념치킨",
+      "sub": "25,000원에 푸짐한 세트로 즐겨보세요!",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0,
+        "weekend": 1.0
+      }
+    },
+    "control": {
+      "headline": "주말의 특별한 맛!",
+      "sub": "양념치킨 세트, 25,000원으로 즐겨보세요!",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0,
+        "weekend": 1.0
+      }
+    },
+    "verdict_panel": "변화 없음",
+    "verdict_control": "변화 없음",
+    "secs": 17.2
+  },
+  {
+    "store": "수유통닭",
+    "area": "도봉산입구",
+    "category": "치킨전문점",
+    "product": "순살 반반",
+    "price": 22000,
+    "before": {
+      "headline": "순살 반반, 배달의 정석",
+      "sub": "22,000원으로 두 가지 맛을 즐겨보세요!",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "suggestions": [
+      "가격을 낮추기보다 배달 전용 메뉴의 가치를 강조하는 문구로 바꿔보세요.",
+      "가격 대신 품질이나 신선함을 강조하는 표현을 사용해보세요."
+    ],
+    "top_resistance": [
+      "price"
+    ],
+    "confidence": "ok",
+    "excluded_cnt": 0,
+    "panel": {
+      "headline": "두 가지 맛, 한 번에!",
+      "sub": "신선한 순살로 배달의 즐거움을 더하세요.",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "control": {
+      "headline": "두 가지 맛, 한 번에!",
+      "sub": "순살 반반으로 배달의 즐거움을 느껴보세요. 22,000원",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "verdict_panel": "변화 없음",
+    "verdict_control": "변화 없음",
+    "secs": 18.1
+  }
+]
