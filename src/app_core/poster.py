@@ -24,7 +24,10 @@ def paper_background(size: int = 1080, base: tuple[int, int, int] = CREAM) -> Im
     """포스터용 종이 배경 — 가장자리를 살짝 눌러 인쇄물 느낌을 낸다."""
     bg = Image.new("RGB", (size, size), base)
     d = ImageDraw.Draw(bg, "RGBA")
-    for i in range(90):
+
+    # 크기에 비례해 겹 수를 정한다. 고정값이면 작은 이미지에서 사각형이 뒤집힌다.
+    depth = min(90, size // 8)
+    for i in range(depth):
         d.rectangle([i, i, size - i, size - i], outline=(0, 0, 0, 3))
     return bg
 
