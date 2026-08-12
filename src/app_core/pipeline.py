@@ -19,12 +19,12 @@ def generate_ad(
     store: Store,
     copy: CopyCandidate,
 ) -> Image.Image:
-    """주문서·가게·문구를 받아 완성 광고 이미지를 돌려준다."""
+    """주문서·가게·문구를 받아 완성 광고 이미지를 돌려준다.
+
+    사진(photo_id)이 없으면 배경과 문구만으로 만든다 — 텍스트만으로 주문한 경우다.
+    """
     prompt = build_bg_prompt(store.industry_label, brief.situation, brief.tone)
     bg = generate_background(prompt)
 
-    if brief.photo_id is None:
-        raise NotImplementedError("사진 없는 통생성은 아직 준비 중입니다")
-
-    product = remove_background(load_photo(brief.photo_id))
+    product = None if brief.photo_id is None else remove_background(load_photo(brief.photo_id))
     return compose_ad(product, copy.headline, copy.sub, background=bg)

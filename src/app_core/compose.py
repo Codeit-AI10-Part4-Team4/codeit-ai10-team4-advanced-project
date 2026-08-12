@@ -46,7 +46,7 @@ def _fit_font(text: str, max_width: int, start: int, floor: int = 30) -> ImageFo
 
 
 def compose_ad(
-    product: Image.Image,
+    product: Image.Image | None,
     headline: str,
     sub: str = "",
     size: tuple[int, int] = (1080, 1080),
@@ -57,22 +57,27 @@ def compose_ad(
     headline·sub는 문구 생성이 주는 형식(CopyCandidate) 그대로다 —
     헤드라인은 크게, 서브는 그 아래 작게. 가격은 보통 sub에 녹아 온다.
     background를 주면 크기를 맞춰 배경으로 쓰고, 없으면 그라데이션(임시)을 깐다.
+    product가 None이면 사진 없이 배경과 문구만으로 만든다(텍스트 광고).
     """
     w, h = size
     bg = background.resize(size) if background else make_gradient_background(size)
     canvas = bg.convert("RGBA")
 
-    # 투명 여백을 잘라 제품이 크게 보이게 (개선 1호)
-    bbox = product.getbbox()
-    prod = product.crop(bbox) if bbox else product.copy()
-    prod.thumbnail((int(w * 0.75), int(h * 0.62)))
-    canvas.alpha_composite(prod, ((w - prod.width) // 2, h - prod.height - 100))
+    if product is not None:
+        # 투명 여백을 잘라 제품이 크게 보이게 (개선 1호)
+        bbox = product.getbbox()
+        prod = product.crop(bbox) if bbox else product.copy()
+        prod.thumbnail((int(w * 0.75), int(h * 0.62)))
+        canvas.alpha_composite(prod, ((w - prod.width) // 2, h - prod.height - 100))
+
+    # 사진이 없으면 위쪽이 허전하므로 문구를 가운데로 내린다.
+    head_y = 140 if product is not None else int(h * 0.42)
 
     d = ImageDraw.Draw(canvas)
     max_text_w = int(w * 0.9)
     head_font = _fit_font(headline, max_text_w, 76)
     d.text(
-        (w // 2, 140),
+        (w // 2, head_y),
         headline,
         font=head_font,
         fill=(255, 255, 255),
@@ -83,7 +88,7 @@ def compose_ad(
     if sub:
         sub_font = _fit_font(sub, max_text_w, 52)
         d.text(
-            (w // 2, 235),
+            (w // 2, head_y + 95),
             sub,
             font=sub_font,
             fill=(255, 245, 230),

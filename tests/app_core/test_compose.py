@@ -30,3 +30,10 @@ def test_compose_ad_uses_given_background(monkeypatch):
     blue = Image.new("RGB", (64, 64), (0, 0, 255))
     ad = compose.compose_ad(product, "제목", size=(256, 256), background=blue)
     assert ad.getpixel((5, 250)) == (0, 0, 255)
+
+
+def test_compose_ad_without_product(monkeypatch):
+    monkeypatch.setattr(compose, "_load_font", _fake_font)
+    ad = compose.compose_ad(None, "사진 없는 광고", "문구만으로", size=(256, 256))
+    assert ad.size == (256, 256)
+    assert ad.mode == "RGB"
