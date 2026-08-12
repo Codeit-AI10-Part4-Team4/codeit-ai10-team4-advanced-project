@@ -137,11 +137,26 @@ class AdBrief(BaseModel):
     extra: str = Field(default="", description="그 밖의 요청")
     with_sub: bool = Field(default=True, description="서브 문구까지 만들지")
 
-    # 이미지는 JSON 에 실을 수 없어서 사진 보관함에 두고 번호만 싣는다.
-    # 보관함은 이미지 생성 담당의 photo_store 가 맡는다.
+    # ── 사진 ────────────────────────────────────────────────
+    # 이미지는 JSON 에 실을 수 없어서 사진 보관함(photo_store)에 두고 번호만 싣는다.
+    #
+    # 칸을 셋으로 나눈 이유: 사진마다 **받는 쪽이 해야 할 일이 다르다.**
+    # 한 칸에 몰아넣으면 "이 사진을 살리라는 건지 흉내내라는 건지"를 받는 쪽이
+    # 알 수 없다. 나눠두면 각자 자기 칸만 보면 되고, "내 상품은 살리되 분위기는
+    # 이 레퍼런스로" 같은 조합도 그냥 된다.
     photo_id: int | None = Field(
-        default=None, ge=1, description="사진 보관함 번호. None 이면 사진 없이 생성"
+        default=None, ge=1, description="제품 사진 — 이 상품을 **그대로 살린다**(누끼)"
     )
+    ref_id: int | None = Field(
+        default=None, ge=1, description="레퍼런스 — 분위기만 **참고한다**. 상품을 베끼지 않는다"
+    )
+    sketch_id: int | None = Field(
+        default=None, ge=1, description="스케치 — 배치·구도를 **따라간다**"
+    )
+
+    # 제품 사진을 비전 모델로 읽은 메모(vision.describe). photo_id 와 짝이다.
+    # ⚠️ 사장님이 한 말이 아니다. 그래서 tone·situation 에 섞지 않고 자리를 따로 뒀다.
+    photo_note: str = Field(default="", description="제품 사진에서 읽은 생김새·분위기")
 
     # 슬롯이 못 담는 것을 여기서 건진다.
     # "단골분들이 매콤한 걸 좋아하셔서" 같은 말은 어느 슬롯에도 안 들어가지만
@@ -217,6 +232,9 @@ class AdBriefDraft(BaseModel):
     with_sub: bool = True
     # 대화로 묻지 않는다. 사장님이 화면에서 사진을 올리면 채워진다.
     photo_id: int | None = Field(default=None, ge=1)
+    ref_id: int | None = Field(default=None, ge=1)
+    sketch_id: int | None = Field(default=None, ge=1)
+    photo_note: str = ""
 
     transcript: list[str] = Field(default_factory=list, description="사장님이 한 말 그대로")
     asked: list[str] = Field(
@@ -281,6 +299,9 @@ class AdBriefDraft(BaseModel):
             extra=self.extra,
             with_sub=self.with_sub,
             photo_id=self.photo_id,
+            ref_id=self.ref_id,
+            sketch_id=self.sketch_id,
+            photo_note=self.photo_note,
             transcript=self.transcript,
         )
 

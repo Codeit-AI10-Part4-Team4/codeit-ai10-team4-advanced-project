@@ -125,6 +125,24 @@ def test_사진_번호를_담는다() -> None:
     assert brief(photo_id=7).photo_id == 7
 
 
+def test_용도가_다른_사진은_칸이_다르다() -> None:
+    """한 칸에 몰면 살리라는 건지 흉내내라는 건지 받는 쪽이 알 수 없다."""
+    b = brief(photo_id=7, ref_id=8, sketch_id=9)
+    assert (b.photo_id, b.ref_id, b.sketch_id) == (7, 8, 9)
+
+
+def test_레퍼런스만_넣을_수도_있다() -> None:
+    """ "제품 사진은 없고 이런 느낌으로만 만들어줘" 가 성립한다."""
+    b = brief(ref_id=8)
+    assert b.ref_id == 8 and b.photo_id is None and b.sketch_id is None
+
+
+def test_레퍼런스_스케치도_번호는_1부터다() -> None:
+    for field in ("ref_id", "sketch_id"):
+        with pytest.raises(ValidationError):
+            brief(**{field: 0})
+
+
 def test_사진_번호는_1부터다() -> None:
     """0 이나 음수는 보관함에 없는 번호다."""
     with pytest.raises(ValidationError):
@@ -136,10 +154,27 @@ def test_승격해도_사진_번호가_따라간다() -> None:
     assert d.to_brief().photo_id == 7
 
 
+def test_승격해도_레퍼런스와_스케치가_따라간다() -> None:
+    d = AdBriefDraft(goal="image", product="크로플", price=4500, ref_id=8, sketch_id=9)
+    b = d.to_brief()
+    assert (b.ref_id, b.sketch_id) == (8, 9)
+
+
 def test_다시_만들어도_사진은_그대로다() -> None:
     """사진을 바꾸려면 다시 올려야 한다. 재생성이 조건을 건드리지 않는다."""
     revised = brief(photo_id=7).revised(Feedback(source="option", notes=["더 짧게"]), [])
     assert revised.photo_id == 7
+
+
+def test_사진에서_읽은_메모는_별도_자리에_담긴다() -> None:
+    """tone 에 섞으면 사장님이 말한 적 없는 값이 주문서에 조용히 들어간다."""
+    b = brief(photo_note="- 사진의 분위기: 따뜻하고 아늑한")
+    assert b.photo_note and b.tone == ""
+
+
+def test_승격해도_사진_메모가_따라간다() -> None:
+    d = AdBriefDraft(goal="copy", product="크로플", price=4500, photo_note="- 찍힌 것: 크로플")
+    assert d.to_brief().photo_note == "- 찍힌 것: 크로플"
 
 
 # ── 대화 초안 ────────────────────────────────────────────────

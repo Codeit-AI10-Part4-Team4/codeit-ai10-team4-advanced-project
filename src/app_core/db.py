@@ -85,8 +85,13 @@ class AdRow(Base):
     situation: Mapped[str] = mapped_column(String(128), default="")
     tone: Mapped[str] = mapped_column(String(128), default="")
     extra: Mapped[str] = mapped_column(Text, default="")
-    #: 사진 보관함 번호. 파일 자체는 보관함에 있다 (이미지 생성 담당 소관)
+    # 사진 보관함 번호 셋. 파일 자체는 photo_store 가 들고 있다.
+    # 용도가 달라서 칸을 나눴다 — 살릴 사진 / 참고할 사진 / 따라갈 구도.
     photo_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    ref_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    sketch_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    #: 제품 사진을 비전 모델로 읽은 메모. 사장님이 한 말이 아니라 사진에서 본 것이다
+    photo_note: Mapped[str] = mapped_column(Text, default="")
     # 사장님이 한 말 원문. 줄바꿈으로 이어 붙인다.
     # 슬롯으로 요약하면서 깎인 뉘앙스를 여기서 되살린다.
     transcript: Mapped[str] = mapped_column(Text, default="")

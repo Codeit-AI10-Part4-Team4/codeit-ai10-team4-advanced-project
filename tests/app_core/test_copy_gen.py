@@ -103,6 +103,29 @@ def test_말이_없으면_그_부분을_빼고_보낸다(store: Store) -> None:
     assert client.system is not None and "원문" not in client.system
 
 
+# ── 상품 사진 ────────────────────────────────────────────────
+
+
+def test_사진에서_읽은_것을_프롬프트에_넣는다(store: Store) -> None:
+    note = "- 찍힌 것: 크로플\n- 사진의 분위기: 따뜻하고 아늑한"
+    client = FakeClient(three())
+    copy_gen.generate(brief(photo_id=1, photo_note=note), store, client=client)
+    assert client.system is not None and "따뜻하고 아늑한" in client.system
+
+
+def test_사진_메모는_사장님_말과_구분해서_넣는다(store: Store) -> None:
+    """섞어 놓으면 사장님이 하지도 않은 말이 문구의 근거가 된다."""
+    client = FakeClient(three())
+    copy_gen.generate(brief(photo_note="- 찍힌 것: 크로플"), store, client=client)
+    assert client.system is not None and "사장님이 한 말이 아니다" in client.system
+
+
+def test_사진이_없으면_그_부분을_빼고_보낸다(store: Store) -> None:
+    client = FakeClient(three())
+    copy_gen.generate(brief(), store, client=client)
+    assert client.system is not None and "사진에서 읽은 것" not in client.system
+
+
 # ── 다시 만들기 ──────────────────────────────────────────────
 
 

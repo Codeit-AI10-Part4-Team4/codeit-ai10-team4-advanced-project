@@ -44,7 +44,7 @@ SYSTEM_PROMPT = """너는 동네 가게 광고 문구를 쓰는 카피라이터�
 - 원하는 느낌: {tone}
 - 그 밖의 요청: {extra}
 {price_line}
-{transcript}{revision}{history}
+{transcript}{photo}{revision}{history}
 규칙
 - **{count}개**를 서로 다르게 만들어라.
 - 헤드라인은 {max_headline}자 이내, 서브는 {max_sub}자 이내.
@@ -86,6 +86,25 @@ def _transcript_block(brief: AdBrief) -> str:
         f"{lines}\n"
         "⚠️ 여기 있는 말도 사장님이 직접 한 말이지만, "
         "없는 사실을 상상해서 채우지는 마라.\n"
+    )
+
+
+def _photo_block(brief: AdBrief) -> str:
+    """사장님이 올린 상품 사진에서 읽은 것.
+
+    사진을 올렸다는 건 "이런 느낌으로 만들어줘"라는 뜻이다. 말로 못 하는
+    분위기가 사진엔 담겨 있어서, 여기를 참고하면 톤이 상품과 따로 놀지 않는다.
+
+    말과 구분해서 넣는 이유: 이건 모델이 사진을 보고 적은 것이라 사장님 말보다
+    믿을 만하지 않다. 섞어 놓으면 사장님이 하지도 않은 말이 근거가 된다.
+    """
+    if not brief.photo_note:
+        return ""
+    return (
+        "\n사장님이 올린 상품 사진에서 읽은 것:\n"
+        f"{brief.photo_note}\n"
+        "⚠️ 이건 사진을 보고 적은 메모지 사장님이 한 말이 아니다. 분위기를 잡는 데만"
+        " 참고하고, 여기 없는 맛·재료·가격은 지어내지 마라.\n"
     )
 
 
@@ -131,6 +150,7 @@ def _system_prompt(brief: AdBrief, store: Store, recent: list[AdBrief]) -> str:
         extra=brief.extra or "(없음)",
         price_line=_price_line(brief),
         transcript=_transcript_block(brief),
+        photo=_photo_block(brief),
         revision=_revision_block(brief),
         history=_history_block(recent),
         count=CANDIDATE_COUNT,

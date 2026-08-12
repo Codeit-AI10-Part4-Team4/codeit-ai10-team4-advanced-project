@@ -73,6 +73,20 @@ def test_사진이_없으면_None으로_읽힌다(store: Store) -> None:
     assert ads.recent(store.id)[0].photo_id is None
 
 
+def test_레퍼런스와_스케치도_따로_저장된다(store: Store) -> None:
+    """받는 쪽이 칸을 보고 무엇을 할지 정한다 — 섞이면 안 된다."""
+    ads.save(store.id, brief(goal="image", photo_id=7, ref_id=8, sketch_id=9))
+    saved = ads.recent(store.id)[0]
+    assert (saved.photo_id, saved.ref_id, saved.sketch_id) == (7, 8, 9)
+
+
+def test_사진에서_읽은_메모도_같이_저장된다(store: Store) -> None:
+    """다시 만들 때 사진을 또 읽지 않으려고 남긴다."""
+    note = "- 찍힌 것: 크로플\n- 사진의 분위기: 따뜻하고 아늑한"
+    ads.save(store.id, brief(photo_id=7, photo_note=note))
+    assert ads.recent(store.id)[0].photo_note == note
+
+
 # ── 다시 만들기 ──────────────────────────────────────────────
 
 

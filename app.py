@@ -8,10 +8,12 @@
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 import streamlit as st
 from pydantic import ValidationError
 
-from app_core import ads, auth, chat, config, copy_gen, registry, stores
+from app_core import ads, auth, chat, config, copy_gen, photo_store, registry, stores, vision
 from app_core.schema import AdBrief, AdBriefDraft, Feedback, Store, StoreInput
 
 # DB·API 키 설정을 읽는다. app_core 를 쓰기 전에 해야 한다.
@@ -21,6 +23,33 @@ st.set_page_config(page_title="동네 광고 만들기", page_icon="🏪", layou
 
 GOALS = {"image": "🖼️ 광고 이미지 만들기", "copy": "✍️ 광고 문구 만들기"}
 PLACEHOLDER = "예: 크로플 신메뉴 나왔어요, 인스타에 올릴 사진 만들어줘"
+PHOTO_TYPES = ["png", "jpg", "jpeg", "webp"]
+
+
+class PhotoSlot(NamedTuple):
+    field: str  #: AdBriefDraft 의 어느 칸에 번호를 넣을지
+    label: str
+    hint: str  #: 사장님에게 "이 칸에 뭘 넣는 건지" 알려주는 한 줄
+    read: bool  #: 비전 모델로 읽어서 문구에 반영할지
+
+
+#: 사진 칸 셋. 용도가 달라서 받는 쪽이 하는 일이 다르다 (schema.AdBrief 참고).
+PHOTO_SLOTS = (
+    PhotoSlot("photo_id", "제품 사진", "이 상품을 그대로 살립니다", read=True),
+    PhotoSlot("ref_id", "레퍼런스", "이런 분위기로 만들어주세요", read=False),
+    PhotoSlot("sketch_id", "스케치", "이런 배치·구도로 만들어주세요", read=False),
+)
+
+
+def _clear_uploader(field: str) -> None:
+    """올린 파일을 비운다.
+
+    st.file_uploader 는 key 가 같으면 rerun 뒤에도 파일을 계속 물고 있어서,
+    "빼기"를 눌러도 다음 rerun 에 같은 파일이 또 올라온다.
+    key 를 바꾸면 새 위젯으로 취급돼 빈 상태로 그려진다.
+    """
+    st.session_state[f"slot_{field}"] = st.session_state.get(f"slot_{field}", 0) + 1
+    st.session_state.pop(f"key_{field}", None)
 
 
 def _reset_chat() -> None:
@@ -29,6 +58,8 @@ def _reset_chat() -> None:
     st.session_state.pop("copies", None)
     st.session_state.pop("brief", None)
     st.session_state.pop("ad_id", None)
+    for slot in PHOTO_SLOTS:
+        _clear_uploader(slot.field)
 
 
 # ── 로그인 ────────────────────────────────────────────────
@@ -112,6 +143,74 @@ def store_list_view(user_id: int) -> None:
 
 
 # ── 챗봇 ──────────────────────────────────────────────────
+
+
+def _photo_slot(draft: AdBriefDraft, slot: PhotoSlot) -> None:
+    """사진 칸 하나. 이미 있으면 보여주고, 없으면 받는다."""
+    st.markdown(f"**{slot.label}**")
+    st.caption(slot.hint)
+
+    # ① 이미 올린 경우 — 무엇으로 읽었는지 보여준다. 엉뚱하면 빼면 된다.
+    if (photo_id := getattr(draft, slot.field)) is not None:
+        if path := photo_store.path_of(photo_id):
+            st.image(str(path), use_container_width=True)
+        if slot.read:
+            st.caption(draft.photo_note or "사진은 저장했지만 내용은 읽지 못했습니다")
+        if st.button("빼기", key=f"drop_{slot.field}", use_container_width=True):
+            blank = {slot.field: None} | ({"photo_note": ""} if slot.read else {})
+            st.session_state.draft = draft.model_copy(update=blank)
+            _clear_uploader(slot.field)
+            st.rerun()
+        return
+
+    # ② 아직 없는 경우
+    uploaded = st.file_uploader(
+        slot.label,
+        type=PHOTO_TYPES,
+        label_visibility="collapsed",
+        key=f"up_{slot.field}{st.session_state.get(f'slot_{slot.field}', 0)}",
+    )
+    if uploaded is None:
+        return
+
+    # 같은 파일이 그대로 있으면 rerun 마다 다시 올라온다 — 저장도 비전 호출도 한 번만.
+    key = (uploaded.name, uploaded.size)
+    if st.session_state.get(f"key_{slot.field}") == key:
+        return
+    st.session_state[f"key_{slot.field}"] = key
+
+    try:
+        photo_id = photo_store.save(uploaded.getvalue(), uploaded.name)
+    except (ValueError, OSError) as e:
+        st.error(str(e))
+        return
+
+    update: dict = {slot.field: photo_id}
+    if slot.read:
+        with st.spinner("사진 보는 중..."):
+            data, mime = photo_store.load(photo_id) or (b"", "")
+            update["photo_note"] = vision.describe(data, mime) if data else ""
+
+    st.session_state.draft = draft.model_copy(update=update)
+    st.rerun()
+
+
+def photo_panel(draft: AdBriefDraft) -> None:
+    """사진 칸 셋 — 전부 선택이다.
+
+    제품 사진만 비전 모델로 읽어서 문구에 반영한다. 그 사진이 곧 홍보 대상이라
+    생김새·분위기가 문구의 근거가 되기 때문이다. 레퍼런스·스케치는 "어떻게
+    그릴지"에 대한 지시라 문구와 상관없어서 읽지 않는다 — 호출비만 든다.
+
+    읽는 건 올릴 때 한 번뿐이다. 다시 만들 때마다 부르면 같은 답에 돈만 든다.
+    """
+    filled = [s.label for s in PHOTO_SLOTS if getattr(draft, s.field) is not None]
+    title = "📷 사진 — " + (", ".join(filled) if filled else "선택")
+
+    with st.expander(title, expanded=not filled):
+        for col, slot in zip(st.columns(len(PHOTO_SLOTS)), PHOTO_SLOTS, strict=True):
+            with col:
+                _photo_slot(draft, slot)
 
 
 def brief_panel(draft: AdBriefDraft) -> None:
@@ -206,6 +305,7 @@ def chat_view(store: Store) -> None:
     col_chat, col_brief = st.columns([3, 2])
 
     with col_chat:
+        photo_panel(draft)
         for role, text in history:
             st.chat_message(role).write(text)
 
