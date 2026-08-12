@@ -9,7 +9,8 @@ from pathlib import Path
 from PIL import Image
 
 # data/ 는 gitignore 대상이라 사진이 리포에 올라가지 않는다 (팀 규칙)
-_STORE = Path("data/photos")
+_ROOT = Path(__file__).resolve().parents[2]
+_STORE = _ROOT / "data" / "photos"
 
 
 def save_photo(img: Image.Image) -> int:
