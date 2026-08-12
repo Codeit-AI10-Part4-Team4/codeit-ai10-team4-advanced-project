@@ -173,6 +173,16 @@ def test_새벽을_알아챈다() -> None:
     assert note.fit is not None and note.fit < 0.05
 
 
+def test_간식은_시점이_아니다() -> None:
+    """A/B 측정에서 "특별한 간식!" 이 오후 광고로 잡혀 적합도 0.40 이 붙었다.
+
+    끼니말(점심·저녁·야식)과 달리 간식은 때를 가리키지 않는다. 사장님이
+    시간대를 말한 적이 없는데 시간대로 감점당하면 안 된다.
+    """
+    copy = CopyCandidate(headline="크로플 세트", sub="8,900원으로 즐기는 특별한 간식!")
+    assert timing_note(_features(), copy) is None
+
+
 def test_가장_어긋난_항목을_고른다() -> None:
     f = _features()
     copy = CopyCandidate(headline="새벽 감성 크로플")  # 시점이 최악, 가격은 정상
