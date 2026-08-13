@@ -40,11 +40,35 @@ def test_헤드라인이_빈_후보는_버린다(store: Store) -> None:
     assert [c.headline for c in result] == ["겨울 크로플"]
 
 
-def test_너무_긴_문구는_자른다(store: Store) -> None:
+def test_너무_긴_문구는_버린다(store: Store) -> None:
+    """자르면 "…특가 이벤" 처럼 중간에서 끊긴 문구가 사장님 화면에 뜬다."""
     long = {"candidates": [{"headline": "가" * 100, "sub": "나" * 100}]}
-    result = copy_gen.generate(brief(), store, client=FakeClient(long))
-    assert len(result[0].headline) == copy_gen.MAX_HEADLINE
-    assert len(result[0].sub) == copy_gen.MAX_SUB
+    assert copy_gen.generate(brief(), store, client=FakeClient(long)) == []
+
+
+def test_서브만_길어도_버린다(store: Store) -> None:
+    long_sub = {"candidates": [{"headline": "겨울 크로플", "sub": "나" * 100}]}
+    assert copy_gen.generate(brief(), store, client=FakeClient(long_sub)) == []
+
+
+def test_긴_후보_하나가_나머지를_죽이지_않는다(store: Store) -> None:
+    """후보는 하나씩 따로 판단한다."""
+    mixed = {"candidates": [{"headline": "가" * 100}, {"headline": "겨울 크로플"}]}
+    result = copy_gen.generate(brief(), store, client=FakeClient(mixed))
+    assert [c.headline for c in result] == ["겨울 크로플"]
+
+
+def test_길이만_맞으면_그대로_쓴다(store: Store) -> None:
+    exact = {"candidates": [{"headline": "가" * copy_gen.MAX_HEADLINE}]}
+    result = copy_gen.generate(brief(), store, client=FakeClient(exact))
+    assert len(result) == 1
+
+
+def test_서브를_안_만들_때는_서브_길이를_보지_않는다(store: Store) -> None:
+    """with_sub=False 면 sub 를 비우므로 LLM 이 길게 줬어도 상관없다."""
+    long_sub = {"candidates": [{"headline": "겨울 크로플", "sub": "나" * 100}]}
+    result = copy_gen.generate(brief(with_sub=False), store, client=FakeClient(long_sub))
+    assert [c.headline for c in result] == ["겨울 크로플"]
 
 
 def test_서브를_안_원하면_비운다(store: Store) -> None:

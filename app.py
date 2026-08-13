@@ -13,7 +13,18 @@ from typing import NamedTuple
 import streamlit as st
 from pydantic import ValidationError
 
-from app_core import ads, auth, chat, config, copy_gen, photo_store, registry, stores, vision
+from app_core import (
+    ads,
+    auth,
+    chat,
+    config,
+    copy_gen,
+    llm,
+    photo_store,
+    registry,
+    stores,
+    vision,
+)
 from app_core.schema import AdBrief, AdBriefDraft, Feedback, Store, StoreInput
 
 # DB·API 키 설정을 읽는다. app_core 를 쓰기 전에 해야 한다.
@@ -225,13 +236,29 @@ def brief_panel(draft: AdBriefDraft) -> None:
         st.success("다 찼습니다")
 
 
-def _make_copies(store: Store, brief: AdBrief, parent_id: int | None = None) -> None:
-    """문구를 만들어 화면 상태에 담는다. 처음 만들 때도 다시 만들 때도 같은 길이다."""
+def _make_copies(store: Store, brief: AdBrief, parent_id: int | None = None) -> bool:
+    """문구를 만들어 화면 상태에 담는다. 처음 만들 때도 다시 만들 때도 같은 길이다.
+
+    만들어진 게 없으면 **저장하지 않고 알린다.** 빈 목록은 화면에서 조용히
+    사라져서 "고장인지 느린 건지" 알 수가 없고, 사장님이 버튼을 다시 누를수록
+    후보 0개짜리 광고 행만 쌓인다.
+
+    빈 목록이 나오는 길은 셋이고 증상이 똑같다 —
+    MODEL_PROFILE 이 stub / LLM 이 candidates 를 빠뜨림 / 후보 전부가 검증 탈락.
+    """
     with st.spinner("만드는 중..."):
         copies = copy_gen.generate(brief, store, ads.recent(store.id))
-        st.session_state.copies = copies
-        st.session_state.brief = brief
-        st.session_state.ad_id = ads.save(store.id, brief, copies, parent_id=parent_id)
+
+    if not copies:
+        st.error("문구를 만들지 못했습니다. 다시 눌러주세요.")
+        if llm.profile() == "stub":
+            st.caption("⚠️ MODEL_PROFILE 이 stub 이라 항상 빈 결과입니다 — .env 를 확인하세요.")
+        return False
+
+    st.session_state.copies = copies
+    st.session_state.brief = brief
+    st.session_state.ad_id = ads.save(store.id, brief, copies, parent_id=parent_id)
+    return True
 
 
 def revise_view(store: Store) -> None:
@@ -245,12 +272,14 @@ def revise_view(store: Store) -> None:
     st.caption("마음에 안 드시면 고쳐서 다시 만들어드릴게요")
 
     def again(feedback: Feedback) -> None:
-        _make_copies(
+        # 실패했으면 rerun 하지 않는다 — 다시 그리면 방금 띄운 에러가 지워져서
+        # 또 아무 일도 안 일어난 것처럼 보인다.
+        if _make_copies(
             store,
             brief.revised(feedback, st.session_state.copies),
             parent_id=st.session_state.ad_id,
-        )
-        st.rerun()
+        ):
+            st.rerun()
 
     # ① 선택지 — 말로 설명하기 어려울 때
     cols = st.columns(len(copy_gen.REVISION_OPTIONS))
@@ -329,8 +358,13 @@ def chat_view(store: Store) -> None:
 
     with col_brief:
         brief_panel(draft)
-        if not draft.missing():
-            copy_view(store, draft)
+
+    # 결과는 **전체 폭**으로 아래에 둔다. 오른쪽 칸(2/5)에 넣으면 재생성 버튼이
+    # 3~4줄로 접히고, 손님 패널 결과(대조 3 + 점수 3 + 코멘트 12)는 더 심하다.
+    # 위쪽 좁은 칸에는 개발 확인용 주문서만 남긴다.
+    if not draft.missing():
+        st.divider()
+        copy_view(store, draft)
 
 
 # ── 라우팅 ────────────────────────────────────────────────

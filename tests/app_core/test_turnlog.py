@@ -64,10 +64,18 @@ def test_빈_발화는_안_남긴다() -> None:
 
 
 def test_끌_수_있다(monkeypatch: pytest.MonkeyPatch) -> None:
-    """배포에서는 개인정보가 섞일 수 있어 기본으로 켜지 않을 수 있다."""
+    """실제 사장님에게 열 때는 꺼야 한다 — 남는 게 발화 원문이다."""
     monkeypatch.setenv("ADS_TURNLOG_ENABLED", "0")
     record()
     assert turnlog.read_all() == []
+
+
+def test_기본은_켜짐이다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """골든셋의 원천이라 꺼져 있으면 아무도 안 켜고 발화가 안 쌓인다.
+    주석과 코드가 어긋나 있던 자리라 값으로 못을 박아둔다.
+    """
+    monkeypatch.delenv("ADS_TURNLOG_ENABLED", raising=False)
+    assert turnlog.enabled() is True
 
 
 def test_로그가_없으면_빈_목록() -> None:

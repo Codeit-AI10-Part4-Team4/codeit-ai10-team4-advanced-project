@@ -94,20 +94,25 @@ class OpenAIClient:
         return json.loads(content) if content else {}
 
 
-def _profile() -> str:
-    """호출할 때마다 읽는다 — 테스트에서 MODEL_PROFILE 을 바꿔치기할 수 있게."""
+def profile() -> str:
+    """지금 쓰는 백엔드 이름. 호출할 때마다 읽는다 —
+    테스트에서 MODEL_PROFILE 을 바꿔치기할 수 있게.
+
+    화면에서도 쓴다: stub 이면 생성 결과가 항상 비는데, 그 이유를 사용자에게
+    알려주려면 어느 백엔드인지 알아야 한다.
+    """
     return os.environ.get("MODEL_PROFILE", "stub")
 
 
 def get_client() -> ChatClient:
-    profile = _profile()
-    if profile == "stub":
+    name = profile()
+    if name == "stub":
         return StubClient()
-    if profile == "openai":
+    if name == "openai":
         return OpenAIClient()
-    if profile == "local":
+    if name == "local":
         raise NotImplementedError("local 모델은 아직 붙이지 않았습니다")
-    raise ValueError(f"모르는 MODEL_PROFILE 입니다: {profile!r}")
+    raise ValueError(f"모르는 MODEL_PROFILE 입니다: {name!r}")
 
 
 def get_vision_client() -> VisionClient:
@@ -116,6 +121,6 @@ def get_vision_client() -> VisionClient:
     local 프로필에서 막지 않고 스텁으로 흘리는 이유: 사진 설명은 없어도 문구가
     만들어진다. 여기서 터뜨리면 사진 한 장 때문에 전체가 멈춘다.
     """
-    if _profile() == "openai":
+    if profile() == "openai":
         return OpenAIClient()
     return StubClient()

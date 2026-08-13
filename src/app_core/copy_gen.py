@@ -180,11 +180,17 @@ def generate(
     for item in raw.get("candidates") or []:
         if not isinstance(item, dict):
             continue
+        headline = str(item.get("headline", "")).strip()
+        sub = str(item.get("sub", "")).strip() if brief.with_sub else ""
+
+        # 길이를 어긴 후보는 **자르지 않고 버린다.** 잘라서 내보내면
+        # "신메뉴 크로플 출시 기념 특가 이벤" 처럼 중간에서 끊긴 문구가
+        # 사장님 화면에 그대로 뜬다. 후보는 하나씩 따로 판단하므로 긴 것
+        # 하나 때문에 나머지가 같이 죽지는 않는다.
+        if len(headline) > MAX_HEADLINE or len(sub) > MAX_SUB:
+            continue
         try:
-            candidate = CopyCandidate(
-                headline=str(item.get("headline", ""))[:MAX_HEADLINE],
-                sub=str(item.get("sub", ""))[:MAX_SUB] if brief.with_sub else "",
-            )
+            candidate = CopyCandidate(headline=headline, sub=sub)
         except ValidationError:
             continue  # 헤드라인이 비었다 — 쓸 수 없는 후보
         candidates.append(candidate)
