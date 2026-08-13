@@ -310,7 +310,7 @@ def copy_view(store: Store, draft: AdBriefDraft) -> None:
             if candidate.sub:
                 st.write(candidate.sub)
             if st.button("이걸로 할게요", key=f"pick_copy{i}"):
-                ads.choose_copy(st.session_state.ad_id, candidate.headline)
+                ads.choose_copy(store.id, st.session_state.ad_id, candidate.headline)
                 st.success("선택했습니다")
 
     if copies:
