@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -23,15 +22,11 @@ from app_core import db
 from app_core.panel.schemas import Panel
 from app_core.schema import Store
 
-ROOT = Path(__file__).resolve().parent.parent
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
-# `eval/`은 src 레이아웃 밖이라 설치 대상이 아니고, 그대로는 import 되지 않는다.
-# 공유 설정을 건드리지 않으려고 여기서만 경로를 넣는다.
-# → 팀 합의 후 pyproject의 [tool.pytest.ini_options] pythonpath 에 "eval" 을
-#   추가하면 아래 두 줄은 지워도 된다.
-if str(ROOT / "eval") not in sys.path:
-    sys.path.insert(0, str(ROOT / "eval"))
+# `eval/` 은 src 레이아웃 밖이라 설치 대상이 아니다. 예전에는 여기서 sys.path 를
+# 건드렸는데, `pyproject.toml` 의 [tool.pytest.ini_options] pythonpath 로 옮겼다.
+# 그래야 `pytest` 로 돌리든 `python -m pytest` 로 돌리든 똑같이 동작한다.
 
 
 # --- 서비스 ---------------------------------------------------------------

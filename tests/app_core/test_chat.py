@@ -52,31 +52,92 @@ def test_느낌을_말하면_tone에_들어간다(store: Store) -> None:
     assert turn.draft.tone == "매운 감칠맛 강조"
 
 
-def test_다_찼으면_선택지를_지운다(store: Store) -> None:
+def test_더_물을_게_없으면_선택지를_지운다(store: Store) -> None:
     """LLM 이 지시를 어기고 또 물어봐도 대화가 맴돌지 않게 한다."""
+    done = draft(product="크로플", price=4500, situation="신메뉴", tone="따뜻한")
     turn = chat.respond(
-        draft(product="크로플"),
-        "4500원",
-        store,
-        FakeClient({"message": "느낌은요?", "options": ["따뜻하게"], "extracted": {"price": 4500}}),
+        done, "네", store, FakeClient({"message": "더 없나요?", "options": ["있어요"]})
     )
-    assert turn.draft.missing() == []
+    assert turn.draft.next_slot() is None
     assert turn.options == []
 
 
-def test_필수가_남으면_마무리하라고_안_한다(store: Store) -> None:
+def test_더_물을_게_없으면_마무리_인사는_코드가_쓴다(store: Store) -> None:
+    """LLM 이 또 질문을 만들어도 화면에는 안 나가야 한다.
+
+    실제로 그랬다 — 프롬프트 JSON 틀의 예시("가격"·"원하는 느낌")를 베껴서
+    다 채워진 뒤에도 그 둘을 번갈아 물었다.
+    """
+    done = draft(product="크로플", price=4500, situation="신메뉴", tone="따뜻한")
+    turn = chat.respond(done, "네", store, FakeClient({"message": "가격은 얼마인가요?"}))
+    assert turn.message == chat.DONE_MESSAGE
+
+
+def test_마지막_슬롯이_이번_턴에_차도_마무리한다(store: Store) -> None:
+    """이번 말로 마지막 칸이 차는 순간이 실제로 터진 지점이다."""
+    almost = draft(product="크로플", price=4500, situation="신메뉴")
+    turn = chat.respond(
+        almost,
+        "매운 감칠맛 강조",
+        store,
+        FakeClient({"extracted": {"tone": "매운 감칠맛 강조"}, "message": "가격은 얼마인가요?"}),
+    )
+    assert turn.message == chat.DONE_MESSAGE
+    assert turn.options == []
+
+
+def test_아직_물을_게_남으면_LLM_말을_그대로_쓴다(store: Store) -> None:
+    turn = chat.respond(
+        draft(product="크로플"), "네", store, FakeClient({"message": "가격은 얼마인가요?"})
+    )
+    assert turn.message == "가격은 얼마인가요?"
+
+
+def test_필수가_남으면_그것부터_물으라고_지시한다(store: Store) -> None:
     client = FakeClient({})
     chat.respond(draft(product="크로플"), "안녕", store, client)
     assert client.system is not None
-    assert "하나만" in client.system
+    assert "가격" in client.system
+    assert "없으면 광고를 못 만든다" in client.system
 
 
-def test_다_차면_마무리하라고_지시한다(store: Store) -> None:
-    """이게 없으면 선택 항목을 채우려고 같은 질문을 되풀이한다."""
+def test_필수가_차면_느낌을_물으라고_지시한다(store: Store) -> None:
+    """필수만 채우고 끝내면 사장님 의도를 못 담는다."""
     client = FakeClient({})
-    chat.respond(draft(product="크로플", price=4500), "안녕", store, client)
+    chat.respond(draft(product="크로플", price=4500, situation="신메뉴"), "네", store, client)
     assert client.system is not None
-    assert "더 묻지 말고 마무리해라" in client.system
+    assert "원하는 느낌" in client.system
+    assert "부담 주지 마라" in client.system
+
+
+def test_다_물었으면_마무리하라고_지시한다(store: Store) -> None:
+    client = FakeClient({})
+    full = draft(product="크로플", price=4500, situation="신메뉴", tone="따뜻한")
+    chat.respond(full, "네", store, client)
+    assert client.system is not None
+    assert "더 묻지 마라" in client.system
+
+
+def test_한_번_물어본_것은_다시_묻지_않는다(store: Store) -> None:
+    """사장님이 답을 피해도 같은 질문을 되풀이하면 안 된다."""
+    d = draft(product="크로플", price=4500)
+
+    first = chat.respond(d, "네", store, FakeClient({})).draft
+    assert first.asked == ["situation"]  # 상황을 물었다
+
+    # 답을 안 했는데도 다음 턴엔 상황이 아니라 느낌을 묻는다
+    client = FakeClient({})
+    chat.respond(first, "글쎄요", store, client)
+    assert client.system is not None
+    assert "원하는 느낌" in client.system
+
+
+def test_결국_물어볼_게_바닥난다(store: Store) -> None:
+    """무한 반복하지 않는다."""
+    d = draft(product="크로플", price=4500)
+    for _ in range(5):
+        d = chat.respond(d, "글쎄요", store, FakeClient({})).draft
+    assert d.next_slot() is None
 
 
 def test_가격을_안_말했으면_0을_넣지_말라고_지시한다(store: Store) -> None:
@@ -86,6 +147,37 @@ def test_가격을_안_말했으면_0을_넣지_말라고_지시한다(store: St
     chat.respond(draft(), "안녕", store, client)
     assert client.system is not None
     assert "0 도 넣지 마라" in client.system
+
+
+def test_사장님이_한_말이_기록된다(store: Store) -> None:
+    turn = chat.respond(draft(), "크로플 홍보하고 싶어", store, FakeClient({}))
+    assert turn.draft.transcript == ["크로플 홍보하고 싶어"]
+
+
+def test_아무것도_못_뽑아내도_말은_남는다(store: Store) -> None:
+    """슬롯에 안 담기는 뉘앙스가 여기서 살아남는다."""
+    said = "단골분들이 매콤한 걸 좋아하셔서 이번에 낸 거예요"
+    turn = chat.respond(draft(), said, store, FakeClient({}))
+    assert turn.draft.transcript == [said]
+
+
+def test_말이_쌓인다(store: Store) -> None:
+    d = draft()
+    for said in ["크로플이요", "4500원", "따뜻하게"]:
+        d = chat.respond(d, said, store, FakeClient({})).draft
+    assert d.transcript == ["크로플이요", "4500원", "따뜻하게"]
+
+
+def test_빈_입력은_기록하지_않는다(store: Store) -> None:
+    turn = chat.respond(draft(), "   ", store, FakeClient({}))
+    assert turn.draft.transcript == []
+
+
+def test_프롬프트에_지금까지_한_말이_들어간다(store: Store) -> None:
+    client = FakeClient({})
+    chat.respond(draft(transcript=["단골분들이 매콤한 걸 좋아해요"]), "네", store, client)
+    assert client.system is not None
+    assert "단골분들이 매콤한 걸 좋아해요" in client.system
 
 
 def test_가격_0은_사장님이_말했을_때만_받는다(store: Store) -> None:

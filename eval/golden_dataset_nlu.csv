@@ -1,0 +1,51 @@
+utterance,product,price,situation,tone,start,source,note
+교촌치킨에서 레드콤보 메뉴가 판매량이 저조해 판매량을 늘릴 수 있을만한 문구를 만들어줘,레드콤보,,판매 부진,,empty,real,DB 저장 발화. 상황 표현이 신메뉴·할인 틀 밖
+레드콤보,레드콤보,,,,empty,real,DB 저장 발화. 상품만 한 단어
+중독성 있는,,,,중독성 있는,empty,real,DB 저장 발화. 톤만 한 마디
+23000원이고 맛있게 매운 맛이라서 중독성이 있거든,,23000,,매운 맛·중독성,empty,real,DB 저장 발화. 가격+톤 동시
+감칠맛과 바삭한 껍질을 강조해줘,,,,감칠맛과 바삭한 껍질 강조,empty,real,DB 저장 발화. 놓치기 쉬운 톤 표현
+바삭한 껍질과 감칠맛보단 매운맛을 강조해줘,,,,매운맛 강조,empty,real,재생성 요청으로 실제 입력됨
+크로플 홍보하고싶어,크로플,,,,empty,observed,실제 LLM 확인. 초기에 product 를 못 뽑던 케이스
+4500원,,4500,,,empty,observed,실제 LLM 확인. 가격만
+신메뉴 나온거예요,,,신메뉴,,empty,observed,실제 LLM 확인
+따뜻하고 감성적으로,,,,따뜻하고 감성적인,empty,observed,실제 LLM 확인
+그냥 우리 가게 좀 알려줘,,,,,empty,observed,실제 LLM 확인. 아무것도 안 뽑혀야 정상
+레드콤보가 잘 안 팔려서요,레드콤보,,판매 부진,,empty,observed,실제 LLM 확인. situation 자유화 후 통과
+요즘 손님이 뜸해서 홍보하려고요,,,손님 유치,,empty,observed,실제 LLM 확인
+단골분들한테 감사 인사하려고요,,,단골 감사,,empty,observed,실제 LLM 확인
+글쎄요,,,,,empty,observed,실제 LLM 확인. 답 회피
+몰라요 알아서 해주세요,,,,,empty,observed,답 회피
+음...,,,,,empty,constructed,무의미 입력
+크로플 신메뉴 나왔어요 4500원이요,크로플,4500,신메뉴,,empty,constructed,세 개 동시
+"레드콤보 신메뉴인데 23,000원이고 매콤하게 써주세요",레드콤보,23000,신메뉴,매콤한,empty,constructed,네 개 동시. 쉼표 있는 금액
+가격은 빼주세요,,0,,,empty,constructed,0 은 가격 없음. 미언급(None)과 다르다
+가격 안 넣을래요,,0,,,empty,constructed,0
+아메리카노 4천원이요,아메리카노,4000,,,empty,constructed,한글 숫자 표기
+크로플 4500 입니다,크로플,4500,,,empty,constructed,단위 없는 숫자
+삼겹살 1인분 15000원 신메뉴예요,삼겹살,15000,신메뉴,,empty,constructed,상품명에 단위가 붙음
+이번 주만 아메리카노 반값이에요,아메리카노,,할인,,empty,constructed,할인이나 금액은 미언급
+다음 주에 가게 오픈해요,,,오픈,,empty,constructed,오픈
+단골분들이 매콤한 걸 좋아하셔서 이번에 낸 신메뉴예요,,,신메뉴,매콤한,empty,constructed,슬롯 밖 정보가 섞인 긴 문장
+피자 두 판 사면 콜라 줘요,피자,,사은 행사,,empty,constructed,틀에 없는 상황
+좀 힘있고 강렬하게,,,,힘있고 강렬한,empty,constructed,톤만
+금액은 안 적을래요,,0,,,empty,constructed,가격 빼달라 유형 ②
+가격 빼고 만들어주세요,,0,,,empty,constructed,가격 빼달라 유형 ③
+아직 가격은 안 정했어요,,,,,empty,constructed,가격 미정 — 0 이 아니라 미언급이다
+치킨 두 마리 시키면 만원 할인,치킨,,할인,,empty,constructed,행사 문장 ②
+아메리카노 사면 쿠키 드려요,아메리카노,,사은 행사,,empty,constructed,행사 문장 ③
+삼겹살 오늘만 30프로 세일합니다,삼겹살,,할인,,empty,constructed,행사 문장 ④
+크로플 신메뉴 4500원 따뜻한 느낌으로,크로플,4500,신메뉴,따뜻한,empty,constructed,네 개 동시 ②
+"라떼 5,000원인데 오픈 기념이라 산뜻하게",라떼,5000,오픈,산뜻한,empty,constructed,네 개 동시 ③
+아니 6000원이요,크로플,6000,신메뉴,따뜻한,filled,observed,가격 정정
+가격 6000원으로 바꿔주세요,크로플,6000,신메뉴,따뜻한,filled,observed,가격 정정 ②
+아 크로플 말고 아메리카노요,아메리카노,4500,신메뉴,따뜻한,filled,observed,상품 정정
+따뜻한 말고 강렬하게요,크로플,4500,신메뉴,강렬한,filled,observed,톤 정정
+신메뉴 아니고 할인이에요,크로플,4500,할인,따뜻한,filled,observed,상황 정정
+아 가격은 빼주세요,크로플,0,신메뉴,따뜻한,filled,observed,가격을 0 으로 정정
+교촌치킨 레드콤보를 홍보할만한 문구를 작성해줘,레드콤보,,,,empty,real,실사용 입력. 요청형 문장에서 상품을 놓쳤다
+레드콤보를 홍보할만한 문구를 작성해줘,레드콤보,,,,empty,real,요청형 ②
+아메리카노 광고 좀 부탁드려요,아메리카노,,,,empty,constructed,요청형 ③ 정중체
+크로플 알릴 만한 거 하나 만들어주세요,크로플,,,,empty,constructed,요청형 ④
+우리 가게 홍보 문구 만들어주세요,,,,,empty,constructed,메뉴명 없음 — 문구를 상품으로 오인하면 안 된다
+이번에 신규 매장을 오픈해서 레드콤보를 시키면 웨지감자를 증정해주는 이벤트를 진행하는데 그 내용을 담아서 홍보하고싶어,레드콤보,,오픈 사은 행사,,empty,real,실사용 입력. 긴 문장
+뭘 원하는느낌이야 그냥 홍보하고싶다고,크로플,4500,신메뉴,따뜻한,filled,real,실사용 입력. 아무것도 새로 안 뽑히므로 시작 상태가 그대로여야 한다

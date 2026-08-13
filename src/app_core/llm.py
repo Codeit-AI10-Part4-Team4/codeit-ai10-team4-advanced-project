@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 from typing import Protocol
@@ -19,10 +20,24 @@ class ChatClient(Protocol):
     def complete_json(self, system: str, user: str) -> dict: ...
 
 
+class VisionClient(Protocol):
+    """사진을 읽는 쪽. ChatClient 와 나눠 둔 이유는 두 가지다.
+
+    - 텍스트만 쓰는 곳(패널 평가 등)의 가짜 클라이언트가 사진 메서드까지
+      구현하지 않아도 되게.
+    - 사진은 모델을 따로 고를 여지가 있어서 (텍스트는 mini, 사진은 상위 모델).
+    """
+
+    def read_image(self, system: str, image: bytes, mime: str) -> dict: ...
+
+
 class StubClient:
     """빈 응답만 돌려준다 — API 없이 나머지 배관(병합·되묻기)을 테스트할 때 쓴다."""
 
     def complete_json(self, system: str, user: str) -> dict:
+        return {}
+
+    def read_image(self, system: str, image: bytes, mime: str) -> dict:
         return {}
 
 
@@ -53,14 +68,59 @@ class OpenAIClient:
         content = response.choices[0].message.content
         return json.loads(content) if content else {}
 
+    def read_image(self, system: str, image: bytes, mime: str) -> dict:
+        """사진 한 장을 보여주고 JSON 을 받는다.
+
+        사진은 data URI 로 본문에 실어 보낸다. 파일을 어딘가에 올려두고 URL 을
+        주는 방식은 그 URL 이 공개돼야 해서 쓰지 않는다.
+        """
+        data_uri = f"data:{mime};base64,{base64.b64encode(image).decode()}"
+        response = self._client.chat.completions.create(
+            model=self._model,
+            temperature=0,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "이 사진을 보고 답해줘."},
+                        {"type": "image_url", "image_url": {"url": data_uri}},
+                    ],
+                },
+            ],
+        )
+        content = response.choices[0].message.content
+        return json.loads(content) if content else {}
+
+
+def profile() -> str:
+    """지금 쓰는 백엔드 이름. 호출할 때마다 읽는다 —
+    테스트에서 MODEL_PROFILE 을 바꿔치기할 수 있게.
+
+    화면에서도 쓴다: stub 이면 생성 결과가 항상 비는데, 그 이유를 사용자에게
+    알려주려면 어느 백엔드인지 알아야 한다.
+    """
+    return os.environ.get("MODEL_PROFILE", "stub")
+
 
 def get_client() -> ChatClient:
-    """호출할 때마다 환경변수를 읽는다 — 테스트에서 MODEL_PROFILE 을 바꿔치기할 수 있게."""
-    profile = os.environ.get("MODEL_PROFILE", "stub")
-    if profile == "stub":
+    name = profile()
+    if name == "stub":
         return StubClient()
-    if profile == "openai":
+    if name == "openai":
         return OpenAIClient()
-    if profile == "local":
+    if name == "local":
         raise NotImplementedError("local 모델은 아직 붙이지 않았습니다")
-    raise ValueError(f"모르는 MODEL_PROFILE 입니다: {profile!r}")
+    raise ValueError(f"모르는 MODEL_PROFILE 입니다: {name!r}")
+
+
+def get_vision_client() -> VisionClient:
+    """사진을 읽는 클라이언트.
+
+    local 프로필에서 막지 않고 스텁으로 흘리는 이유: 사진 설명은 없어도 문구가
+    만들어진다. 여기서 터뜨리면 사진 한 장 때문에 전체가 멈춘다.
+    """
+    if profile() == "openai":
+        return OpenAIClient()
+    return StubClient()

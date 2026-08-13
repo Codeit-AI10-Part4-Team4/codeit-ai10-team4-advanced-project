@@ -5,6 +5,9 @@
 
 가격은 사장님이 입력한 값만 쓴다. 0 원이면 광고에 가격을 넣지 않는다 —
 없는 가격을 쓰면 표시광고법 위반이다.
+
+다시 만들 때는 직전 결과와 피드백을 프롬프트에 얹는다. 조건(상품·가격)은
+그대로 두므로, 결과가 마음에 들 때까지 대화를 처음부터 다시 하지 않아도 된다.
 """
 
 from __future__ import annotations
@@ -18,6 +21,17 @@ CANDIDATE_COUNT = 3
 MAX_HEADLINE = 20
 MAX_SUB = 40
 
+#: 다시 만들기 선택지. 말로 설명하기 어려운 사장님이 누른다.
+#: 대화 중 선택지와 달리 LLM 이 만들지 않는다 — 고칠 방향은 업종·상품과
+#: 무관하게 비슷해서(길이·세기·강조점) 매번 새로 만들 이유가 없다.
+REVISION_OPTIONS = (
+    "더 짧게",
+    "더 힘있게",
+    "더 부드럽게",
+    "가격을 강조해서",
+    "아예 다른 느낌으로",
+)
+
 SYSTEM_PROMPT = """너는 동네 가게 광고 문구를 쓰는 카피라이터다.
 
 가게
@@ -26,11 +40,11 @@ SYSTEM_PROMPT = """너는 동네 가게 광고 문구를 쓰는 카피라이터�
 
 이번 광고
 - 홍보 대상: {product}
-- 알리려는 것: {situation}
+- 광고를 만드는 이유: {situation}
 - 원하는 느낌: {tone}
 - 그 밖의 요청: {extra}
 {price_line}
-{history}
+{transcript}{photo}{revision}{history}
 규칙
 - **{count}개**를 서로 다르게 만들어라.
 - 헤드라인은 {max_headline}자 이내, 서브는 {max_sub}자 이내.
@@ -57,6 +71,75 @@ def _history_block(recent: list[AdBrief]) -> str:
     return "이 가게가 전에 만든 광고 (겹치지 않게 참고만):\n" + "\n".join(lines) + "\n"
 
 
+def _transcript_block(brief: AdBrief) -> str:
+    """사장님이 한 말 원문.
+
+    위의 항목들은 이 말에서 뽑아낸 요약이라 뉘앙스가 깎여 있다.
+    "단골분들이 매콤한 걸 좋아하셔서" 같은 말은 어느 항목에도 안 들어가지만
+    문구를 쓸 때 가장 쓸모 있다.
+    """
+    if not brief.transcript:
+        return ""
+    lines = "\n".join(f'- "{t}"' for t in brief.transcript)
+    return (
+        "\n사장님이 한 말 (원문 — 위 항목이 놓친 것을 여기서 읽어라):\n"
+        f"{lines}\n"
+        "⚠️ 여기 있는 말도 사장님이 직접 한 말이지만, "
+        "없는 사실을 상상해서 채우지는 마라.\n"
+    )
+
+
+def _photo_block(brief: AdBrief) -> str:
+    """사장님이 올린 상품 사진에서 읽은 것.
+
+    사진을 올렸다는 건 "이런 느낌으로 만들어줘"라는 뜻이다. 말로 못 하는
+    분위기가 사진엔 담겨 있어서, 여기를 참고하면 톤이 상품과 따로 놀지 않는다.
+
+    말과 구분해서 넣는 이유: 이건 모델이 사진을 보고 적은 것이라 사장님 말보다
+    믿을 만하지 않다. 섞어 놓으면 사장님이 하지도 않은 말이 근거가 된다.
+    """
+    if not brief.photo_note:
+        return ""
+    return (
+        "\n사장님이 올린 상품 사진에서 읽은 것:\n"
+        f"{brief.photo_note}\n"
+        "⚠️ 이건 사진을 보고 적은 메모지 사장님이 한 말이 아니다. 분위기를 잡는 데만"
+        " 참고하고, 여기 없는 맛·재료·가격은 지어내지 마라.\n"
+    )
+
+
+FEEDBACK_LABEL = {
+    "typed": "사장님이 이렇게 고쳐달라고 하셨다",
+    "option": "사장님이 이렇게 고쳐달라고 하셨다",
+    "panel": "AI 손님 패널이 평가한 결과다",
+}
+
+
+def _revision_block(brief: AdBrief) -> str:
+    """다시 만드는 경우에만 붙는다.
+
+    직전 결과를 보여주는 이유는 두 가지다 — 같은 걸 또 내놓지 않게,
+    그리고 무엇을 고치라는 말인지 알 수 있게.
+    """
+    if brief.feedback is None:
+        return ""
+
+    parts = ["\n## 다시 만드는 중이다"]
+    if brief.prev_copies:
+        made = "\n".join(
+            f"- {c.headline}" + (f" / {c.sub}" if c.sub else "") for c in brief.prev_copies
+        )
+        parts.append(f"\n직전에 만든 문구 (이것과 **다르게** 만들어라):\n{made}")
+
+    fb = brief.feedback
+    notes = "\n".join(f"- {n}" for n in fb.notes)
+    parts.append(f"\n{FEEDBACK_LABEL[fb.source]}:\n{notes}")
+    if fb.resistance:
+        parts.append("\n손님들이 걸린 부분: " + ", ".join(fb.resistance))
+    parts.append("\n→ 위 지적을 **반드시 반영**해라. 그래도 없는 사실은 지어내지 마라.\n")
+    return "\n".join(parts)
+
+
 def _system_prompt(brief: AdBrief, store: Store, recent: list[AdBrief]) -> str:
     return SYSTEM_PROMPT.format(
         industry=store.industry_label,
@@ -66,6 +149,9 @@ def _system_prompt(brief: AdBrief, store: Store, recent: list[AdBrief]) -> str:
         tone=brief.tone or "(없음)",
         extra=brief.extra or "(없음)",
         price_line=_price_line(brief),
+        transcript=_transcript_block(brief),
+        photo=_photo_block(brief),
+        revision=_revision_block(brief),
         history=_history_block(recent),
         count=CANDIDATE_COUNT,
         max_headline=MAX_HEADLINE,
@@ -94,11 +180,17 @@ def generate(
     for item in raw.get("candidates") or []:
         if not isinstance(item, dict):
             continue
+        headline = str(item.get("headline", "")).strip()
+        sub = str(item.get("sub", "")).strip() if brief.with_sub else ""
+
+        # 길이를 어긴 후보는 **자르지 않고 버린다.** 잘라서 내보내면
+        # "신메뉴 크로플 출시 기념 특가 이벤" 처럼 중간에서 끊긴 문구가
+        # 사장님 화면에 그대로 뜬다. 후보는 하나씩 따로 판단하므로 긴 것
+        # 하나 때문에 나머지가 같이 죽지는 않는다.
+        if len(headline) > MAX_HEADLINE or len(sub) > MAX_SUB:
+            continue
         try:
-            candidate = CopyCandidate(
-                headline=str(item.get("headline", ""))[:MAX_HEADLINE],
-                sub=str(item.get("sub", ""))[:MAX_SUB] if brief.with_sub else "",
-            )
+            candidate = CopyCandidate(headline=headline, sub=sub)
         except ValidationError:
             continue  # 헤드라인이 비었다 — 쓸 수 없는 후보
         candidates.append(candidate)
