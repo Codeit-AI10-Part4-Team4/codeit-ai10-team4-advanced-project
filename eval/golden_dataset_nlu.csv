@@ -30,7 +30,7 @@ utterance,product,price,situation,tone,start,source,note
 좀 힘있고 강렬하게,,,,힘있고 강렬한,empty,constructed,톤만
 금액은 안 적을래요,,0,,,empty,constructed,가격 빼달라 유형 ②
 가격 빼고 만들어주세요,,0,,,empty,constructed,가격 빼달라 유형 ③
-아직 가격은 안 정했어요,,,,,empty,constructed,가격 미정 — 0 이 아니라 미언급이다
+아직 가격은 안 정했어요,,0,,,empty,constructed,미정도 0 — 광고에 넣을 금액이 없다는 뜻
 치킨 두 마리 시키면 만원 할인,치킨,,할인,,empty,constructed,행사 문장 ②
 아메리카노 사면 쿠키 드려요,아메리카노,,사은 행사,,empty,constructed,행사 문장 ③
 삼겹살 오늘만 30프로 세일합니다,삼겹살,,할인,,empty,constructed,행사 문장 ④
@@ -55,7 +55,7 @@ utterance,product,price,situation,tone,start,source,note
 단골분들이 매콤한 걸 좋아하셔서 이번에 낸 거예요,,,출시,매콤한,empty,real,메뉴 이름이 없다 — product 를 지어내면 안 된다
 크로플이요,크로플,,,,empty,real,상품만 한 마디
 따뜻하게,,,,따뜻한,empty,real,톤만 한 마디
-크로플인데 가격은 몰라,크로플,,,,empty,real,가격 미정 — 0 이 아니라 미언급
+크로플인데 가격은 몰라,크로플,0,,,empty,real,실사용. 모른다고 하면 0 — 안 그러면 계속 묻게 된다
 ?,,,,,empty,real,무의미 입력
 크로플 신메뉴 나왔어요,크로플,,신메뉴,,empty,real,상품+상황
 그냥 광고 만들어줘,,,,,empty,real,아무것도 안 뽑혀야 정상

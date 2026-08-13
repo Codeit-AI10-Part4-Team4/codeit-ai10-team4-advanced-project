@@ -97,22 +97,35 @@ def test_아직_물을_게_남으면_LLM_말을_그대로_쓴다(store: Store) -
 
 def test_필수가_남으면_그것부터_물으라고_지시한다(store: Store) -> None:
     client = FakeClient({})
+    chat.respond(AdBriefDraft(goal="copy", product=None, price=4500), "안녕", store, client)
+    assert client.system is not None
+    assert "홍보할 상품·메뉴" in client.system
+    assert "있어야 광고를 만들 수 있다" in client.system
+
+
+def test_몰아붙이지_말라고_지시한다(store: Store) -> None:
+    """ "없으면 못 만든다" 는 답을 못 하는 사장님을 막아 세운다."""
+    client = FakeClient({})
+    chat.respond(AdBriefDraft(goal="copy", product=None), "안녕", store, client)
+    assert client.system is not None
+    assert "몰아붙이지 마라" in client.system
+
+
+def test_가격은_빠져나갈_길을_같이_알려준다(store: Store) -> None:
+    """문구는 가격이 필수지만, 넣을 금액이 없는 사장님이 거기서 막히면 안 된다."""
+    client = FakeClient({})
     chat.respond(AdBriefDraft(goal="copy", product="크로플"), "안녕", store, client)
     assert client.system is not None
-    assert "가격" in client.system
-    assert "없으면 광고를 못 만든다" in client.system
+    assert "가격이 없거나 아직 안 정하셨으면" in client.system
+    assert "가격 없이 만들기" in client.system
 
 
-def test_이미지는_가격을_가볍게_묻는다(store: Store) -> None:
-    """같은 슬롯이라도 목적에 따라 무게가 다르다.
-    이미지는 분위기만 내는 경우가 많아 가격을 강요하면 대화만 길어진다.
-    """
+def test_이미지에서도_가격은_같은_말투다(store: Store) -> None:
+    """가격은 목적과 무관하게 따로 묻는다 — 막히면 안 되는 건 양쪽 다 같다."""
     client = FakeClient({})
     chat.respond(AdBriefDraft(goal="image", product="크로플"), "안녕", store, client)
     assert client.system is not None
-    assert "가격" in client.system
-    assert "없으면 광고를 못 만든다" not in client.system
-    assert "부담 주지 마라" in client.system
+    assert "가격 없이 만들기" in client.system
 
 
 def test_필수가_차면_느낌을_물으라고_지시한다(store: Store) -> None:
