@@ -258,6 +258,23 @@ class AdBriefDraft(BaseModel):
             return tuple(s for s in REQUIRED_SLOTS if s != "price")
         return REQUIRED_SLOTS
 
+    @property
+    def optional(self) -> tuple[str, ...]:
+        """한 번만 묻고 넘어가는 슬롯. **안 답해도 광고를 만든다.**
+
+        이미지 광고의 가격이 여기로 온다. 필수에서 빼기만 하면 넣고 싶었던
+        사장님이 그 생각을 **스스로 해내야** 한다 — 그건 선택 항목이 아니다.
+        한 번은 묻되 빠져나갈 길을 준다(`chat.ASK_HELPFUL`).
+        """
+        if self.goal == "image":
+            return ("price", *HELPFUL_SLOTS)
+        return HELPFUL_SLOTS
+
+    def _unanswered(self, slot: str) -> bool:
+        """아직 답을 못 받았나. 가격의 0 은 빈 값이 아니라 '없음'이라는 **답**이다."""
+        value = getattr(self, slot)
+        return value is None if slot == "price" else not value
+
     def missing(self) -> list[str]:
         """아직 안 찬 **필수** 슬롯. 이게 비어야 생성할 수 있다."""
         return [slot for slot in self.required if getattr(self, slot) is None]
@@ -269,7 +286,7 @@ class AdBriefDraft(BaseModel):
         사장님이 답을 안 해도 asked 에 남아서 다시 묻지 않는다.
         """
         left = [s for s in self.required if getattr(self, s) is None]
-        left += [s for s in HELPFUL_SLOTS if not getattr(self, s) and s not in self.asked]
+        left += [s for s in self.optional if self._unanswered(s) and s not in self.asked]
         return left
 
     def next_slot(self) -> str | None:

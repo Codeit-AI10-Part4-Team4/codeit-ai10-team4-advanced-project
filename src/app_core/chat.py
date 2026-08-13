@@ -238,13 +238,17 @@ def _describe(draft: AdBriefDraft) -> str:
     return "\n".join(filled) if filled else "(아직 없음)"
 
 
-def _next_action(draft: AdBriefDraft, slot: str | None) -> str:
-    """이번 턴에 어떻게 물을지.
+def _next_action(draft: AdBriefDraft) -> str:
+    """필수인지 아닌지는 **주문서마다 다르다** — 이미지 광고의 가격은 선택이다.
 
-    가격은 따로 뺐다. 문구 광고에선 필수지만, 넣을 금액이 없는 사장님이 거기서
-    막히면 안 된다 — "없으면 못 만든다" 대신 빠져나갈 길을 같이 알려준다.
-    (이미지 광고는 가격을 아예 안 묻는다 — AdBriefDraft.required 참고)
+    상수(`REQUIRED_SLOTS`)를 보면 이미지 광고에서도 "없으면 광고를 못 만든다"고
+    협박하게 된다.
+
+    가격은 그 위에 한 겹 더 있다. 문구 광고에선 필수지만 **넣을 금액이 없는
+    사장님이 거기서 막히면 안 된다** — 목적과 무관하게 ASK_PRICE 로 묻고
+    빠져나갈 길을 같이 알려준다.
     """
+    slot = draft.next_slot()
     if slot is None:
         return WRAP_UP
     if slot == "price":
@@ -270,7 +274,7 @@ def _system_prompt(draft: AdBriefDraft, store: Store) -> str:
         goal=GOAL_LABEL.get(draft.goal or "", "미정"),
         transcript="\n".join(f'- "{t}"' for t in draft.transcript) or "(아직 없음)",
         filled=_describe(draft),
-        next_action=_next_action(draft, draft.next_slot()),
+        next_action=_next_action(draft),
         unknown=_unknown(draft),
     )
 

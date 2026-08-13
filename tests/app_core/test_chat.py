@@ -95,7 +95,19 @@ def test_아직_물을_게_남으면_LLM_말을_그대로_쓴다(store: Store) -
     assert turn.message == "가격은 얼마인가요?"
 
 
+def test_이미지_광고의_가격은_협박하지_않고_묻는다(store: Store) -> None:
+    """이미지 광고에서 가격은 선택이다. 상수만 보면 "없으면 못 만든다"고 한다."""
+    client = FakeClient({})
+    chat.respond(draft(goal="image", product="크로플"), "안녕", store, client)
+    assert client.system is not None
+    assert "가격" in client.system
+    assert "없으면 광고를 못 만든다" not in client.system
+    assert "빠져나갈 길" in client.system  # ASK_PRICE 쪽 지시
+
+
 def test_필수가_남으면_그것부터_물으라고_지시한다(store: Store) -> None:
+    # 가격이 필수인 건 문구 광고다. 이미지 광고는 선택이다 (schema.required).
+    # 여기서는 가격 말고 **상품**이 남은 경우를 본다 — 가격은 ASK_PRICE 로 빠진다.
     client = FakeClient({})
     chat.respond(AdBriefDraft(goal="copy", product=None, price=4500), "안녕", store, client)
     assert client.system is not None
@@ -120,19 +132,18 @@ def test_가격은_빠져나갈_길을_같이_알려준다(store: Store) -> None
     assert "가격 없이 만들기" in client.system
 
 
-def test_이미지는_가격을_아예_안_묻는다(store: Store) -> None:
-    """분위기만 내는 경우가 많아 묻지 않는다 (팀 합의 2026-08-13).
+def test_이미지도_가격은_같은_말투로_묻는다(store: Store) -> None:
+    """이미지에서 가격은 선택이지만, 물을 때의 말투는 문구와 같아야 한다.
 
-    "가격 없이 만들기" 로 확인하면 안 된다 — 그 말은 추출 예시에도 들어 있어서
-    가격을 안 물어도 프롬프트에 남아 있다. 질문 틀 자체를 봐야 한다.
+    막히면 안 되는 건 양쪽 다 같아서 목적과 무관하게 ASK_PRICE 로 묻는다.
     """
     client = FakeClient({})
     d = AdBriefDraft(goal="image", product="크로플")
-    assert d.next_slot() != "price"
+    assert d.next_slot() == "price"  # 선택이지만 한 번은 묻는다
 
     chat.respond(d, "안녕", store, client)
     assert client.system is not None
-    assert "광고에 넣을 금액이다" not in client.system  # ASK_PRICE 가 안 실렸다
+    assert "광고에 넣을 금액이다" in client.system  # ASK_PRICE 가 실렸다
 
 
 def test_필수가_차면_느낌을_물으라고_지시한다(store: Store) -> None:
