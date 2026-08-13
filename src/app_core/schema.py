@@ -29,6 +29,8 @@ FeedbackSource = Literal["typed", "option", "panel"]
 
 # 대화로 반드시 채워야 하는 것. goal 은 고정 버튼으로 이미 정해져서 여기 없다.
 # 이게 비면 광고를 만들 수 없다.
+#
+# ⚠️ 목표에 따라 다르다 — 실제 판정은 `AdBriefDraft.required` 를 본다.
 REQUIRED_SLOTS = ("product", "price")
 
 # 없어도 만들 수는 있지만, 있으면 사장님 의도에 훨씬 가까워지는 것.
@@ -241,9 +243,24 @@ class AdBriefDraft(BaseModel):
         default_factory=list, description="이미 물어본 슬롯. 같은 걸 두 번 묻지 않으려고 센다"
     )
 
+    @property
+    def required(self) -> tuple[str, ...]:
+        """이 광고에 정말 필요한 슬롯. **목표에 따라 다르다.**
+
+        이미지 광고는 사진으로 분위기만 내는 경우가 많아 가격을 안 묻는다
+        (팀 합의 2026-08-13). 문구 광고는 가격이 문구에 그대로 들어가므로 받는다.
+
+        `REQUIRED_SLOTS` 를 직접 읽지 말고 이걸 봐야 한다 — 그 상수는 "문구
+        광고 기준"이라 이미지 광고에서는 사장님이 말할 생각도 없는 값을 계속
+        묻게 된다.
+        """
+        if self.goal == "image":
+            return tuple(s for s in REQUIRED_SLOTS if s != "price")
+        return REQUIRED_SLOTS
+
     def missing(self) -> list[str]:
         """아직 안 찬 **필수** 슬롯. 이게 비어야 생성할 수 있다."""
-        return [slot for slot in REQUIRED_SLOTS if getattr(self, slot) is None]
+        return [slot for slot in self.required if getattr(self, slot) is None]
 
     def remaining_slots(self) -> list[str]:
         """아직 물어볼 게 남은 슬롯 전부. 우선순위 순이다.
@@ -251,7 +268,7 @@ class AdBriefDraft(BaseModel):
         필수를 먼저 다 받고, 그 다음 도움되는 것을 한 번씩만 묻는다.
         사장님이 답을 안 해도 asked 에 남아서 다시 묻지 않는다.
         """
-        left = [s for s in REQUIRED_SLOTS if getattr(self, s) is None]
+        left = [s for s in self.required if getattr(self, s) is None]
         left += [s for s in HELPFUL_SLOTS if not getattr(self, s) and s not in self.asked]
         return left
 
@@ -293,7 +310,10 @@ class AdBriefDraft(BaseModel):
         return AdBrief(
             goal=self.goal,  # type: ignore[arg-type]  # missing() 이 None 아님을 보장
             product=self.product,  # type: ignore[arg-type]
-            price=self.price,  # type: ignore[arg-type]
+            # 안 물어본 가격(None)은 '가격 없음'(0)으로 굳힌다. 주문서 단계에서는
+            # 둘의 결과가 같다 — 광고에 가격을 안 넣는다. 구분이 필요한 건 대화
+            # 중(더 물어볼까)이고 그건 이 클래스의 `price: int | None` 이 한다.
+            price=self.price or 0,
             situation=self.situation,
             tone=self.tone,
             extra=self.extra,

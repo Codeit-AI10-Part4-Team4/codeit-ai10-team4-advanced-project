@@ -94,8 +94,9 @@ def test_아직_물을_게_남으면_LLM_말을_그대로_쓴다(store: Store) -
 
 
 def test_필수가_남으면_그것부터_물으라고_지시한다(store: Store) -> None:
+    # 가격이 필수인 건 문구 광고다. 이미지 광고는 안 묻는다 (schema.required).
     client = FakeClient({})
-    chat.respond(draft(product="크로플"), "안녕", store, client)
+    chat.respond(draft(goal="copy", product="크로플"), "안녕", store, client)
     assert client.system is not None
     assert "가격" in client.system
     assert "없으면 광고를 못 만든다" in client.system
