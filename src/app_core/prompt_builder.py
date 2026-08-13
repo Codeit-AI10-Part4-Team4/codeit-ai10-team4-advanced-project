@@ -4,8 +4,6 @@
 실험 근거: notebooks/background_gen_poc.ipynb (한글 프롬프트 → 엉뚱한 그림)
 """
 
-from openai import OpenAI
-
 # 어떤 주문이 와도 공통으로 지킬 조건 — 제품을 놓을 "빈 탁자"가 앞에 있어야 한다.
 # 실험 근거: 같은 seed 로 3안 비교(notebooks/background_gen_poc.ipynb) — 탁자 클로즈업이
 # 제품 놓을 자리를 가장 잘 만든다. 재질(나무 등)은 넣지 않는다 — 업종마다 어울리는
@@ -23,6 +21,8 @@ _SYSTEM = (
 def build_bg_prompt(industry: str, situation: str = "", tone: str = "") -> str:
     """업종·상황·느낌(한국어)을 영어 배경 프롬프트 한 줄로 변환한다."""
     order = f"업종: {industry} / 상황: {situation} / 느낌: {tone}"
+    from openai import OpenAI
+
     client = OpenAI()
     res = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -46,6 +46,8 @@ _HERO_SYSTEM = (
 def build_hero_prompt(industry: str, product: str, tone: str = "") -> str:
     """사진 없는 주문에서 포스터에 넣을 주인공 이미지용 프롬프트를 만든다."""
     order = f"업종: {industry} / 대상: {product} / 느낌: {tone}"
+    from openai import OpenAI
+
     client = OpenAI()
     res = client.chat.completions.create(
         model="gpt-4o-mini",

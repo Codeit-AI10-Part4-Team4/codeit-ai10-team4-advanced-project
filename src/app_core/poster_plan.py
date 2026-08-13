@@ -9,7 +9,6 @@
 
 import json
 
-from openai import OpenAI
 from pydantic import BaseModel, Field, field_validator
 
 from app_core.palettes import PALETTES
@@ -78,6 +77,9 @@ def plan_poster(
         f"상황: {situation} / 느낌: {tone} / 그 밖: {extra}\n"
         f"사장님이 한 말 원문:\n{transcript or '(없음)'}"
     )
+
+    from openai import OpenAI  # CI에는 llm extra가 없어 지연 import
+
     res = OpenAI().chat.completions.create(
         model="gpt-4o-mini",
         response_format={"type": "json_object"},

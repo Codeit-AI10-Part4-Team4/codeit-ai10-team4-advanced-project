@@ -28,8 +28,7 @@ def _fake_openai(payload: dict):
 
 def test_plan_poster_parses_fields(monkeypatch):
     monkeypatch.setattr(
-        poster_plan,
-        "OpenAI",
+        "openai.OpenAI",
         _fake_openai(
             {
                 "tagline": "봄과 함께",
@@ -54,8 +53,7 @@ def test_plan_poster_parses_fields(monkeypatch):
 def test_plan_poster_allows_empty_event(monkeypatch):
     """말하지 않은 이벤트·날짜는 비어 있어야 한다 — 지어내면 허위광고가 된다."""
     monkeypatch.setattr(
-        poster_plan,
-        "OpenAI",
+        "openai.OpenAI",
         _fake_openai(
             {
                 "tagline": "동네 꽃집",
@@ -75,8 +73,7 @@ def test_plan_poster_allows_empty_event(monkeypatch):
 def test_unknown_palette_is_rejected(monkeypatch):
     """모르는 팔레트 이름이 오면 그리기 전에 걸러야 한다."""
     monkeypatch.setattr(
-        poster_plan,
-        "OpenAI",
+        "openai.OpenAI",
         _fake_openai(
             {
                 "tagline": "x",
