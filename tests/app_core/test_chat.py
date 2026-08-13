@@ -120,12 +120,19 @@ def test_가격은_빠져나갈_길을_같이_알려준다(store: Store) -> None
     assert "가격 없이 만들기" in client.system
 
 
-def test_이미지에서도_가격은_같은_말투다(store: Store) -> None:
-    """가격은 목적과 무관하게 따로 묻는다 — 막히면 안 되는 건 양쪽 다 같다."""
+def test_이미지는_가격을_아예_안_묻는다(store: Store) -> None:
+    """분위기만 내는 경우가 많아 묻지 않는다 (팀 합의 2026-08-13).
+
+    "가격 없이 만들기" 로 확인하면 안 된다 — 그 말은 추출 예시에도 들어 있어서
+    가격을 안 물어도 프롬프트에 남아 있다. 질문 틀 자체를 봐야 한다.
+    """
     client = FakeClient({})
-    chat.respond(AdBriefDraft(goal="image", product="크로플"), "안녕", store, client)
+    d = AdBriefDraft(goal="image", product="크로플")
+    assert d.next_slot() != "price"
+
+    chat.respond(d, "안녕", store, client)
     assert client.system is not None
-    assert "가격 없이 만들기" in client.system
+    assert "광고에 넣을 금액이다" not in client.system  # ASK_PRICE 가 안 실렸다
 
 
 def test_필수가_차면_느낌을_물으라고_지시한다(store: Store) -> None:

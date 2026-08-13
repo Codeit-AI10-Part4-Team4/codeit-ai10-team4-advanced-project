@@ -225,45 +225,30 @@ def test_안_찼는데_승격하려면_거부한다() -> None:
 
 # ── 목적에 따라 필수가 다르다 ─────────────────────────────────
 #
-# 이미지는 분위기만 내는 경우가 많아 가격을 강요하면 대화만 길어진다.
+# 이미지 광고는 사진으로 분위기만 내는 경우가 많아 가격을 안 묻는다
+# (팀 합의 2026-08-13). 문구 광고는 가격이 문구에 그대로 들어가므로 받는다.
 
 
 def test_문구는_가격이_필수다() -> None:
     assert AdBriefDraft(goal="copy", product="크로플").missing() == ["price"]
 
 
-def test_이미지는_가격_없이도_만들_수_있다() -> None:
-    assert AdBriefDraft(goal="image", product="크로플").missing() == []
-
-
-def test_이미지도_가격을_한_번은_묻는다() -> None:
-    """안 묻는 게 아니라 한 번 묻고 넘어간다 — 넣고 싶은 사장님도 있다."""
+def test_이미지는_가격을_안_묻는다() -> None:
     d = AdBriefDraft(goal="image", product="크로플")
-    assert d.next_slot() == "price"
-
-
-def test_이미지에서_가격을_안_답해도_넘어간다() -> None:
-    """한 번 물었으면 다시 안 묻는다. 답을 안 해도 만들 수 있어야 한다."""
-    d = AdBriefDraft(goal="image", product="크로플").mark_asked("price")
-    assert "price" not in d.remaining_slots()
     assert d.missing() == []
+    assert "price" not in d.remaining_slots()
 
 
-def test_가격을_못_받은_이미지는_0으로_굳는다() -> None:
+def test_가격을_안_받은_이미지는_0으로_굳는다() -> None:
     """주문서에서 0 은 "광고에 가격을 넣지 않는다" 는 뜻이다."""
     brief = AdBriefDraft(goal="image", product="크로플").to_brief()
     assert brief.price == 0 and brief.show_price is False
 
 
 def test_이미지도_말한_가격은_그대로_간다() -> None:
+    """안 묻는 것이지 못 넣는 것은 아니다 — 사장님이 먼저 말하면 받는다."""
     brief = AdBriefDraft(goal="image", product="크로플", price=4500).to_brief()
     assert brief.price == 4500 and brief.show_price is True
-
-
-def test_이미지에서_가격_0은_다시_묻지_않는다() -> None:
-    """0 은 "빼달라" 고 답한 것이다. 빈 값으로 보고 또 물으면 안 된다."""
-    d = AdBriefDraft(goal="image", product="크로플", price=0)
-    assert "price" not in d.remaining_slots()
 
 
 # ── 원문 보관 ────────────────────────────────────────────────

@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from app_core import turnlog
 from app_core.llm import ChatClient, get_client
-from app_core.schema import AdBriefDraft, ChatTurn, Store, required_slots
+from app_core.schema import AdBriefDraft, ChatTurn, Store
 
 SYSTEM_PROMPT = """너는 동네 가게 사장님이 광고를 만들도록 돕는 챗봇이다.
 
@@ -241,14 +241,15 @@ def _describe(draft: AdBriefDraft) -> str:
 def _next_action(draft: AdBriefDraft, slot: str | None) -> str:
     """이번 턴에 어떻게 물을지.
 
-    가격만 목적과 무관하게 따로 묻는다. 문구에선 필수지만, 넣을 금액이 없는
-    사장님이 거기서 막히면 안 된다 — 빠져나갈 길을 같이 알려주는 쪽이다.
+    가격은 따로 뺐다. 문구 광고에선 필수지만, 넣을 금액이 없는 사장님이 거기서
+    막히면 안 된다 — "없으면 못 만든다" 대신 빠져나갈 길을 같이 알려준다.
+    (이미지 광고는 가격을 아예 안 묻는다 — AdBriefDraft.required 참고)
     """
     if slot is None:
         return WRAP_UP
     if slot == "price":
         return ASK_PRICE
-    template = ASK_REQUIRED if slot in required_slots(draft.goal) else ASK_HELPFUL
+    template = ASK_REQUIRED if slot in draft.required else ASK_HELPFUL
     return template.format(label=SLOT_LABEL[slot])
 
 
