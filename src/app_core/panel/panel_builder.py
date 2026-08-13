@@ -5,15 +5,24 @@
 
 축을 어떤 근거로 정하는지가 이 파일의 전부다. 근거 없는 다양성은 만들지 않는다.
 
-  price_sens  상권 객단가 분위 + 배후 아파트 시가   → 상권 단위 (전원 동일)
+  price_sens  상권 객단가 분위 + 아파트 시가 + **나이대별 객단가** → 페르소나마다 다름
   motive      work_ratio (출퇴근 상권인가)          → 상권 단위 (전원 동일)
   time        매출 시간대 분포에 맞춰 배분          → 페르소나마다 다름
   weight      gender_share × age_share             → 두 축의 곱
 
-**price_sens·motive 가 전원 동일한 것은 의도한 것이다.** 상권 단위로만 관측되는
-값이라, 연령별로 다르게 주려면 계수를 지어내야 한다. 지어낸 다양성은 코멘트를
-그럴듯하게 만들 뿐 근거를 늘리지 않는다 (07 §4.6). 시간대만 페르소나별로 다른
-이유는 매출 시간대 분포라는 실측 근거가 있기 때문이다.
+**근거 없는 다양성은 만들지 않는다**가 이 파일의 원칙이고, 그건 안 바뀌었다.
+바뀐 것은 근거다 — 서울시 원본에 `연령대_N_매출_금액` 과 **`건수`가 둘 다** 있어서
+나이대별 객단가를 실측으로 구할 수 있다. 우리 ETL 이 건수를 안 싣고 있었을 뿐이다.
+
+    역삼역 커피-음료     10대  6,420원  →  60대+ 10,023원   (나이 들수록 오름)
+    홍대입구역 커피-음료  10대 12,626원  →  60대+  7,833원   (나이 들수록 내림)
+
+같은 업종인데 상권마다 방향이 반대다. 계수로는 절대 못 만드는 값이라 근거 등급 A 다.
+
+price_sens 를 상권 단위로 두던 동안 손님 12명은 같은 숫자와 견주었고, 그래서
+가격 판단이 하나로 모였다 (실측 2026-08-12: 12명 중 10명이 걸림돌로 price 를 골랐고
+그중 5명은 코멘트가 글자 하나 안 틀리고 같았다). motive 는 아직 상권 단위인데,
+`work_ratio` 를 나이대로 쪼갤 실측 근거가 없어서 그대로 둔다.
 """
 
 from __future__ import annotations
@@ -59,10 +68,62 @@ AGE_LABEL: Final = {
 }
 
 
-def price_sens(features: dict[str, Any]) -> str:
-    """상권의 가격 저항. 객단가 분위가 기준이고 배후 아파트 시가로 한 번 보정한다.
+#: 저항이 높은 쪽 → 낮은 쪽. `_shift` 가 이 순서로 한 칸씩 옮긴다.
+SENS_LEVELS: Final = ("high", "mid", "low")
+
+#: 그 나이대 객단가가 동네 기준의 이 배율 밖이면 한 칸 옮긴다.
+#:
+#: 서울 전체를 쓸어서 정했다 — (상권×업종) 14,231개 조합, 비율 표본 64,061개.
+#:
+#:     비율 분포   p5 0.55   p25 0.86   중앙 0.99   p75 1.09   p95 1.43
+#:
+#:     문턱          12명이 갈리는 조합   한 칸 이상 움직인 나이대
+#:     0.80~1.20          66.4%                31.3%
+#:     0.85~1.15          77.9%                41.3%   ← 여기
+#:     0.90~1.10          88.8%                55.3%
+#:     0.95~1.05          96.6%                75.1%
+#:
+#: 대략 사분위 바깥이라, 또래와 견줘 **꼬리에 있는 나이대만** 움직인다.
+#: 더 좁히면 절반 넘는 손님이 한 칸씩 밀려 "다양성"이 아니라 잡음이 되고,
+#: 더 넓히면 3분의 1이 지금처럼 한 덩어리로 남는다.
+AGE_TICKET_LOW: Final = 0.85
+AGE_TICKET_HIGH: Final = 1.15
+
+
+def _shift(level: str, step: int) -> str:
+    i = SENS_LEVELS.index(level) + step
+    return SENS_LEVELS[max(0, min(len(SENS_LEVELS) - 1, i))]
+
+
+def _age_ticket_ratio(features: dict[str, Any], age: str | None) -> float | None:
+    """그 나이대 객단가 ÷ 동네 기준. 잴 수 없으면 None.
+
+    기준은 `avg_ticket` 이 아니라 `age_ticket_base` 다. `avg_ticket` 에는 나이 미상
+    매출이 섞여 있어(역삼 커피는 알려진 나이가 82%뿐) 나이대끼리 견주는 자로는
+    못 쓴다 — 그걸 쓰면 여섯 칸 중 다섯이 전부 아래로 몰린다.
+    """
+    if age is None:
+        return None
+    ticket = (features.get("age_ticket") or {}).get(age)
+    base = features.get("age_ticket_base") or 0
+    if not ticket or not base:
+        return None
+    return ticket / base
+
+
+def price_sens(features: dict[str, Any], age: str | None = None) -> str:
+    """가격 저항. 상권 객단가 분위가 기준이고, 배후 아파트 시가와 **나이대**로 보정한다.
 
     객단가가 높다 = 그 동네 손님이 그 값을 내고 있다 = 가격 저항이 낮다.
+
+    `age` 를 주면 **그 나이대가 이 동네에서 실제로 한 번에 쓰는 돈**으로 한 칸 옮긴다.
+    상권 값 하나만 쓰면 12명이 같은 숫자와 견주게 되어 가격 판단이 하나로 모인다
+    (실측 2026-08-12: 손님 12명 중 10명이 걸림돌로 price 를 골랐고, 그중 5명은
+    코멘트가 글자 하나 안 틀리고 같았다).
+
+    지어낸 계수가 아니라 서울시 원본의 `연령대_N_매출_금액 ÷ 건수` 다. 그래서 이
+    파일 맨 위의 "근거 없는 다양성은 만들지 않는다"를 어기지 않는다 — 근거가 생겼다.
+    건수가 적어 믿을 수 없는 칸은 `age_ticket` 이 `None` 이고, 그러면 상권 값을 쓴다.
     """
     pct = features.get("avg_ticket_pct", 0.5)
     level = "low" if pct > 0.75 else "high" if pct < 0.25 else "mid"
@@ -70,6 +131,14 @@ def price_sens(features: dict[str, Any]) -> str:
     if apt and apt > APT_PRICE_HIGH and level != "low":
         # 비싼 아파트가 배후면 소득이 받쳐준다 — 한 단계 완화
         level = "mid" if level == "high" else "low"
+
+    ratio = _age_ticket_ratio(features, age)
+    if ratio is not None:
+        # 또래보다 적게 쓰는 나이대 = 이 가격이 더 부담스럽다
+        if ratio < AGE_TICKET_LOW:
+            level = _shift(level, -1)
+        elif ratio > AGE_TICKET_HIGH:
+            level = _shift(level, +1)
     return level
 
 
@@ -150,7 +219,8 @@ def build_panel(
     gender, age = features["gender_share"], features["age_share"]
     bound = boundary_age(features)
 
-    base_axes = {"price_sens": price_sens(features), "motive": motive(features)}
+    # motive 만 상권 단위다. price_sens 는 나이대별 실측 객단가가 있어 사람마다 갈린다.
+    base_motive = motive(features)
     seeds = [
         {"gender": g, "age": a, "weight": round(gender[g] * age[a], 4)}
         for a in sorted(age)
@@ -180,7 +250,11 @@ def build_panel(
             {
                 "persona_id": f"p{i:02d}",
                 "demo": demo,
-                "axes": {**base_axes, "time": time},
+                "axes": {
+                    "price_sens": price_sens(features, a),
+                    "motive": base_motive,
+                    "time": time,
+                },
                 "weight": seed["weight"],
                 "is_boundary": is_boundary,
                 "narrative": "",

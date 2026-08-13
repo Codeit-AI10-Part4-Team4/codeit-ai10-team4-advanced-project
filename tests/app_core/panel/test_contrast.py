@@ -22,7 +22,7 @@ from app_core.panel.contrast import (
 )
 from app_core.panel.evidence import evidence_failures
 from app_core.panel.schemas import TradeAreaFeatures
-from app_core.schema import AdBrief, CopyCandidate
+from app_core.schema import AdBrief, CopyCandidate, Store
 
 BRIEF = AdBrief(goal="copy", product="크로플", price=6000)
 
@@ -171,6 +171,90 @@ def test_새벽을_알아챈다() -> None:
     assert note is not None
     # 적합도는 가장 많이 팔리는 시간대 대비다 — 0.01 / 0.48 = 0.02
     assert note.fit is not None and note.fit < 0.05
+
+
+def test_상품명이_빠지면_짚어준다() -> None:
+    from app_core.panel.contrast import product_note
+
+    brief = BRIEF.model_copy(update={"product": "크로플 세트"})
+    assert product_note(brief, CopyCandidate(headline="달콤한 오후를 만나보세요")) is not None
+    # 여러 낱말이면 하나만 나와도 말한 것으로 본다
+    assert product_note(brief, CopyCandidate(headline="크로플, 지금 만나보세요")) is None
+
+
+def test_근거_없는_최상급을_짚어준다() -> None:
+    """`copy_gen` 이 쓰지 말라고 지시하는데 아무도 검사하지 않고 있었다."""
+    from app_core.panel.contrast import claim_note
+
+    note = claim_note(CopyCandidate(headline="이 동네 최고의 크로플"))
+    assert note is not None and "최고" in note.text
+    assert claim_note(CopyCandidate(headline="갓 구운 크로플")) is None
+
+
+def test_상호에_든_말은_주장으로_보지_않는다() -> None:
+    from app_core.panel.contrast import claim_note
+
+    store = Store(id=1, user_id=1, industry="cafe", name="제일커피", address="서울 강남구")
+    assert claim_note(CopyCandidate(headline="제일커피의 크로플"), store) is None
+    assert claim_note(CopyCandidate(headline="제일커피의 크로플"), None) is not None
+
+
+def test_지어낸_금액을_짚어준다() -> None:
+    """사장님이 정한 값이 아니면 지어낸 것으로 본다 — `copy_gen` 과 같은 규칙이다."""
+    from app_core.panel.contrast import price_text_note
+
+    brief = BRIEF.model_copy(update={"price": 8900})
+    note = price_text_note(brief, CopyCandidate(headline="크로플 6,000원"))
+    assert note is not None and "6,000원" in note.text and "8,900원" in note.text
+    assert price_text_note(brief, CopyCandidate(headline="크로플 8,900원")) is None
+
+
+def test_가격을_빼기로_했는데_적히면_짚어준다() -> None:
+    from app_core.panel.contrast import price_text_note
+
+    brief = BRIEF.model_copy(update={"price": 0})
+    assert price_text_note(brief, CopyCandidate(headline="크로플 5,000원")) is not None
+    assert price_text_note(brief, CopyCandidate(headline="갓 구운 크로플")) is None
+
+
+def test_문구_결함은_적합도를_받지_않는다() -> None:
+    """`fit` 은 '이 동네와 얼마나 맞나'다. 상품명 누락은 동네와 상관이 없다.
+
+    섞으면 `weakest()` 가 결함을 '가장 어긋나는 곳'으로 뽑아 동네 대조를 가린다.
+    """
+    from app_core.panel.contrast import DEFECT_KINDS, copy_defects
+
+    copy = CopyCandidate(
+        headline="이 동네 최고", sub="9,900원"
+    )  # BRIEF 는 6,000원이다  # 결함 3종 전부
+    defects = copy_defects(BRIEF, copy)
+    assert {n.kind for n in defects} == DEFECT_KINDS
+    assert all(n.fit is None for n in defects)
+    assert weakest(defects) is None  # 잴 것이 없으므로 고를 것도 없다
+
+
+def test_문구_결함은_동네_대조에_섞이지_않는다() -> None:
+    """근거 관문이 '모든 대조 문장은 수치를 인용한다'를 계약으로 걸어두었다.
+
+    결함 문장은 인용할 수치가 없어 `evidence` 가 빈다 — 합칠지는 수호님 판단이라
+    `contrast()` 에 넣지 않았다.
+    """
+    from app_core.panel.contrast import DEFECT_KINDS
+
+    copy = CopyCandidate(headline="이 동네 최고", sub="9,900원")  # BRIEF 는 6,000원이다
+    notes = contrast(_features(), BRIEF, copy)
+    assert not [n for n in notes if n.kind in DEFECT_KINDS]
+    assert all(n.evidence for n in notes)  # 전부 수치를 인용한다
+
+
+def test_간식은_시점이_아니다() -> None:
+    """A/B 측정에서 "특별한 간식!" 이 오후 광고로 잡혀 적합도 0.40 이 붙었다.
+
+    끼니말(점심·저녁·야식)과 달리 간식은 때를 가리키지 않는다. 사장님이
+    시간대를 말한 적이 없는데 시간대로 감점당하면 안 된다.
+    """
+    copy = CopyCandidate(headline="크로플 세트", sub="8,900원으로 즐기는 특별한 간식!")
+    assert timing_note(_features(), copy) is None
 
 
 def test_가장_어긋난_항목을_고른다() -> None:

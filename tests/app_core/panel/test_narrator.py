@@ -42,15 +42,16 @@ def personas() -> list[dict[str, Any]]:
 
 
 def test_프롬프트에_연령별_구매_비율이_들어간다(personas: list[dict[str, Any]]) -> None:
-    """축(price_sens·motive)이 상권 단위라 전원 같다. 이 비율이 유일한 구별 재료다."""
+    """서사에는 축을 안 넣으므로(`_persona_line`) 이 비율이 유일한 구별 재료다."""
     prompt = build_prompt(personas, FEATURES)
     assert "많이 산다" in prompt  # 30대: 0.40/0.28 = 1.4배
     assert "적게 산다" in prompt  # 20대: 0.16/0.30 = 0.5배
 
 
 def test_구별에_기여하지_않는_축은_넣지_않는다(personas: list[dict[str, Any]]) -> None:
-    """motive·price_sens 는 상권 단위라 12명이 전원 같다 (실측: 상권 300곳 중
-    82%가 exploratory). 서사에 넣으면 앞뒤가 안 맞는 문장만 나온다."""
+    """motive 는 상권 단위라 12명이 전원 같다 (실측: 상권 300곳 중 82%가
+    exploratory) — 서사에 넣으면 앞뒤가 안 맞는 문장만 나온다. price_sens 는
+    이제 나이대별로 갈리지만, 평가 프롬프트에 축으로 따로 들어가므로 여기선 뺀다."""
     prompt = build_prompt(personas, FEATURES)
     assert "늘 가던 곳" not in prompt
     assert "가격 저항" not in prompt
