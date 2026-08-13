@@ -93,9 +93,20 @@ def test_아직_물을_게_남으면_LLM_말을_그대로_쓴다(store: Store) -
     assert turn.message == "가격은 얼마인가요?"
 
 
-def test_필수가_남으면_그것부터_물으라고_지시한다(store: Store) -> None:
+def test_이미지_광고의_가격은_협박하지_않고_묻는다(store: Store) -> None:
+    """이미지 광고에서 가격은 선택이다. 상수만 보면 "없으면 못 만든다"고 한다."""
     client = FakeClient({})
-    chat.respond(draft(product="크로플"), "안녕", store, client)
+    chat.respond(draft(goal="image", product="크로플"), "안녕", store, client)
+    assert client.system is not None
+    assert "가격" in client.system
+    assert "없으면 광고를 못 만든다" not in client.system
+    assert "빠져나갈 길" in client.system  # ASK_HELPFUL 쪽 지시
+
+
+def test_필수가_남으면_그것부터_물으라고_지시한다(store: Store) -> None:
+    # 가격이 필수인 건 문구 광고다. 이미지 광고는 선택이다 (schema.required).
+    client = FakeClient({})
+    chat.respond(draft(goal="copy", product="크로플"), "안녕", store, client)
     assert client.system is not None
     assert "가격" in client.system
     assert "없으면 광고를 못 만든다" in client.system
