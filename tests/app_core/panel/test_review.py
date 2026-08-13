@@ -15,7 +15,7 @@ import pytest
 
 from app_core.panel.features import DB_PATH, build_features
 from app_core.panel.panel_builder import build_panel
-from app_core.panel.review import review, to_panel
+from app_core.panel.review import Ranked, rank, rank_key, review, to_panel
 from app_core.schema import AdBrief, CopyCandidate, Store, StoreInput
 
 from .test_evaluator import FakeClient, _good
@@ -66,6 +66,77 @@ def _honest(coord: tuple[float, float]) -> Honest:
         return _good(p, attention=50 + int(p.persona_id[1:]))
 
     return Honest(reply=reply)
+
+
+def _ranked(intent: float, attention: float = 60.0, defects: int = 0) -> Ranked:
+    """정렬만 검증하므로 결과는 최소 필드로 만든다."""
+    from app_core.panel.contrast import Note
+    from app_core.panel.schemas import EvaluationResult
+
+    return Ranked(
+        copy=COPY,
+        result=EvaluationResult(
+            ad_id="x",
+            scores={"attention": attention, "message": 70.0, "intent": intent},
+            confidence="ok",
+            max_metric_std=0.0,
+            top_resistance=[],
+            persona_comments=[],
+            area_nm="역삼역",
+            quarter="20261",
+            is_fallback=False,
+            demo_coverage=0.9,
+        ),
+        defects=[Note(kind="product", text="", evidence=[])] * defects,
+    )
+
+
+def test_방문의향이_높은_문구가_앞에_온다() -> None:
+    """사장님이 원하는 결과 그 자체라 첫 기준으로 둔다."""
+    keys = [rank_key(_ranked(intent=i), n) for n, i in enumerate([46.0, 54.0, 50.0])]
+    assert [n for *_, n in sorted(keys)] == [1, 2, 0]
+
+
+def test_잡음보다_작은_차이는_차이가_아니다() -> None:
+    """실측(2026-08-13): 1·2위가 반올림해 둘 다 52 인데 1위에만 결함이 있었다.
+
+    사장님 화면에서 "1위" 바로 밑에 경고가 뜨는 모양이 된다. 0.1점 차로 결함 있는
+    문구가 1등이 되면 안 된다.
+    """
+    keys = [
+        rank_key(_ranked(intent=52.4, defects=1), 0),  # 아주 조금 높지만 결함 있음
+        rank_key(_ranked(intent=52.0, defects=0), 1),  # 결함 없음
+    ]
+    assert min(keys)[3] == 1
+
+
+def test_잡음보다_큰_차이는_결함을_이긴다() -> None:
+    """결함이 있어도 손님들이 확실히 더 좋아하면 그쪽이 1위다."""
+    keys = [
+        rank_key(_ranked(intent=58.0, defects=1), 0),
+        rank_key(_ranked(intent=50.0, defects=0), 1),
+    ]
+    assert min(keys)[3] == 0
+
+
+def test_결함까지_같으면_눈길이_가른다() -> None:
+    """눈길은 신호가 가장 큰 지표다 (실측: 후보 3개 폭 5.5 vs 잡음 0.7)."""
+    keys = [
+        rank_key(_ranked(intent=52.0, attention=a), n) for n, a in enumerate([59.8, 65.3, 59.8])
+    ]
+    assert min(keys)[3] == 1
+
+
+def test_전부_같으면_만든_순서를_지킨다() -> None:
+    keys = [rank_key(_ranked(intent=52.0), n) for n in range(3)]
+    assert [n for *_, n in sorted(keys)] == [0, 1, 2]
+
+
+def test_후보마다_하나씩_돌려준다() -> None:
+    copies = [COPY, CopyCandidate(headline="크로플 6,000원", sub="")]
+    out = rank(_store(), BRIEF, copies, client=_honest(YEOKSAM), coord=YEOKSAM)
+    assert len(out) == 2
+    assert {r.copy.headline for r in out} == {c.headline for c in copies}
 
 
 def test_주소만_넣으면_결과가_나온다() -> None:
