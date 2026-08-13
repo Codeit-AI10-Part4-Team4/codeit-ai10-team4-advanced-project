@@ -6,6 +6,9 @@ import pytest
 
 from app_core import poster_plan
 
+# CI에는 llm extra(openai)가 없다 ─ 그 환경에서는 이 파일의 테스트를 건너뛴다
+pytest.importorskip("openai")
+
 
 class _FakeCompletions:
     def __init__(self, payload: str):
