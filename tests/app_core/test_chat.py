@@ -97,10 +97,22 @@ def test_아직_물을_게_남으면_LLM_말을_그대로_쓴다(store: Store) -
 
 def test_필수가_남으면_그것부터_물으라고_지시한다(store: Store) -> None:
     client = FakeClient({})
-    chat.respond(draft(product="크로플"), "안녕", store, client)
+    chat.respond(AdBriefDraft(goal="copy", product="크로플"), "안녕", store, client)
     assert client.system is not None
     assert "가격" in client.system
     assert "없으면 광고를 못 만든다" in client.system
+
+
+def test_이미지는_가격을_가볍게_묻는다(store: Store) -> None:
+    """같은 슬롯이라도 목적에 따라 무게가 다르다.
+    이미지는 분위기만 내는 경우가 많아 가격을 강요하면 대화만 길어진다.
+    """
+    client = FakeClient({})
+    chat.respond(AdBriefDraft(goal="image", product="크로플"), "안녕", store, client)
+    assert client.system is not None
+    assert "가격" in client.system
+    assert "없으면 광고를 못 만든다" not in client.system
+    assert "부담 주지 마라" in client.system
 
 
 def test_필수가_차면_느낌을_물으라고_지시한다(store: Store) -> None:

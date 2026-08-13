@@ -29,11 +29,33 @@ FeedbackSource = Literal["typed", "option", "panel"]
 
 # 대화로 반드시 채워야 하는 것. goal 은 고정 버튼으로 이미 정해져서 여기 없다.
 # 이게 비면 광고를 만들 수 없다.
-REQUIRED_SLOTS = ("product", "price")
+#
+# **무엇이 필수인지는 목적에 따라 다르다.** 문구는 가격이 글에 들어가지만,
+# 이미지는 분위기만 내는 경우가 많아 가격을 강요하면 대화만 길어진다.
+_REQUIRED = {
+    "copy": ("product", "price"),
+    "image": ("product",),
+}
 
 # 없어도 만들 수는 있지만, 있으면 사장님 의도에 훨씬 가까워지는 것.
 # **한 번씩만 묻고 넘어간다** — 안 그러면 사장님이 답을 피할 때 대화가 맴돈다.
-HELPFUL_SLOTS = ("situation", "tone")
+#
+# 이미지에서 price 가 여기 있는 이유: 안 묻는 게 아니라 **한 번 묻고 넘어간다.**
+# 넣고 싶은 사장님도 있는데 아예 안 물으면 넣을 방법이 없다.
+_HELPFUL = {
+    "copy": ("situation", "tone"),
+    "image": ("price", "situation", "tone"),
+}
+
+
+def required_slots(goal: Goal | None) -> tuple[str, ...]:
+    """이 목적으로 광고를 만들려면 꼭 있어야 하는 슬롯."""
+    return _REQUIRED.get(goal or "", _REQUIRED["copy"])
+
+
+def helpful_slots(goal: Goal | None) -> tuple[str, ...]:
+    """있으면 좋은 슬롯. 한 번씩만 묻는다."""
+    return _HELPFUL.get(goal or "", _HELPFUL["copy"])
 
 
 class StoreInput(BaseModel):
@@ -242,8 +264,11 @@ class AdBriefDraft(BaseModel):
     )
 
     def missing(self) -> list[str]:
-        """아직 안 찬 **필수** 슬롯. 이게 비어야 생성할 수 있다."""
-        return [slot for slot in REQUIRED_SLOTS if getattr(self, slot) is None]
+        """아직 안 찬 **필수** 슬롯. 이게 비어야 생성할 수 있다.
+
+        무엇이 필수인지는 goal 이 정한다 — 이미지는 가격 없이 만들 수 있다.
+        """
+        return [slot for slot in required_slots(self.goal) if getattr(self, slot) is None]
 
     def remaining_slots(self) -> list[str]:
         """아직 물어볼 게 남은 슬롯 전부. 우선순위 순이다.
@@ -251,8 +276,13 @@ class AdBriefDraft(BaseModel):
         필수를 먼저 다 받고, 그 다음 도움되는 것을 한 번씩만 묻는다.
         사장님이 답을 안 해도 asked 에 남아서 다시 묻지 않는다.
         """
-        left = [s for s in REQUIRED_SLOTS if getattr(self, s) is None]
-        left += [s for s in HELPFUL_SLOTS if not getattr(self, s) and s not in self.asked]
+        left = [s for s in required_slots(self.goal) if getattr(self, s) is None]
+        left += [
+            s
+            for s in helpful_slots(self.goal)
+            # price 는 0 도 채운 값이라 not 으로 보면 안 된다 (0 = 가격 없이 만들기)
+            if getattr(self, s) in (None, "") and s not in self.asked
+        ]
         return left
 
     def next_slot(self) -> str | None:
@@ -287,13 +317,19 @@ class AdBriefDraft(BaseModel):
         return self.model_copy(update={"transcript": [*self.transcript, said]})
 
     def to_brief(self) -> AdBrief:
-        """필수가 다 찼을 때만 주문서로 승격한다."""
+        """필수가 다 찼을 때만 주문서로 승격한다.
+
+        가격을 끝내 못 받았으면 0 으로 굳힌다 — 이미지는 가격이 필수가 아니라
+        여기까지 None 으로 올 수 있다. 주문서에서 0 은 "광고에 가격을 넣지
+        않는다" 는 뜻이고, 대화가 끝난 시점에는 "안 물어봤다" 와 결과가 같다.
+        (대화 중에는 둘을 구분해야 해서 AdBriefDraft 쪽에만 None 이 있다)
+        """
         if missing := self.missing():
             raise ValueError(f"아직 안 찬 항목이 있습니다: {missing}")
         return AdBrief(
             goal=self.goal,  # type: ignore[arg-type]  # missing() 이 None 아님을 보장
             product=self.product,  # type: ignore[arg-type]
-            price=self.price,  # type: ignore[arg-type]
+            price=self.price if self.price is not None else 0,
             situation=self.situation,
             tone=self.tone,
             extra=self.extra,
