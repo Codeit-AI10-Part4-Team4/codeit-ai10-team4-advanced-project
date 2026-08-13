@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from app_core import turnlog
 from app_core.llm import ChatClient, get_client
-from app_core.schema import REQUIRED_SLOTS, AdBriefDraft, ChatTurn, Store
+from app_core.schema import AdBriefDraft, ChatTurn, Store
 
 SYSTEM_PROMPT = """너는 동네 가게 사장님이 광고를 만들도록 돕는 챗봇이다.
 
@@ -214,10 +214,16 @@ def _describe(draft: AdBriefDraft) -> str:
     return "\n".join(filled) if filled else "(아직 없음)"
 
 
-def _next_action(slot: str | None) -> str:
+def _next_action(draft: AdBriefDraft) -> str:
+    """필수인지 아닌지는 **주문서마다 다르다** — 이미지 광고의 가격은 선택이다.
+
+    상수(`REQUIRED_SLOTS`)를 보면 이미지 광고에서도 "없으면 광고를 못 만든다"고
+    협박하게 된다.
+    """
+    slot = draft.next_slot()
     if slot is None:
         return WRAP_UP
-    template = ASK_REQUIRED if slot in REQUIRED_SLOTS else ASK_HELPFUL
+    template = ASK_REQUIRED if slot in draft.required else ASK_HELPFUL
     return template.format(label=SLOT_LABEL[slot])
 
 
@@ -238,7 +244,7 @@ def _system_prompt(draft: AdBriefDraft, store: Store) -> str:
         goal=GOAL_LABEL.get(draft.goal or "", "미정"),
         transcript="\n".join(f'- "{t}"' for t in draft.transcript) or "(아직 없음)",
         filled=_describe(draft),
-        next_action=_next_action(draft.next_slot()),
+        next_action=_next_action(draft),
         unknown=_unknown(draft),
     )
 

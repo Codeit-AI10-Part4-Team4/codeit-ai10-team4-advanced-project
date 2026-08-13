@@ -198,14 +198,34 @@ def test_가격_0도_채운_것으로_친다() -> None:
     assert AdBriefDraft(product="크로플", price=0).missing() == []
 
 
-def test_이미지_광고는_가격을_안_묻는다() -> None:
+def test_이미지_광고는_가격_없이도_만들_수_있다() -> None:
     """사진으로 분위기만 내는 광고가 많다 (팀 합의 2026-08-13).
 
     이게 없으면 사장님이 가격을 말할 때까지 "광고 이미지 만들기" 버튼이
     안 열린다.
     """
+    assert AdBriefDraft(goal="image", product="크로플").missing() == []
+
+
+def test_이미지_광고도_가격을_한_번은_묻는다() -> None:
+    """**필수에서 빼기만 하면 선택 항목이 아니라 없는 항목이 된다.**
+
+    가격을 넣고 싶은 사장님이 그 생각을 스스로 해내야 하기 때문이다.
+    한 번은 묻되 안 답해도 넘어간다 — 상황·톤과 같은 대접이다.
+    """
     d = AdBriefDraft(goal="image", product="크로플")
-    assert d.missing() == []
+    assert "price" in d.remaining_slots()
+    assert "price" not in d.missing()  # 물어보되 막지는 않는다
+
+
+def test_한_번_물어본_가격은_다시_묻지_않는다() -> None:
+    d = AdBriefDraft(goal="image", product="크로플").mark_asked("price")
+    assert "price" not in d.remaining_slots()
+
+
+def test_가격_없음이라고_답하면_다시_묻지_않는다() -> None:
+    """0 은 빈 값이 아니라 '없음'이라는 답이다 — falsy 로 보면 또 묻게 된다."""
+    d = AdBriefDraft(goal="image", product="크로플", price=0)
     assert "price" not in d.remaining_slots()
 
 
