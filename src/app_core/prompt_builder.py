@@ -30,3 +30,26 @@ def build_bg_prompt(industry: str, situation: str = "", tone: str = "") -> str:
     )
     text = (res.choices[0].message.content or "").strip()
     return f"{_BASE}, {text}"
+
+
+# 사진이 없을 때는 반대로 "주인공 자체"를 그린다. _BASE(빈 무대)와 용도가 반대다.
+_HERO_BASE = "professional product photography, centered close-up, soft light, blurred background"
+
+_HERO_SYSTEM = (
+    "You turn Korean shop-order details into a short English phrase "
+    "for a text-to-image model — at most 12 words. "
+    "Describe the product itself, appetizing and beautiful. "
+    "No text, no people. Output the phrase only."
+)
+
+
+def build_hero_prompt(industry: str, product: str, tone: str = "") -> str:
+    """사진 없는 주문에서 포스터에 넣을 주인공 이미지용 프롬프트를 만든다."""
+    order = f"업종: {industry} / 대상: {product} / 느낌: {tone}"
+    client = OpenAI()
+    res = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "system", "content": _HERO_SYSTEM}, {"role": "user", "content": order}],
+    )
+    text = (res.choices[0].message.content or "").strip()
+    return f"{text}, {_HERO_BASE}"

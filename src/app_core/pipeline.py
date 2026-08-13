@@ -18,7 +18,7 @@ from app_core.gen_background import generate_background
 from app_core.photo_store import load_photo
 from app_core.poster import generate_poster
 from app_core.poster_plan import plan_poster
-from app_core.prompt_builder import build_bg_prompt
+from app_core.prompt_builder import build_bg_prompt, build_hero_prompt
 from app_core.schema import AdBrief, CopyCandidate, Store
 
 Style = Literal["simple", "poster"]
@@ -40,6 +40,11 @@ def _poster_ad(brief: AdBrief, store: Store, copy: CopyCandidate, product: Image
 
     사장님에게 특징 3개를 직접 쓰게 하면 서비스가 아니라 양식 작성이 된다.
     """
+    if product is None:
+        # 사진이 없으면 주인공 이미지를 생성해 그 자리를 채운다 (사진 카드처럼 얹힌다)
+        hero_prompt = build_hero_prompt(store.industry_label, brief.product, brief.tone)
+        product = generate_background(hero_prompt).convert("RGBA")
+
     plan = plan_poster(
         shop=store.name,
         industry=store.industry_label,

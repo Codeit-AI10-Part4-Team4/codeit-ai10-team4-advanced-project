@@ -24,6 +24,12 @@ def _brief() -> AdBrief:
 def test_poster_style_uses_plan(monkeypatch):
     """포스터 형태는 기획 부품이 채운 내용으로 그린다."""
     monkeypatch.setattr(fonts, "load", _fake_font)
+    monkeypatch.setattr(pipeline, "build_hero_prompt", lambda *a, **k: "hero prompt")
+    monkeypatch.setattr(
+        pipeline,
+        "generate_background",
+        lambda prompt: Image.new("RGB", (512, 512), (200, 180, 160)),
+    )
     monkeypatch.setattr(
         pipeline,
         "plan_poster",
@@ -52,4 +58,25 @@ def test_simple_style_uses_generated_background(monkeypatch):
     )
     monkeypatch.setattr(compose, "_load_font", lambda size: ImageFont.load_default(size))
     ad = pipeline.generate_ad(_brief(), _store(), CopyCandidate(headline="크로플"), "simple")
+    assert ad.size == (1080, 1080)
+
+
+def test_poster_style_without_photo_generates_hero(monkeypatch):
+    """사진이 없으면 주인공 이미지를 생성해 채운다 — 오른쪽이 비면 안 된다."""
+    monkeypatch.setattr(fonts, "load", _fake_font)
+    monkeypatch.setattr(pipeline, "build_hero_prompt", lambda *a, **k: "hero prompt")
+    monkeypatch.setattr(
+        pipeline,
+        "generate_background",
+        lambda prompt: Image.new("RGB", (512, 512), (200, 180, 160)),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "plan_poster",
+        lambda **kwargs: PosterPlan(
+            tagline="t", badge="b", date_line="", features=["a|b"], event="", palette="fresh_mint"
+        ),
+    )
+    brief = AdBrief(goal="image", product="꽃다발", price=0, photo_id=None)
+    ad = pipeline.generate_ad(brief, _store(), CopyCandidate(headline="봄 꽃다발"), "poster")
     assert ad.size == (1080, 1080)
