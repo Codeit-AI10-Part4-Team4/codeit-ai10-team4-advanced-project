@@ -139,7 +139,7 @@ def test_cutout_갈래는_청소된_누끼가_그대로_전달된다(tmp_path, m
 
 def test_generate_갈래는_제품이_든_장면을_그린다(tmp_path, monkeypatch):
     seen = {}
-    monkeypatch.setattr(compose, "_load_font", lambda size: ImageFont.load_default(size))
+    monkeypatch.setattr(fonts, "load", _fake_font)
     monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: _photo(tmp_path))
     monkeypatch.setattr(
         pipeline, "remove_background", lambda im: Image.new("RGBA", (64, 64), (255, 255, 255, 255))

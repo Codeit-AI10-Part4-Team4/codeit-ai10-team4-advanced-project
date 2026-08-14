@@ -1,12 +1,9 @@
-"""photo_router 테스트 — 마스크 분석은 합성 이미지로, 비전 판정은 가짜 응답으로."""
-
-import sys
-from types import SimpleNamespace
+"""photo_router 테스트 — 마스크 분석은 합성 이미지로, 비전 판정은 가짜 클라이언트로."""
 
 from PIL import Image
 
 from app_core import photo_router
-from app_core.photo_router import MaskStats, mask_stats, route_by_mask, route_photo
+from app_core.photo_router import keep_largest, mask_area, route_by_mask, route_photo
 
 
 def _canvas(boxes: list[tuple[int, int, int, int]]) -> Image.Image:
@@ -17,29 +14,43 @@ def _canvas(boxes: list[tuple[int, int, int, int]]) -> Image.Image:
     return im
 
 
+def _alpha_at(im: Image.Image, x: int, y: int) -> int:
+    """(x, y) 픽셀의 알파값 — getpixel의 모호한 타입을 피해 bytes로 읽는다."""
+    return im.getchannel("A").tobytes()[y * im.width + x]
+
+
+class _FakeVision:
+    """가짜 비전 클라이언트 — 정해둔 답을 주거나, 예외를 던진다."""
+
+    def __init__(self, out):
+        self._out = out
+
+    def read_image(self, system: str, image: bytes, mime: str) -> dict:
+        if isinstance(self._out, Exception):
+            raise self._out
+        return self._out
+
+
+# ── 마스크 ────────────────────────────────────────────────
+
+
 def test_빈_마스크는_면적이_0이다():
-    s = mask_stats(_canvas([]))
-    assert s.area == 0 and s.pieces == 0
+    assert mask_area(_canvas([])) == 0
 
 
-def test_네모_하나는_조각_하나다():
-    s = mask_stats(_canvas([(16, 16, 48, 48)]))
-    assert s.pieces == 1
-    assert 0.2 < s.area < 0.3
-    assert s.largest == 1.0
-
-
-def test_떨어진_네모_둘은_조각_둘이다():
-    s = mask_stats(_canvas([(0, 0, 20, 20), (40, 40, 60, 60)]))
-    assert s.pieces == 2
+def test_네모_하나의_면적을_잰다():
+    assert 0.2 < mask_area(_canvas([(16, 16, 48, 48)])) < 0.3
 
 
 def test_전경이_화면을_다_덮으면_generate():
-    assert route_by_mask(MaskStats(area=0.9, pieces=1, largest=1.0)) == "generate"
+    assert route_by_mask(0.9) == "generate"
 
 
 def test_보통_사진은_마스크만으로_못_정한다():
-    assert route_by_mask(MaskStats(area=0.3, pieces=1, largest=1.0)) is None
+    assert route_by_mask(0.3) is None
+
+
+# ── 갈래 판정 ──────────────────────────────────────────────
 
 
 def test_비전이_정한_갈래를_따른다(monkeypatch):
@@ -54,14 +65,30 @@ def test_누끼가_빈손이면_cutout_대신_keep(monkeypatch):
     assert route_photo(b"", "image/jpeg", cut) == "keep"
 
 
-def _alpha_at(im: Image.Image, x: int, y: int) -> int:
-    """(x, y) 픽셀의 알파값 — getpixel의 모호한 타입을 피해 bytes로 읽는다."""
-    return im.getchannel("A").tobytes()[y * im.width + x]
+def test_판정_스텁이면_cutout으로_물러선다():
+    assert photo_router.judge_photo(b"x", "image/jpeg", client=_FakeVision({})) == "cutout"
+
+
+def test_판정_갈래가_엉뚱해도_cutout으로_물러선다():
+    fake = _FakeVision({"route": "unknown"})
+    assert photo_router.judge_photo(b"x", "image/jpeg", client=fake) == "cutout"
+
+
+def test_외부_호출이_실패해도_cutout으로_물러선다():
+    fake = _FakeVision(RuntimeError("네트워크 끊김"))
+    assert photo_router.judge_photo(b"x", "image/jpeg", client=fake) == "cutout"
+
+
+def test_판정은_공용_비전_클라이언트를_쓴다(monkeypatch):
+    fake = _FakeVision({"route": "keep"})
+    monkeypatch.setattr(photo_router.llm, "get_vision_client", lambda: fake)
+    assert photo_router.judge_photo(b"x", "image/jpeg") == "keep"
+
+
+# ── 누끼 청소 ──────────────────────────────────────────────
 
 
 def test_큰_덩어리만_남기고_작은_조각은_지운다():
-    from app_core.photo_router import keep_largest
-
     cut = _canvas([(8, 8, 40, 40), (50, 50, 60, 60)])  # 주인공 + 딸려온 조각
     cleaned = keep_largest(cut)
     assert _alpha_at(cleaned, 20, 20) == 255  # 주인공은 그대로
@@ -69,31 +96,4 @@ def test_큰_덩어리만_남기고_작은_조각은_지운다():
 
 
 def test_빈_마스크는_청소해도_그대로다():
-    from app_core.photo_router import keep_largest
-
-    cut = _canvas([])
-    assert _alpha_at(keep_largest(cut), 30, 30) == 0
-
-
-def _fake_openai(content):
-    rsp = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
-
-    class _Fake:
-        class chat:
-            class completions:
-                create = staticmethod(lambda **kwargs: rsp)
-
-    return lambda **kw: _Fake()
-
-
-def test_판정_JSON이_깨져도_cutout으로_물러선다(monkeypatch):
-    # 가짜 openai 모듈을 꽂는다 — 진짜 openai 가 없는 CI 에서도 이 시험은 돈다
-    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=_fake_openai("not json")))
-    assert photo_router.judge_photo(b"x", "image/jpeg") == "cutout"
-
-
-def test_판정_갈래가_엉뚱해도_cutout으로_물러선다(monkeypatch):
-    monkeypatch.setitem(
-        sys.modules, "openai", SimpleNamespace(OpenAI=_fake_openai('{"route": "unknown"}'))
-    )
-    assert photo_router.judge_photo(b"x", "image/jpeg") == "cutout"
+    assert _alpha_at(keep_largest(_canvas([])), 30, 30) == 0

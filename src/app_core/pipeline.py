@@ -16,7 +16,7 @@ from app_core import photo_store
 from app_core.background import remove_background
 from app_core.compose import compose_ad
 from app_core.gen_background import generate_background
-from app_core.photo_router import keep_largest, mask_stats, route_photo
+from app_core.photo_router import keep_largest, mask_area, route_photo
 from app_core.poster import generate_poster
 from app_core.poster_plan import plan_poster
 from app_core.prompt_builder import build_bg_prompt, build_hero_prompt
@@ -109,7 +109,7 @@ def generate_ad(
 
     if style == "poster":
         # 누끼가 빈손(전경 5% 미만)이면 없는 셈 친다 — 실오라기가 제품 자리에 앉는 것 방지
-        product = cut if cut is not None and mask_stats(cut).area >= 0.05 else None
+        product = cut if cut is not None and mask_area(cut) >= 0.05 else None
         return _poster_ad(brief, store, copy, product)
 
     if route == "keep" and photo is not None:

@@ -13,7 +13,7 @@ from PIL import Image
 
 from app_core import config
 from app_core.background import remove_background
-from app_core.photo_router import mask_stats, route_photo
+from app_core.photo_router import mask_area, route_photo
 
 ROOT = Path(__file__).resolve().parents[1]
 GOLD = ROOT / "data" / "golden_photos" / "선정"
@@ -48,7 +48,7 @@ def main() -> None:
         got = route_photo(path.read_bytes(), "image/jpeg", cut)
         mark = "✅" if got == label else "❌"
         ok += got == label
-        print(f"{name:<14} {mask_stats(cut).area:>5.2f}   {got:<9} {label:<9} {mark}")
+        print(f"{name:<14} {mask_area(cut):>5.2f}   {got:<9} {label:<9} {mark}")
 
     print(f"\n{ok}/15 맞음")
 
