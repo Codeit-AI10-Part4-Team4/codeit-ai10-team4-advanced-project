@@ -108,6 +108,7 @@ def judge_photo(data: bytes, mime: str) -> Route:
     url = f"data:{mime};base64,{base64.b64encode(data).decode()}"
     rsp = OpenAI().chat.completions.create(
         model="gpt-4o-mini",
+        temperature=0,
         response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": _JUDGE_SYSTEM},
