@@ -1,21 +1,10 @@
 """광고 조립 부품 ─ 배경 생성 + 제품 합성 + 문구 오버레이 (실험 근거: notebooks/pipeline_v0.ipynb)"""
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
-_FONT_CANDIDATES = [
-    "C:/Windows/Fonts/malgunbd.ttf",  # 윈도우
-    "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",  # 리눅스
-]
-
-
-def _load_font(size: int) -> ImageFont.FreeTypeFont:
-    """OS마다 다른 한글 폰트 경로를 순서대로 시도한다."""
-    for path in _FONT_CANDIDATES:
-        try:
-            return ImageFont.truetype(path, size)
-        except OSError:
-            continue
-    raise OSError("한글 폰트를 찾지 못했습니다. _FONT_CANDIDATES에 경로를 추가하세요.")
+# 글꼴 후보는 `fonts.py` 한 곳에서만 관리한다. 여기 따로 두면 새 OS 를 지원할 때
+# 한쪽만 고치게 되고, 그 한쪽은 반드시 잊힌다.
+from app_core import fonts
 
 
 def make_gradient_background(
@@ -32,17 +21,6 @@ def make_gradient_background(
         color = tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(3))
         d.line([(0, y), (w, y)], fill=color)
     return bg
-
-
-def _fit_font(text: str, max_width: int, start: int, floor: int = 30) -> ImageFont.FreeTypeFont:
-    """글자가 폭을 넘치면 폰트 크기를 줄여 한 줄에 들어가게 한다."""
-    size = start
-    while size > floor:
-        font = _load_font(size)
-        if font.getlength(text) <= max_width:
-            return font
-        size -= 4
-    return _load_font(floor)
 
 
 def compose_ad(
@@ -75,7 +53,7 @@ def compose_ad(
 
     d = ImageDraw.Draw(canvas)
     max_text_w = int(w * 0.9)
-    head_font = _fit_font(headline, max_text_w, 76)
+    head_font = fonts.fit(headline, max_text_w, 76, floor=30)
     d.text(
         (w // 2, head_y),
         headline,
@@ -86,7 +64,7 @@ def compose_ad(
         stroke_fill=(60, 35, 15),
     )
     if sub:
-        sub_font = _fit_font(sub, max_text_w, 52)
+        sub_font = fonts.fit(sub, max_text_w, 52, floor=30)
         d.text(
             (w // 2, head_y + 95),
             sub,

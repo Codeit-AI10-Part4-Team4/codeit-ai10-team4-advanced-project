@@ -1,8 +1,12 @@
 """글꼴 부품 — 역할(제목·본문·손글씨)로 글꼴을 찾아준다.
 
 리포에 동봉한 글꼴(assets/fonts)을 먼저 쓰고, 없으면 OS 기본 한글 글꼴로 물러선다.
-OS 글꼴에만 기대면 도커·CI(리눅스)에서 한글이 깨지기 때문이다.
+OS 글꼴에만 기대면 한글이 깨지는 환경이 생기기 때문이다.
 동봉 글꼴은 전부 OFL(상업 이용 가능)이며 라이선스 원문을 같은 폴더에 둔다.
+
+⚠️ **`assets/fonts` 는 아직 리포에 없다.** 지금은 전적으로 아래 OS 후보에 기대고
+있다 — 도커는 `fonts-nanum` 을 깔아서 살아 있다(Dockerfile). 동봉을 실제로 하기
+전까지는 새 OS 를 쓰는 사람이 생길 때마다 후보를 늘려야 한다.
 """
 
 from functools import lru_cache
@@ -23,6 +27,9 @@ _ROLES = {
 _OS_FALLBACK = [
     "C:/Windows/Fonts/malgunbd.ttf",
     "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+    # macOS. 이게 없으면 맥 쓰는 사람은 포스터를 아예 못 그린다(OSError).
+    "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+    "/Library/Fonts/AppleGothic.ttf",
 ]
 
 
