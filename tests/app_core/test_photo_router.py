@@ -1,0 +1,51 @@
+"""photo_router 테스트 — 마스크 분석은 합성 이미지로, 비전 판정은 가짜 응답으로."""
+
+from PIL import Image
+
+from app_core import photo_router
+from app_core.photo_router import MaskStats, mask_stats, route_by_mask, route_photo
+
+
+def _canvas(boxes: list[tuple[int, int, int, int]]) -> Image.Image:
+    """투명한 판(64×64)에 지정한 네모들만 불투명하게 채운 가짜 누끼 결과."""
+    im = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    for box in boxes:
+        im.paste((255, 255, 255, 255), box)
+    return im
+
+
+def test_빈_마스크는_면적이_0이다():
+    s = mask_stats(_canvas([]))
+    assert s.area == 0 and s.pieces == 0
+
+
+def test_네모_하나는_조각_하나다():
+    s = mask_stats(_canvas([(16, 16, 48, 48)]))
+    assert s.pieces == 1
+    assert 0.2 < s.area < 0.3
+    assert s.largest == 1.0
+
+
+def test_떨어진_네모_둘은_조각_둘이다():
+    s = mask_stats(_canvas([(0, 0, 20, 20), (40, 40, 60, 60)]))
+    assert s.pieces == 2
+
+
+def test_전경이_화면을_다_덮으면_generate():
+    assert route_by_mask(MaskStats(area=0.9, pieces=1, largest=1.0)) == "generate"
+
+
+def test_보통_사진은_마스크만으로_못_정한다():
+    assert route_by_mask(MaskStats(area=0.3, pieces=1, largest=1.0)) is None
+
+
+def test_비전이_정한_갈래를_따른다(monkeypatch):
+    monkeypatch.setattr(photo_router, "judge_photo", lambda data, mime: "keep")
+    cut = _canvas([(16, 16, 48, 48)])
+    assert route_photo(b"", "image/jpeg", cut) == "keep"
+
+
+def test_누끼가_빈손이면_cutout_대신_keep(monkeypatch):
+    monkeypatch.setattr(photo_router, "judge_photo", lambda data, mime: "cutout")
+    cut = _canvas([(0, 0, 8, 8)])  # 화면의 1.5% — 오릴 게 없다
+    assert route_photo(b"", "image/jpeg", cut) == "keep"
