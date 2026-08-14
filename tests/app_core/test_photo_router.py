@@ -49,3 +49,24 @@ def test_누끼가_빈손이면_cutout_대신_keep(monkeypatch):
     monkeypatch.setattr(photo_router, "judge_photo", lambda data, mime: "cutout")
     cut = _canvas([(0, 0, 8, 8)])  # 화면의 1.5% — 오릴 게 없다
     assert route_photo(b"", "image/jpeg", cut) == "keep"
+
+
+def _alpha_at(im: Image.Image, x: int, y: int) -> int:
+    """(x, y) 픽셀의 알파값 — getpixel의 모호한 타입을 피해 bytes로 읽는다."""
+    return im.getchannel("A").tobytes()[y * im.width + x]
+
+
+def test_큰_덩어리만_남기고_작은_조각은_지운다():
+    from app_core.photo_router import keep_largest
+
+    cut = _canvas([(8, 8, 40, 40), (50, 50, 60, 60)])  # 주인공 + 딸려온 조각
+    cleaned = keep_largest(cut)
+    assert _alpha_at(cleaned, 20, 20) == 255  # 주인공은 그대로
+    assert _alpha_at(cleaned, 55, 55) == 0  # 조각은 지워짐
+
+
+def test_빈_마스크는_청소해도_그대로다():
+    from app_core.photo_router import keep_largest
+
+    cut = _canvas([])
+    assert _alpha_at(keep_largest(cut), 30, 30) == 0

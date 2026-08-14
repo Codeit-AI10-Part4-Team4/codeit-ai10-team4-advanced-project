@@ -120,3 +120,48 @@ def route_photo(data: bytes, mime: str, cut: Image.Image) -> Route:
     if route == "cutout" and stats.area < _TOO_SMALL:
         return "keep"  # 오리라는데 누끼가 빈손이다 — 원본이라도 살리는 쪽이 안전하다
     return route
+
+
+def keep_largest(cut: Image.Image, grid: int = 256) -> Image.Image:
+    """누끼 결과에서 가장 큰 덩어리만 남긴다 — 딸려온 조각(책·대리석 등) 청소.
+
+    골든셋 실측에서 나온 처방: 꽃집_밝음(책 더미), 분식_밝음(대리석 조각).
+    조각 구분은 축소판(256)에서 빠르게 하고, 지우는 것만 원본 해상도에 적용한다
+    — 주인공의 가장자리 품질은 원본 알파가 그대로 지킨다.
+    """
+    from PIL import ImageChops
+
+    alpha = cut.getchannel("A")
+    raw = alpha.resize((grid, grid), Image.Resampling.NEAREST).tobytes()
+    on = [b > 127 for b in raw]
+
+    best: list[int] = []
+    seen = [False] * (grid * grid)
+    for start in range(grid * grid):
+        if not on[start] or seen[start]:
+            continue
+        comp, queue = [], [start]
+        seen[start] = True
+        while queue:
+            i = queue.pop()
+            comp.append(i)
+            x, y = i % grid, i // grid
+            for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if 0 <= nx < grid and 0 <= ny < grid:
+                    j = ny * grid + nx
+                    if on[j] and not seen[j]:
+                        seen[j] = True
+                        queue.append(j)
+        if len(comp) > len(best):
+            best = comp
+
+    if not best:
+        return cut
+
+    chosen = set(best)
+    keep = Image.frombytes(
+        "L", (grid, grid), bytes(255 if i in chosen else 0 for i in range(grid * grid))
+    )
+    out = cut.copy()
+    out.putalpha(ImageChops.multiply(alpha, keep.resize(cut.size, Image.Resampling.NEAREST)))
+    return out
