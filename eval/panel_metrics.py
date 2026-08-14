@@ -9,8 +9,9 @@ AI 패널이 실제 사람 평가를 얼마나 따라가는지 재는 데 쓴다
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from math import sqrt
+from typing import Final
 
 
 def _check(pred: Sequence[float], truth: Sequence[float]) -> None:
@@ -60,3 +61,29 @@ def mean_absolute_error(pred: Sequence[float], truth: Sequence[float]) -> float:
     """평균 절대 오차. 0~100 스케일에서 몇 점이나 빗나가는지."""
     _check(pred, truth)
     return sum(abs(x - y) for x, y in zip(pred, truth, strict=True)) / len(pred)
+
+
+# --- 걸림돌 라벨의 자기모순 (2026-08-14) ------------------------------------
+
+#: 코멘트가 가격을 **문제가 아니라고** 말할 때 쓰는 표현.
+#: 실측에서 12명이 하나같이 이렇게 말하면서 걸림돌은 `price` 를 골랐다.
+PRICE_PRAISE: Final = ("괜찮", "적당", "저렴", "매력적", "합리적", "나쁘지 않")
+
+
+def price_contradictions(pairs: Iterable[tuple[str, str]]) -> list[str]:
+    """가격을 칭찬하면서 걸림돌이 `price` 인 코멘트를 모은다.
+
+    `pairs` 는 `(코멘트, 걸림돌 라벨)`.
+
+    "걸림돌이 price 로 쏠린다"는 그 자체로는 결함이 아니다 — 정말 비싼 광고면
+    맞는 답이다. 결함인 것은 **가격이 괜찮다고 말하면서 가격을 걸림돌로 고르는
+    것**이고, 그건 광고가 아니라 프롬프트를 보고 답했다는 뜻이다.
+
+    느낌으로 "이상하다"를 판단하다가 여러 번 헛짚어서, 세는 것으로 바꾼다.
+    낱말 맞추기라 완벽하진 않다. **판정이 아니라 계기판으로 쓴다.**
+    """
+    return [
+        comment
+        for comment, label in pairs
+        if label == "price" and any(word in comment for word in PRICE_PRAISE)
+    ]

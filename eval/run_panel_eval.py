@@ -27,6 +27,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from panel_metrics import price_contradictions
+
 from app_core.config import load_env
 from app_core.panel.aggregate import AggregationError
 from app_core.panel.evaluator import MAX_EVAL_CALLS, evaluate
@@ -115,9 +117,18 @@ def report(result: EvaluationResult, counter: FailureCounter, elapsed: float) ->
         print(f"    · {s}")
     print()
     print("  손님 코멘트 (가중치순)")
+    bad = set(price_contradictions((c.comment, c.resistance) for c in result.persona_comments))
     for c in result.persona_comments:
         mark = "△" if c.is_boundary else " "
-        print(f"    {mark} {c.demo:<10} [{c.resistance:<9}] {c.comment}")
+        # 가격이 괜찮다고 말하면서 걸림돌이 price 인 줄을 눈에 띄게 표시한다.
+        flag = " ⚠" if c.comment in bad else ""
+        print(f"    {mark} {c.demo:<10} [{c.resistance:<9}] {c.comment}{flag}")
+
+    total = len(result.persona_comments)
+    print(f"\n  ⚠ 가격을 괜찮다면서 걸림돌은 price: {len(bad)}/{total}")
+    if bad:
+        print("    걸림돌이 price 로 쏠리는 것 자체는 결함이 아니다 — 정말 비싼")
+        print("    광고면 맞는 답이다. 위 숫자가 큰 것이 결함이다.")
 
     if counter.samples:
         print("\n  탈락 로그 (최대 5건)")

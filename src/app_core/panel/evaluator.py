@@ -224,6 +224,24 @@ _POOL_HIGH: Final = 1.15
 _POOL_LOW: Final = 0.85
 
 
+#: 가격 감각을 **사람 이야기**로 옮긴다.
+#:
+#: `narrator.PRICE_KO` 는 `"가격에 민감한"` + `"동네에 산다"` 로 이어져 주어가
+#: 동네가 됐다. 바로 앞 둘은 사람 이야기인데(`"점심에 주로 움직이고"`,
+#: `"늘 가던 곳을 다시 찾는 편"`) 가격만 주어가 바뀌었던 것이다.
+#:
+#: 나는 그 줄을 통째로 뺐었는데, 아인님이 사람 문장으로 바꿔 재보니 싼 광고에서
+#: 걸림돌 price 가 8/12 → 4/12 로 줄었다(2026-08-14). 빼는 것보다 고쳐 쓰는 쪽이
+#: 낫다 — 손님을 가르는 축 하나를 통째로 버릴 이유가 없다.
+#:
+#: `narrator.PRICE_KO` 는 아인님 파일이라 두고, 평가용 표현만 여기서 갖는다.
+_PRICE_SENS_KO: Final[dict[str, str]] = {
+    "low": "가격보다 다른 걸 먼저 보는 편이다.",
+    "mid": "가격은 적당하면 넘어가는 편이다.",
+    "high": "가격을 꼼꼼히 따지는 편이다.",
+}
+
+
 def standing(features: TradeAreaFeatures, persona: Persona) -> str:
     """이 손님이 동네에서 **핵심 고객인지 놓치는 층인지**.
 
@@ -368,7 +386,7 @@ def build_user_prompt(
     return (
         f"## 나\n{persona.demo}. {persona.narrative}\n"
         f"{TIME_KO.get(axes.time, axes.time)}에 주로 움직이고, "
-        f"{MOTIVE_KO[axes.motive]} 편이다.\n"
+        f"{MOTIVE_KO[axes.motive]} 편이고, {_PRICE_SENS_KO[axes.price_sens]}\n"
         f"{standing(features, persona)}\n\n"
         f"## 우리 동네 숫자 (evidence 는 여기서만 고른다)\n"
         f"{_feature_lines(features, persona, copy, show_price=brief.show_price)}\n\n"

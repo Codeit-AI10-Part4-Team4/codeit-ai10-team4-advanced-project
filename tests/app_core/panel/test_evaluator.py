@@ -1127,16 +1127,34 @@ def test_common_numbers_are_not_price_dominated(yeoksam: Panel, shop, copy) -> N
     assert len(price_ish) * 2 <= len(common), f"공통 {len(common)}개 중 가격 {price_ish}"
 
 
-def test_prompt_does_not_label_the_persona_by_price(yeoksam: Panel, shop, brief, copy) -> None:
-    """손님 소개에서 '가격에 민감한' 을 뺀다.
+def test_price_sense_is_a_person_not_a_neighbourhood(
+    yeoksam: Panel, shop, brief, copy
+) -> None:
+    """가격 감각은 손님의 성격이지 동네의 성격이 아니다.
 
-    아인님이 `price_sens` 를 12명에게 다르게 넘겨 실측했으나 답이 안 바뀌었다
-    (걸림돌 price 10/12 → 11/12). 값은 신호가 없는데 `high` 일 때의 표현이
-    모든 호출에서 '가격'을 부른다 — 값어치 없이 편향만 남는다.
+    옛 문장은 `narrator.PRICE_KO` 와 이어져 `"가격에 민감한 동네에 산다"` 가
+    됐다. 바로 앞 둘은 사람 이야기인데(`"점심에 주로 움직이고"`,
+    `"늘 가던 곳을 다시 찾는 편"`) 가격만 주어가 동네로 바뀌어 있었다.
+
+    나는 이 줄을 통째로 뺐었는데, 아인님이 사람 문장으로 바꿔 재보니 싼 광고에서
+    걸림돌 price 가 8/12 → 4/12 로 줄었다(2026-08-14). 손님을 가르는 축 하나를
+    통째로 버릴 이유가 없어 되살렸다.
     """
     text = build_user_prompt(yeoksam.personas[0], yeoksam.features, shop, brief, copy)
+
+    assert "동네에 산다" not in text
     assert "가격에 민감한" not in text
     assert "가격 저항이 낮은" not in text
+    assert evaluator._PRICE_SENS_KO[yeoksam.personas[0].axes.price_sens] in text
+
+
+def test_every_price_sense_has_a_person_phrase() -> None:
+    """축 값이 늘면 KeyError 로 죽는다 — 빠짐없이 갖고 있어야 한다."""
+    from app_core.panel.schemas import PriceSens
+
+    assert set(evaluator._PRICE_SENS_KO) == set(get_args(PriceSens))
+    for phrase in evaluator._PRICE_SENS_KO.values():
+        assert phrase.endswith("편이다.")
 
 
 def test_price_resistance_is_challenged_when_ad_has_no_price(
