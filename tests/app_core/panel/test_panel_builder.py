@@ -75,6 +75,48 @@ def test_비싼_아파트가_배후면_가격_저항이_한_단계_완화된다(
     assert price_sens(_features(avg_ticket_pct=0.1, apt_avg_price=1_500_000_000)) == "mid"
 
 
+def test_나이대_객단가가_가격_저항을_한_칸_옮긴다() -> None:
+    """상권 값 하나만 쓰면 12명이 같은 숫자와 견주게 되어 답이 하나로 모인다.
+
+    실측(2026-08-12): 손님 12명 중 10명이 걸림돌로 price 를 골랐고, 그중 5명은
+    코멘트가 글자 하나 안 틀리고 같았다.
+    """
+    f = _features(
+        avg_ticket_pct=0.5,  # 상권 기준은 mid
+        age_ticket={"10": 6000, "30": 8300, "60": 10500},
+        age_ticket_base=8300,
+    )
+    assert price_sens(f, "10") == "high"  # 0.72 — 또래보다 적게 쓴다
+    assert price_sens(f, "30") == "mid"  # 1.00
+    assert price_sens(f, "60") == "low"  # 1.27
+    assert price_sens(f) == "mid"  # 나이를 안 주면 상권 값 그대로
+
+
+def test_가격_저항은_양끝을_넘지_않는다() -> None:
+    f = _features(avg_ticket_pct=0.9, age_ticket={"60": 10500}, age_ticket_base=8300)
+    assert price_sens(f, "60") == "low"  # 이미 low 인데 더 올라가지 않는다
+
+
+def test_건수가_적은_나이대는_상권_값으로_돌아간다() -> None:
+    """역삼 치킨 10대는 결제 14건으로 92,005원이 나온다 — 그 업종 전체의 1.5배다.
+
+    `MIN_SALES_CNT` 미달이면 `age_ticket` 이 None 이고, 그러면 보정하지 않는다.
+    """
+    f = _features(avg_ticket_pct=0.5, age_ticket={"10": None, "30": 8300}, age_ticket_base=8300)
+    assert price_sens(f, "10") == "mid"
+
+
+def test_패널은_나이대별로_다른_가격_저항을_준다() -> None:
+    f = _features(
+        age_ticket={"10": 6000, "20": 7800, "30": 8300, "40": 8600, "50": 9000, "60": 10500},
+        age_ticket_base=8300,
+    )
+    levels = {p["axes"]["price_sens"] for p in build_panel(f)}
+    assert len(levels) >= 2, "12명이 가격에 대해 한 덩어리로 답한다"
+    # motive 는 아직 상권 단위다 — 나이대로 쪼갤 실측 근거가 없다
+    assert len({p["axes"]["motive"] for p in build_panel(f)}) == 1
+
+
 def test_출퇴근_상권은_반복_방문이_기본이다() -> None:
     assert motive(_features(work_ratio=WORK_RATIO_HIGH + 0.1)) == "habitual"
     assert motive(_features(work_ratio=WORK_RATIO_HIGH - 0.2)) == "exploratory"

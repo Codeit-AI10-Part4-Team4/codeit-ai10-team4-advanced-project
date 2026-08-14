@@ -182,6 +182,9 @@ def _sales_row(
         + ", ".join(f"sum(age_{a}_amount) age_{a}" for a in AGE_BANDS)
         + ", "
         + ", ".join(f"sum(time_{t}_amount) time_{t}" for t in TIME_BANDS)
+        + ", "
+        # 나이대별 건수. 금액과 나누면 그 나이대의 객단가가 나온다 (`_age_tickets`).
+        + ", ".join(f"sum(age_{a}_cnt) agec_{a}" for a in AGE_BANDS)
     )
     if codes:
         ph = ", ".join("?" * len(codes))
@@ -234,6 +237,42 @@ def _ticket_percentile(
     return round(sum(t < ticket for t in tickets) / len(tickets), 3)
 
 
+def _age_tickets(
+    amounts: dict[str, Any], cnts: dict[str, Any]
+) -> tuple[dict[str, int | None], int]:
+    """나이대별 객단가와 그 기준값.
+
+    **손님 12명이 가격을 서로 다르게 판단할 수 있는 유일한 실측 재료다.**
+    상권 객단가 하나만 쓰면 12명이 같은 숫자와 견주게 되어 답이 하나로 모인다.
+
+    실측(2026Q1) — 같은 업종인데 상권마다 **방향이 반대**다.
+
+        역삼역 커피-음료    10대  6,420원  →  60대+ 10,023원   (나이 들수록 오름)
+        홍대입구역 커피-음료 10대 12,626원  →  60대+  7,833원   (나이 들수록 내림)
+
+    건수가 적은 칸은 `None` 이다. 기준은 `MIN_SALES_CNT` 를 그대로 쓴다 —
+    상권 단위에서 쓰던 것과 같은 노이즈 문제이고 근거표도 같기 때문이다.
+    실제로 이 선 아래에서 값이 튄다: 역삼 치킨 10대는 **14건**으로 92,005원
+    (그 업종 전체 60,228원의 1.5배), 도봉산 한식 10대는 **83건**으로 72,209원(1.9배).
+
+    ⚠️ 객단가는 **결제 1건**의 평균이라 여러 개를 산 경우가 섞여 있다. 그래서 이 값은
+    "그 나이대가 이 동네에서 한 번에 쓰는 돈"이지 품목 가격이 아니다. 상권 단위
+    `avg_ticket` 과 같은 성질이라 새로 생긴 한계는 아니다.
+
+    Returns:
+        (나이대별 객단가, 기준 객단가). 기준은 **믿을 만한 칸만** 합쳐 나눈 값이라
+        미상 매출이 섞인 `avg_ticket` 과 다르다 — 나이대끼리 견주려면 이쪽이 맞다.
+    """
+    out: dict[str, int | None] = {}
+    for a in AGE_BANDS:
+        amt, cnt = amounts.get(a) or 0, cnts.get(a) or 0
+        out[a] = int(amt // cnt) if cnt >= MIN_SALES_CNT and amt > 0 else None
+    ok = [a for a in AGE_BANDS if out[a] is not None]
+    amt_sum = sum(amounts[a] or 0 for a in ok)
+    cnt_sum = sum(cnts[a] or 0 for a in ok)
+    return out, int(amt_sum // cnt_sum) if cnt_sum else 0
+
+
 def build_features(
     address: str,
     industry: str,
@@ -261,9 +300,12 @@ def build_features(
         row, fallback = _sales_row(con, area["area_cd"], codes)
 
         amount, cnt, weekend, male, female = row[0], row[1], row[2], row[3], row[4]
-        ages = dict(zip(AGE_BANDS, row[5 : 5 + len(AGE_BANDS)], strict=True))
-        times = dict(zip(TIME_BANDS, row[5 + len(AGE_BANDS) :], strict=True))
+        na, nt = len(AGE_BANDS), len(TIME_BANDS)
+        ages = dict(zip(AGE_BANDS, row[5 : 5 + na], strict=True))
+        times = dict(zip(TIME_BANDS, row[5 + na : 5 + na + nt], strict=True))
+        age_cnts = dict(zip(AGE_BANDS, row[5 + na + nt :], strict=True))
         ticket = int(amount // cnt) if cnt else 0
+        age_ticket, age_ticket_base = _age_tickets(ages, age_cnts)
 
         foot = con.execute(
             "SELECT "
@@ -337,6 +379,12 @@ def build_features(
             "weekend_ratio": round(weekend / amount, 3) if amount else 0.0,
             "avg_ticket": ticket,
             "avg_ticket_pct": _ticket_percentile(con, () if fallback else codes, ticket),
+            # 나이대별 객단가 — 손님 12명이 가격을 다르게 판단하는 근거 (`_age_tickets`).
+            # ⚠️ `TradeAreaFeatures`(수호님 소유)가 extra="ignore" 라 이 두 키는 평가
+            # 프롬프트까지 못 간다. 지금은 `panel_builder.price_sens` 가 여기서 읽어
+            # **페르소나별 축 값**으로 바꿔 넘긴다 — 그 축은 이미 스키마에 있다.
+            "age_ticket": age_ticket,
+            "age_ticket_base": age_ticket_base,
             "competitor_cnt": int(store_cnt),
             "open_cnt": int(open_cnt),
             "close_cnt": int(close_cnt),

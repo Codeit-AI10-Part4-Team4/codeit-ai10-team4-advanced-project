@@ -198,6 +198,55 @@ def test_가격_0도_채운_것으로_친다() -> None:
     assert AdBriefDraft(product="크로플", price=0).missing() == []
 
 
+def test_이미지_광고는_가격_없이도_만들_수_있다() -> None:
+    """사진으로 분위기만 내는 광고가 많다 (팀 합의 2026-08-13).
+
+    이게 없으면 사장님이 가격을 말할 때까지 "광고 이미지 만들기" 버튼이
+    안 열린다.
+    """
+    assert AdBriefDraft(goal="image", product="크로플").missing() == []
+
+
+def test_이미지_광고도_가격을_한_번은_묻는다() -> None:
+    """**필수에서 빼기만 하면 선택 항목이 아니라 없는 항목이 된다.**
+
+    가격을 넣고 싶은 사장님이 그 생각을 스스로 해내야 하기 때문이다.
+    한 번은 묻되 안 답해도 넘어간다 — 상황·톤과 같은 대접이다.
+    """
+    d = AdBriefDraft(goal="image", product="크로플")
+    assert "price" in d.remaining_slots()
+    assert "price" not in d.missing()  # 물어보되 막지는 않는다
+
+
+def test_한_번_물어본_가격은_다시_묻지_않는다() -> None:
+    d = AdBriefDraft(goal="image", product="크로플").mark_asked("price")
+    assert "price" not in d.remaining_slots()
+
+
+def test_가격_없음이라고_답하면_다시_묻지_않는다() -> None:
+    """0 은 빈 값이 아니라 '없음'이라는 답이다 — falsy 로 보면 또 묻게 된다."""
+    d = AdBriefDraft(goal="image", product="크로플", price=0)
+    assert "price" not in d.remaining_slots()
+
+
+def test_문구_광고는_가격을_그대로_묻는다() -> None:
+    """문구에는 가격이 글자로 들어가므로 빼면 안 된다."""
+    d = AdBriefDraft(goal="copy", product="크로플")
+    assert d.missing() == ["price"]
+
+
+def test_안_물어본_가격은_가격_없음이_된다() -> None:
+    """`to_brief()` 가 None 을 그대로 넘기면 ValidationError 로 터진다.
+
+    주문서 단계에서 '안 물어봄'과 '가격 없음'은 결과가 같다 — 광고에 가격을
+    안 넣는다.
+    """
+    b = AdBriefDraft(goal="image", product="크로플").to_brief()
+    assert b.price == 0
+    assert b.show_price is False
+    assert b.items == []
+
+
 def test_이번_턴에_안_나온_슬롯은_이전_값을_유지한다() -> None:
     draft = AdBriefDraft(product="크로플").merge(AdBriefDraft(price=4500))
     assert draft.product == "크로플" and draft.price == 4500
@@ -219,8 +268,9 @@ def test_다_차면_주문서로_승격한다() -> None:
 
 
 def test_안_찼는데_승격하려면_거부한다() -> None:
+    """상품명은 목표와 무관하게 필수다 — 뭘 파는지 없이는 광고를 못 만든다."""
     with pytest.raises(ValueError, match="아직 안 찬"):
-        AdBriefDraft(goal="image", product="크로플").to_brief()
+        AdBriefDraft(goal="image").to_brief()
 
 
 # ── 원문 보관 ────────────────────────────────────────────────
