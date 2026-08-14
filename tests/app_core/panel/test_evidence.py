@@ -216,3 +216,46 @@ def test_population_fields_are_citable_and_exact(
 
 def test_work_ratio_is_citable(features: TradeAreaFeatures) -> None:
     assert check_ref(features, FeatureRef(path="work_ratio", value=0.936)) is None
+
+
+# --- 나이대별 객단가 (2026-08-14, A쪽 신규 필드) ----------------------------
+
+
+def test_age_ticket_survives_the_contract(yeoksam: Panel) -> None:
+    """A가 계산한 나이대별 객단가가 스키마 경계에서 버려지지 않아야 한다.
+
+    `panel_builder._age_ticket_ratio` 가 이 값으로 `price_sens` 를 가른다.
+    스키마에 없으면 `Panel.model_validate` 가 조용히 떨어뜨려, B는 손님이
+    "우리 또래는 8천원쯤 쓴다"고 말해도 대조할 실제값을 갖지 못한다.
+    """
+    f = yeoksam.features
+    assert f.age_ticket, "age_ticket 이 비었다 — 계약 경계에서 사라졌다"
+    assert f.age_ticket_base > 0
+
+
+def test_age_ticket_requires_exact_match(yeoksam: Panel) -> None:
+    """객단가는 원 단위 정수라 비중과 달리 5% 오차를 봐주지 않는다."""
+    f = yeoksam.features
+    age, actual = next((k, v) for k, v in f.age_ticket.items() if v is not None)
+
+    assert check_ref(f, FeatureRef(path=f"age_ticket.{age}", value=actual)) is None
+    near = check_ref(f, FeatureRef(path=f"age_ticket.{age}", value=actual + 1))
+    assert near is not None and near.reason == "value_mismatch"
+
+
+def test_unreliable_age_ticket_cell_is_not_citable(yeoksam: Panel) -> None:
+    """건수가 적어 A가 None 으로 둔 칸은 근거가 될 수 없다.
+
+    값이 없는 것을 인용했다는 뜻이라, 통과시키면 대조 게이트가 뚫린다.
+    """
+    f = yeoksam.features.model_copy(deep=True)
+    age = next(iter(f.age_ticket))
+    f.age_ticket[age] = None
+    fail = check_ref(f, FeatureRef(path=f"age_ticket.{age}", value=8000))
+    assert fail is not None and fail.reason == "unknown_path"
+
+
+def test_age_ticket_base_is_citable(yeoksam: Panel) -> None:
+    """기준 객단가는 스칼라라 기존 경로로 풀린다."""
+    f = yeoksam.features
+    assert check_ref(f, FeatureRef(path="age_ticket_base", value=f.age_ticket_base)) is None

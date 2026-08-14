@@ -340,7 +340,16 @@ def test_resistance_threshold_matches_the_prompt_anchor(yeoksam: Panel) -> None:
 
     assert RESISTANCE_INTENT_MAX == 60
     assert "61~80" in SYSTEM
-    assert "61 이상으로 줬다면 `none`" in SYSTEM
+
+    # 2026-08-14: 프롬프트 쪽 문턱은 걷어냈다. 척도표가 41~60 을 "괜찮네 정도"로
+    # 정의하는데 걸림돌 규칙이 61 을 요구해서, 광고 대부분에서 `none` 이 도달
+    # 불가능했다 (아인님 실측: 금액 없는 광고에도 12/12 가 price).
+    #
+    # 문턱은 이제 **집계에만** 있다. 모델에게 "가겠다면 흠을 대지 마라"고
+    # 시키는 대신, 코드가 "가겠다는 손님의 흠은 안 센다"를 집행한다.
+    # 모델의 자기검열에 기대지 않으므로 이쪽이 더 튼튼하다.
+    assert "61 이상으로 줬다면" not in SYSTEM
+    assert "점수가 몇 점이든 상관없다" in SYSTEM
 
     at_edge = [_eval(p, intent=60, resistance="price") for p in yeoksam.personas]
     assert aggregate(yeoksam, at_edge, ad_id=AD_ID).top_resistance == ["price"]

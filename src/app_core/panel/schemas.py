@@ -42,7 +42,20 @@ Motive = Literal["habitual", "exploratory"]
 #: 섞으면 "주말 저녁 손님"을 표현할 수 없고, 주말 비중은 `weekend_ratio` 로 이미
 #: 따로 있다. `build_panel` 도 이 값을 내지 않았다.
 TimeContext = Literal["morning", "weekday_lunch", "afternoon", "evening", "night"]
-Resistance = Literal["price", "message", "visual", "relevance", "none"]
+#: 손님이 발길을 돌리는 이유.
+#:
+#: `alternative` 는 2026-08-14 실측으로 추가했다. 3,000원 아메리카노 광고
+#: (동네 결제 평균 9,546원)에 12명 전원이 `price` 를 골랐는데, 코멘트는
+#: 하나같이 가격이 **괜찮다**고 말하면서 진짜 이유를 따로 적고 있었다 —
+#: "다른 카페와 비교"(5명) · "자주 가던 곳이 있어서"(4명). 담을 라벨이
+#: 없어서 숫자가 붙은 `price` 로 몰린 것이다.
+#:
+#: 무엇보다 이건 우리가 만든 상황이다. 프롬프트가 12명 전원에게
+#: "늘 가던 곳을 다시 찾는 편"이라고 말해 놓고(`motive=habitual`),
+#: 무엇이 걸리냐 물으면서 "가던 데가 있어서"라는 답을 주지 않았다.
+Resistance = Literal[
+    "price", "message", "visual", "relevance", "alternative", "none"
+]
 Confidence = Literal["ok", "low"]
 
 #: 비중 합이 1.0에서 벗어나도 되는 허용치. 반올림 오차만 흡수한다.
@@ -138,6 +151,13 @@ class TradeAreaFeatures(BaseModel):
     avg_ticket: int = Field(ge=0)
     #: 서울 동일 업종 내 분위(0~1). 높을수록 그 동네 손님의 가격 저항이 낮다.
     avg_ticket_pct: float = Field(ge=0.0, le=1.0)
+    #: 나이대별 객단가(원). 서울시 원본의 `연령대_N_매출_금액 ÷ 건수` 다.
+    #: 건수가 적어 믿을 수 없는 칸은 None (A쪽 `_age_tickets`, `MIN_SALES_CNT`).
+    #: A가 `price_sens` 를 나이대별로 가르는 근거인데, 스키마에 없어서
+    #: `Panel.model_validate` 경계에서 조용히 버려지고 있었다 (2026-08-14 확인).
+    age_ticket: dict[str, int | None] = Field(default_factory=dict)
+    #: `age_ticket` 의 기준값 — 나이 미상을 뺀 객단가. 0 이면 비율을 못 낸다.
+    age_ticket_base: int = Field(default=0, ge=0)
     competitor_cnt: int = Field(ge=0)
     #: 같은 분기 개업·폐업 점포 수. 점포 수만으로는 "경쟁이 많다"까지만 알 수 있는데,
     #: 사장님에게 필요한 건 그게 늘어나는 중인지 빠지는 중인지다.
