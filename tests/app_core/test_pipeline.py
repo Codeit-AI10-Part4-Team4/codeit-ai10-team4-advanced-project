@@ -2,7 +2,7 @@
 
 from PIL import Image, ImageFont
 
-from app_core import compose, fonts, pipeline
+from app_core import fonts, pipeline
 from app_core.poster_plan import PosterPlan
 from app_core.schema import AdBrief, CopyCandidate, Store
 
@@ -56,7 +56,6 @@ def test_simple_style_uses_generated_background(monkeypatch):
     monkeypatch.setattr(
         pipeline, "generate_background", lambda prompt: Image.new("RGB", (1080, 1080), (10, 20, 30))
     )
-    monkeypatch.setattr(compose, "_load_font", lambda size: ImageFont.load_default(size))
     ad = pipeline.generate_ad(_brief(), _store(), CopyCandidate(headline="크로플"), "simple")
     assert ad.size == (1080, 1080)
 

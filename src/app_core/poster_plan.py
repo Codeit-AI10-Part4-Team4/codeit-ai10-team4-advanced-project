@@ -7,10 +7,9 @@
 자유롭게 두면 조합이 촌스러워지고, 업종마다 다시 손봐야 한다.
 """
 
-import json
-
 from pydantic import BaseModel, Field, field_validator
 
+from app_core.llm import ChatClient, get_client
 from app_core.palettes import PALETTES
 
 
@@ -66,11 +65,15 @@ def plan_poster(
     tone: str = "",
     extra: str = "",
     transcript: str = "",
+    client: ChatClient | None = None,
 ) -> PosterPlan:
     """주문 정보로 포스터 기획안을 만든다.
 
     transcript(사장님이 한 말 원문)를 함께 넘긴다 — 날짜·이벤트처럼
     지어내면 안 되는 정보가 거기에만 들어 있는 경우가 많다.
+
+    `client` 는 테스트에서 가짜를 끼우는 통로다 (AGENTS.md — 외부 API 호출 테스트는
+    mock 을 쓴다). 안 주면 `MODEL_PROFILE` 이 고른 백엔드를 쓴다.
     """
     order = (
         f"상호: {shop} / 업종: {industry} / 홍보 대상: {product} / "
@@ -78,11 +81,9 @@ def plan_poster(
         f"사장님이 한 말 원문:\n{transcript or '(없음)'}"
     )
 
-    from openai import OpenAI  # CI에는 llm extra가 없어 지연 import
-
-    res = OpenAI().chat.completions.create(
-        model="gpt-4o-mini",
-        response_format={"type": "json_object"},
-        messages=[{"role": "system", "content": _SYSTEM}, {"role": "user", "content": order}],
-    )
-    return PosterPlan(**json.loads(res.choices[0].message.content or "{}"))
+    raw = (client or get_client()).complete_json(_SYSTEM, order)
+    if not raw:
+        # stub 프로필이거나 빈 응답. 그냥 넘기면 pydantic 이 "필드 5개 없음"으로
+        # 터져서 화면에서는 원인을 알 수 없다.
+        raise ValueError("포스터 기획을 받지 못했습니다 (MODEL_PROFILE 을 확인하세요)")
+    return PosterPlan(**raw)
