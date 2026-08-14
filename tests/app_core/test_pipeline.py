@@ -89,7 +89,7 @@ def _photo(tmp_path):
 
 
 def test_keep_갈래는_원본을_배경으로_쓰고_생성하지_않는다(tmp_path, monkeypatch):
-    monkeypatch.setattr(compose, "_load_font", lambda size: ImageFont.load_default(size))
+    seen = {}
     monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: _photo(tmp_path))
     monkeypatch.setattr(
         pipeline, "remove_background", lambda im: Image.new("RGBA", (64, 64), (0, 0, 0, 255))
@@ -100,17 +100,28 @@ def test_keep_갈래는_원본을_배경으로_쓰고_생성하지_않는다(tmp
         raise AssertionError("keep 갈래는 확산 모델을 부르면 안 된다")
 
     monkeypatch.setattr(pipeline, "generate_background", _boom)
+
+    def _spy(product, headline, sub="", background=None, **kwargs):
+        seen["product"] = product
+        seen["background"] = background
+        return Image.new("RGB", (1080, 1080))
+
+    monkeypatch.setattr(pipeline, "compose_ad", _spy)
     brief = AdBrief(goal="image", product="크로플", price=0, photo_id=7)
-    ad = pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
-    assert ad.size == (1080, 1080)
+    pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
+    assert seen["product"] is None
+    assert seen["background"] is not None
+    assert seen["background"].size == (64, 64)  # 원본 사진 크기 그대로
 
 
-def test_cutout_갈래는_누끼가_결과에_들어간다(tmp_path, monkeypatch):
+def test_cutout_갈래는_청소된_누끼가_그대로_전달된다(tmp_path, monkeypatch):
     seen = {}
+    cleaned = Image.new("RGBA", (10, 10))  # keep_largest 가 돌려준 표식
     monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: _photo(tmp_path))
     monkeypatch.setattr(
         pipeline, "remove_background", lambda im: Image.new("RGBA", (64, 64), (255, 255, 255, 255))
     )
+    monkeypatch.setattr(pipeline, "keep_largest", lambda cut: cleaned)
     monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, cut: "cutout")
     monkeypatch.setattr(pipeline, "build_bg_prompt", lambda *a, **k: "bg")
     monkeypatch.setattr(
@@ -124,7 +135,7 @@ def test_cutout_갈래는_누끼가_결과에_들어간다(tmp_path, monkeypatch
     monkeypatch.setattr(pipeline, "compose_ad", _spy)
     brief = AdBrief(goal="image", product="크로플", price=0, photo_id=7)
     pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
-    assert seen["product"] is not None
+    assert seen["product"] is cleaned
 
 
 def test_generate_갈래는_제품이_든_장면을_그린다(tmp_path, monkeypatch):

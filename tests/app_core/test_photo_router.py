@@ -1,8 +1,8 @@
 """photo_router 테스트 — 마스크 분석은 합성 이미지로, 비전 판정은 가짜 응답으로."""
 
+import sys
 from types import SimpleNamespace
 
-import pytest
 from PIL import Image
 
 from app_core import photo_router
@@ -87,12 +87,13 @@ def _fake_openai(content):
 
 
 def test_판정_JSON이_깨져도_cutout으로_물러선다(monkeypatch):
-    pytest.importorskip("openai")
-    monkeypatch.setattr("openai.OpenAI", _fake_openai("not json"))
+    # 가짜 openai 모듈을 꽂는다 — 진짜 openai 가 없는 CI 에서도 이 시험은 돈다
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=_fake_openai("not json")))
     assert photo_router.judge_photo(b"x", "image/jpeg") == "cutout"
 
 
 def test_판정_갈래가_엉뚱해도_cutout으로_물러선다(monkeypatch):
-    pytest.importorskip("openai")
-    monkeypatch.setattr("openai.OpenAI", _fake_openai('{"route": "unknown"}'))
+    monkeypatch.setitem(
+        sys.modules, "openai", SimpleNamespace(OpenAI=_fake_openai('{"route": "unknown"}'))
+    )
     assert photo_router.judge_photo(b"x", "image/jpeg") == "cutout"
