@@ -12,7 +12,7 @@ from typing import Literal
 
 from PIL import Image
 
-from app_core import photo_store
+from app_core import photo_store, ref_style, sketch_gen
 from app_core.background import remove_background
 from app_core.compose import compose_ad
 from app_core.gen_background import generate_background
@@ -29,9 +29,42 @@ def _info_line(store: Store) -> str:
     return "  ·  ".join(part for part in (store.address, store.phone) if part)
 
 
+def _with_reference(brief: AdBrief, prompt: str) -> str:
+    """레퍼런스가 있으면 그 분위기를 프롬프트 뒤에 얹는다 (이미지 2번).
+
+    이미지를 확산 모델에 직접 넣는 길(IP-Adapter·img2img)은 둘 다 막혀서
+    말로 바꿔 넣는다 — 자세한 근거는 ref_style 참고.
+    """
+    if brief.ref_id is None:
+        return prompt
+    loaded = photo_store.load(brief.ref_id)
+    if loaded is None:
+        return prompt  # 보관함에서 사라졌어도 광고는 만든다
+    return ref_style.apply_to(prompt, ref_style.describe_style(*loaded))
+
+
+def _background(brief: AdBrief, prompt: str) -> Image.Image:
+    """배경 한 장. 스케치가 있으면 그 구도를 따라 그린다 (이미지 4번)."""
+    if brief.sketch_id is None:
+        return generate_background(prompt)
+    path = photo_store.path_of(brief.sketch_id)
+    if path is None:
+        return generate_background(prompt)
+    with Image.open(path) as sketch:
+        return sketch_gen.generate_from_sketch(sketch.copy(), prompt)
+
+
 def _simple_ad(brief: AdBrief, store: Store, copy: CopyCandidate, product: Image.Image | None):
-    prompt = build_bg_prompt(store.industry_label, brief.situation, brief.tone)
-    bg = generate_background(prompt)
+    # 스케치가 있으면 **주인공 프롬프트**를 쓴다. 배경 프롬프트는 "빈 탁자, 흐린
+    # 뒤쪽"을 지시하는데, 스케치는 "여기에 이걸 그려라"라서 정면으로 부딪힌다.
+    # 실제로 배경 프롬프트로 돌렸더니 그린 접시가 흐릿한 덩어리로 나왔다.
+    if brief.sketch_id is not None:
+        prompt = build_hero_prompt(store.industry_label, brief.product, brief.tone)
+    else:
+        prompt = build_bg_prompt(store.industry_label, brief.situation, brief.tone)
+
+    prompt = _with_reference(brief, prompt)
+    bg = _background(brief, prompt)
     return compose_ad(product, copy.headline, copy.sub, background=bg)
 
 
@@ -43,7 +76,9 @@ def _poster_ad(brief: AdBrief, store: Store, copy: CopyCandidate, product: Image
     if product is None:
         # 사진이 없으면 주인공 이미지를 생성해 그 자리를 채운다 (사진 카드처럼 얹힌다)
         hero_prompt = build_hero_prompt(store.industry_label, brief.product, brief.tone)
-        product = generate_background(hero_prompt).convert("RGBA")
+        # 레퍼런스는 여기에도 얹는다 — 배경만 분위기를 따르고 주인공은 안 따르면
+        # 한 장 안에서 두 느낌이 부딪힌다.
+        product = generate_background(_with_reference(brief, hero_prompt)).convert("RGBA")
 
     plan = plan_poster(
         shop=store.name,
