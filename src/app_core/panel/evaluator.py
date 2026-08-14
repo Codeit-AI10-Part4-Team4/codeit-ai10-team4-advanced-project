@@ -614,7 +614,9 @@ _METRIC_NOTE: Final[dict[str, str]] = {
 _GENERIC_NOTE: Final = "손님 반응이 갈렸습니다 — 문구를 바꿔 다시 만들어 보세요"
 
 
-def _classify_resistance(client: ChatClient, evals: list[PersonaEval]) -> list[str] | None:
+def _classify_resistance(
+    client: ChatClient, evals: list[PersonaEval], *, show_price: bool = True
+) -> list[str] | None:
     """코멘트만 보고 걸림돌 라벨을 다시 매긴다.
 
     손님 콜은 자기 라벨을 못 고른다. 실측 5회(2026-08-14)에서 원인이
@@ -641,7 +643,15 @@ def _classify_resistance(client: ChatClient, evals: list[PersonaEval]) -> list[s
     listed = "\n".join(
         f"{i + 1}. {' '.join(e.comment.split())}" for i, e in enumerate(evals)
     )
-    raw = client.complete_json(RESISTANCE_SYSTEM, listed)
+    system = RESISTANCE_SYSTEM
+    if not show_price:
+        # 코드가 아는 사실은 양쪽 콜에 다 걸어야 한다. 손님 콜만 막아 두었더니
+        # 분류가 "가격이 궁금해서"를 price 로 읽어 그대로 샜다 (2026-08-14 회귀).
+        system += (
+            "\n\n이 광고에는 **가격이 적혀 있지 않다.** 그러니 `price` 는 고를 수 "
+            "없다. 손님이 가격을 궁금해했다면 그건 정보가 없다는 뜻이라 `message` 다."
+        )
+    raw = client.complete_json(system, listed)
 
     labels = raw.get("labels")
     if not labels:
@@ -659,6 +669,11 @@ def _classify_resistance(client: ChatClient, evals: list[PersonaEval]) -> list[s
     relabeled = 0
     for i, ev in enumerate(evals):
         lab = labels.get(str(i + 1))
+        if lab == "price" and not show_price:
+            # 적히지도 않은 가격은 걸림돌이 될 수 없다. 손님 콜은 이미 되물어
+            # 고쳤으므로(`_evaluate_one`) 그 답으로 돌아간다.
+            logger.debug("분류가 가격 없는 광고에 price — 손님 답으로 되돌린다")
+            lab = None
         if isinstance(lab, str) and lab in allowed:
             out.append(lab)
             relabeled += 1
@@ -781,7 +796,8 @@ def evaluate(
     # 걸림돌은 손님 콜이 아니라 코멘트에서 정한다 (`_classify_resistance`).
     if evals:
         try:
-            if (labels := _classify_resistance(chat, evals)) is not None:
+            labels = _classify_resistance(chat, evals, show_price=brief.show_price)
+            if labels is not None:
                 evals = [
                     e.model_copy(update={"resistance": lab})
                     for e, lab in zip(evals, labels, strict=True)

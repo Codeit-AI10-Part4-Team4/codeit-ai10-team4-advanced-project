@@ -1381,3 +1381,48 @@ def test_classifier_input_has_no_line_breaks(yeoksam: Panel, shop, brief, copy) 
 
     assert seen
     assert len(seen[0].splitlines()) == len(yeoksam.personas)
+
+
+def test_classifier_cannot_pick_price_without_a_price(yeoksam: Panel, shop, copy) -> None:
+    """분류에도 같은 규칙을 건다 — 적히지도 않은 가격은 걸림돌이 못 된다.
+
+    2026-08-14 회귀: 손님 콜만 막아 두었더니 분류가 "가격이 궁금해서"를
+    price 로 읽어 그대로 샜다. 코드가 아는 사실은 양쪽 콜에 다 걸어야 한다.
+    """
+    brief = AdBrief(goal="copy", product="크로플", price=0)
+    n = len(yeoksam.personas)
+
+    class SaysPrice(FakeClient):
+        def complete_json(self, system: str, user: str) -> dict[str, Any]:
+            if system.startswith("손님이 남긴 한 줄을"):
+                assert "가격이 적혀 있지 않다" in system, "분류 콜에 규칙이 안 갔다"
+                return {"labels": {str(i + 1): "price" for i in range(n)}}
+            return super().complete_json(system, user)
+
+    result = evaluate(
+        yeoksam,
+        shop,
+        brief,
+        copy,
+        client=SaysPrice(_reply_by_demo(yeoksam, resistance="message")),
+        consistency_k=1,
+    )
+    assert "price" not in {c.resistance for c in result.persona_comments}
+    assert "price" not in result.top_resistance
+
+
+def test_classifier_rule_is_not_added_when_price_exists(
+    yeoksam: Panel, shop, brief, copy
+) -> None:
+    """가격이 있는 광고에는 그 규칙을 붙이지 않는다 — 붙이면 price 를 못 고른다."""
+    seen: list[str] = []
+
+    class Spy(FakeClient):
+        def complete_json(self, system: str, user: str) -> dict[str, Any]:
+            if system.startswith("손님이 남긴 한 줄을"):
+                seen.append(system)
+            return super().complete_json(system, user)
+
+    evaluate(yeoksam, shop, brief, copy, client=Spy(_reply_by_demo(yeoksam)), consistency_k=1)
+
+    assert seen and "가격이 적혀 있지 않다" not in seen[0]
