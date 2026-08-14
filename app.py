@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import streamlit as st
 from pydantic import ValidationError
@@ -30,6 +30,9 @@ from app_core.panel.features import NoTradeAreaError
 from app_core.panel.review import CLEAR_MARGIN, Ranked, rank
 from app_core.schema import AdBrief, AdBriefDraft, CopyCandidate, Feedback, Store, StoreInput
 
+if TYPE_CHECKING:
+    from app_core.pipeline import Style
+
 # DB·API 키 설정을 읽는다. app_core 를 쓰기 전에 해야 한다.
 config.load_env()
 
@@ -38,6 +41,7 @@ st.set_page_config(page_title="동네 광고 만들기", page_icon="🏪", layou
 GOALS = {"image": "🖼️ 광고 이미지 만들기", "copy": "✍️ 광고 문구 만들기"}
 PLACEHOLDER = "예: 크로플 신메뉴 나왔어요, 인스타에 올릴 사진 만들어줘"
 PHOTO_TYPES = ["png", "jpg", "jpeg", "webp"]
+STYLES: tuple[tuple[Style, str], ...] = (("simple", "감성 피드형"), ("poster", "정보 포스터형"))
 
 
 class PhotoSlot(NamedTuple):
@@ -74,6 +78,7 @@ def _reset_chat() -> None:
     st.session_state.pop("ad_id", None)
     st.session_state.pop("ranked", None)
     st.session_state.pop("picked", None)
+    st.session_state.pop("images", None)
     for slot in PHOTO_SLOTS:
         _clear_uploader(slot.field)
 
@@ -406,6 +411,49 @@ def copy_view(store: Store, draft: AdBriefDraft) -> None:
         revise_view(store)
 
 
+# ── 광고 이미지 ────────────────────────────────────────────
+
+
+def _make_images(store: Store, brief: AdBrief) -> bool:
+    """이미지 두 형태를 만들어 화면 상태에 담는다. 문구가 없으면 먼저 만든다."""
+    # 확산 모델 의존이라 지연 import ─ 문구만 쓰는 환경에서도 앱이 뜨게 한다
+    from app_core import pipeline
+
+    copies = st.session_state.get("copies") or []
+    if not copies:
+        with st.spinner("문구 만드는 중..."):
+            copies = copy_gen.generate(brief, store, ads.recent(store.id))
+        if not copies:
+            st.error("문구를 만들지 못했습니다. 다시 눌러주세요.")
+            return False
+        st.session_state.copies = copies
+
+    images = {}
+    for style, label in STYLES:
+        with st.spinner(f"{label} 만드는 중... (20~30초)"):
+            images[style] = pipeline.generate_ad(brief, store, copies[0], style=style)
+
+    st.session_state.images = images
+    st.session_state.brief = brief
+    return True
+
+
+def image_view(store: Store, draft: AdBriefDraft) -> None:
+    """광고 이미지 ─ 감성 피드형과 정보 포스터형을 나란히 만든다."""
+    if draft.next_slot():
+        st.caption("더 안 알려주셔도 지금 바로 만들 수 있습니다")
+    if st.button("광고 이미지 만들기", type="primary"):
+        _make_images(store, draft.to_brief())
+
+    images = st.session_state.get("images") or {}
+    if not images:
+        return
+    for col, (style, label) in zip(st.columns(2), STYLES, strict=True):
+        with col, st.container(border=True):
+            st.markdown(f"**{label}**")
+            st.image(images[style], use_container_width=True)
+
+
 def chat_view(store: Store) -> None:
     st.title(f"{store.name} 사장님, 어떤 광고를 만들까요?")
 
@@ -453,7 +501,10 @@ def chat_view(store: Store) -> None:
     # 위쪽 좁은 칸에는 개발 확인용 주문서만 남긴다.
     if not draft.missing():
         st.divider()
-        copy_view(store, draft)
+        if draft.goal == "image":
+            image_view(store, draft)
+        else:
+            copy_view(store, draft)
 
 
 # ── 라우팅 ────────────────────────────────────────────────
