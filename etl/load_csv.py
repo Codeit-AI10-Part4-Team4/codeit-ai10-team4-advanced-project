@@ -108,6 +108,12 @@ def build_sales(df: pd.DataFrame) -> pd.DataFrame:
     )
     for a in AGES:
         out[f"age_{a.split('_')[0]}_amount"] = df[f"연령대_{a}_매출_금액"]
+        # 건수도 같이 싣는다. 금액만으로는 **그 나이대의 객단가**를 못 구한다.
+        # 실측(2026Q1): 역삼역 커피-음료 10대 6,420원 vs 60대+ 10,023원(1.6배),
+        # 홍대입구역은 10대 12,626원 vs 60대+ 7,833원으로 **방향이 반대**다.
+        # 상권 하나에 값 하나만 두면 이 차이가 통째로 사라지고, 손님 12명이
+        # 가격에 대해 서로 다르게 판단할 실측 재료가 없어진다.
+        out[f"age_{a.split('_')[0]}_cnt"] = df[f"연령대_{a}_매출_건수"]
     for t in TIMES:
         out[f"time_{t.replace('~', '_')}_amount"] = df[f"시간대_{t}_매출_금액"]
     return out

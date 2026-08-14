@@ -53,7 +53,16 @@
     "work_ratio": 0.936,
     "household_cnt": 4404,
     "apt_cnt": 82,
-    "apt_avg_price": 326468462
+    "apt_avg_price": 326468462,
+    "age_ticket": {
+      "10": 6420,
+      "20": 7755,
+      "30": 7873,
+      "40": 8545,
+      "50": 8886,
+      "60": 10023
+    },
+    "age_ticket_base": 8275
   },
   "personas": [
     {

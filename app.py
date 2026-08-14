@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import streamlit as st
 from pydantic import ValidationError
@@ -25,7 +25,13 @@ from app_core import (
     stores,
     vision,
 )
-from app_core.schema import AdBrief, AdBriefDraft, Feedback, Store, StoreInput
+from app_core.panel.aggregate import AggregationError
+from app_core.panel.features import NoTradeAreaError
+from app_core.panel.review import CLEAR_MARGIN, Ranked, rank
+from app_core.schema import AdBrief, AdBriefDraft, CopyCandidate, Feedback, Store, StoreInput
+
+if TYPE_CHECKING:
+    from app_core.pipeline import Style
 
 # DB·API 키 설정을 읽는다. app_core 를 쓰기 전에 해야 한다.
 config.load_env()
@@ -35,6 +41,7 @@ st.set_page_config(page_title="동네 광고 만들기", page_icon="🏪", layou
 GOALS = {"image": "🖼️ 광고 이미지 만들기", "copy": "✍️ 광고 문구 만들기"}
 PLACEHOLDER = "예: 크로플 신메뉴 나왔어요, 인스타에 올릴 사진 만들어줘"
 PHOTO_TYPES = ["png", "jpg", "jpeg", "webp"]
+STYLES: tuple[tuple[Style, str], ...] = (("simple", "감성 피드형"), ("poster", "정보 포스터형"))
 
 
 class PhotoSlot(NamedTuple):
@@ -69,6 +76,9 @@ def _reset_chat() -> None:
     st.session_state.pop("copies", None)
     st.session_state.pop("brief", None)
     st.session_state.pop("ad_id", None)
+    st.session_state.pop("ranked", None)
+    st.session_state.pop("picked", None)
+    st.session_state.pop("images", None)
     for slot in PHOTO_SLOTS:
         _clear_uploader(slot.field)
 
@@ -258,7 +268,51 @@ def _make_copies(store: Store, brief: AdBrief, parent_id: int | None = None) -> 
     st.session_state.copies = copies
     st.session_state.brief = brief
     st.session_state.ad_id = ads.save(store.id, brief, copies, parent_id=parent_id)
+    # 문구가 갈렸으니 이전 순위는 더 이상 화면의 것이 아니다. 안 지우면 사라진
+    # 문구의 평가가 새 문구 밑에 그대로 붙어 있는다.
+    st.session_state.pop("ranked", None)
     return True
+
+
+def _rank_copies(store: Store, brief: AdBrief, copies: list[CopyCandidate]) -> None:
+    """후보 전부를 손님들에게 보여주고 순위를 담는다.
+
+    한 건만 평가하던 것을 셋으로 늘렸다. 콜이 3배지만, 한 건만 물어서 얻은 것은
+    "가격이 걸린다"는 한 단어뿐이었고 그건 사장님이 손댈 수 없는 답이다
+    (재생성은 가격 슬롯을 안 바꾼다). 셋을 물으면 **어느 걸 쓸지**가 나온다.
+    """
+    try:
+        with st.spinner("동네 손님 12명에게 후보를 보여주는 중... (1분쯤 걸립니다)"):
+            st.session_state.ranked = rank(
+                store, brief, copies, ad_id=str(st.session_state.get("ad_id", ""))
+            )
+    except NoTradeAreaError as exc:
+        st.warning(str(exc))
+    except AggregationError as exc:
+        st.error(f"손님 반응을 모으지 못했습니다. 다시 눌러주세요. ({exc})")
+
+
+def _rank_summary(ranked: list[Ranked]) -> None:
+    """1등을 권하되 **차이가 잡음보다 클 때만** 권한다.
+
+    절대 점수는 해석할 수 없다 — 실측(2026-08-13)에서 방문의향이 49.7~54.0 사이에만
+    머물러서 "52점"이 좋은지 나쁜지 말할 수 없다. 반면 후보끼리의 차이는 재실행
+    흔들림(0.7)의 3~8배라 순위는 믿을 수 있다. 그래서 점수를 크게 띄우지 않고
+    **어느 것을 쓸지**만 말한다.
+    """
+    if len(ranked) < 2:
+        return
+    gap = ranked[0].result.scores["intent"] - ranked[1].result.scores["intent"]
+    if gap >= CLEAR_MARGIN:
+        st.success(
+            f"손님들은 **1위 문구**에 가장 마음이 움직였습니다 (2위와 {gap:.0f}점 차).",
+            icon="🧑‍🤝‍🧑",
+        )
+    else:
+        st.info(
+            "손님 반응은 셋이 비슷했습니다. 아래 지적사항이 없는 쪽을 고르시면 됩니다.",
+            icon="🧑‍🤝‍🧑",
+        )
 
 
 def revise_view(store: Store) -> None:
@@ -291,8 +345,30 @@ def revise_view(store: Store) -> None:
     if said := st.chat_input("어떻게 고쳐드릴까요? 예: 좀 더 밝게", key="revise_in"):
         again(Feedback(source="typed", notes=[said]))
 
-    # ③ AI 손님 패널 평가 — 담당자 기능이 붙으면 여기로 들어온다
-    st.caption("🧑‍🤝‍🧑 손님 패널 평가는 담당자 기능 연결 후 활성화됩니다")
+    # ③ AI 손님 패널 평가 — 고른 문구에 대한 손님들의 개선 제안
+    #
+    # 여기서 다시 평가하지 않는다. 위(`copy_view`)에서 후보 전부를 이미 평가했고,
+    # 고른 것의 결과가 그 안에 들어 있다. 또 부르면 같은 답에 20콜을 더 쓴다.
+    picked = st.session_state.get("picked")
+    scored = next(
+        (r for r in st.session_state.get("ranked") or [] if r.copy == picked),
+        None,
+    )
+    if scored is None:
+        st.caption("🧑‍🤝‍🧑 위에서 손님 반응을 보고 문구를 하나 고르시면 제안을 드립니다")
+        return
+
+    for line in scored.result.suggestions:
+        st.write(f"- {line}")
+    if scored.result.suggestions and st.button("제안 반영해 다시 만들기", key="panel_again"):
+        # 손님 반응을 그대로 재생성 입력으로 넘긴다. 이전 순위 정리는 `_make_copies` 가 한다.
+        again(
+            Feedback(
+                source="panel",
+                notes=scored.result.suggestions,
+                resistance=scored.result.top_resistance,
+            )
+        )
 
 
 def copy_view(store: Store, draft: AdBriefDraft) -> None:
@@ -304,17 +380,76 @@ def copy_view(store: Store, draft: AdBriefDraft) -> None:
         _make_copies(store, draft.to_brief())
 
     copies = st.session_state.get("copies") or []
-    for i, candidate in enumerate(copies, start=1):
+    ranked: list[Ranked] = st.session_state.get("ranked") or []
+
+    if copies and not ranked and st.button("🧑‍🤝‍🧑 동네 손님 12명에게 셋 다 보여주기"):
+        _rank_copies(store, st.session_state.brief, copies)
+        st.rerun()
+
+    if ranked:
+        _rank_summary(ranked)
+
+    # 순위가 나왔으면 그 순서로 보여준다 — 사장님이 위에서부터 읽으면 된다.
+    shown = [(r.copy, r) for r in ranked] or [(c, None) for c in copies]
+    for i, (candidate, scored) in enumerate(shown, start=1):
         with st.container(border=True):
+            if scored is not None:
+                st.caption(f"**{i}위** · 방문의향 {scored.result.scores['intent']:.0f}")
             st.markdown(f"### {candidate.headline}")
             if candidate.sub:
                 st.write(candidate.sub)
+            for note in scored.defects if scored else []:
+                st.warning(note.text, icon="⚠️")
             if st.button("이걸로 할게요", key=f"pick_copy{i}"):
                 ads.choose_copy(st.session_state.ad_id, candidate.headline)
+                st.session_state.picked = candidate
                 st.success("선택했습니다")
 
     if copies:
         revise_view(store)
+
+
+# ── 광고 이미지 ────────────────────────────────────────────
+
+
+def _make_images(store: Store, brief: AdBrief) -> bool:
+    """이미지 두 형태를 만들어 화면 상태에 담는다. 문구가 없으면 먼저 만든다."""
+    # 확산 모델 의존이라 지연 import ─ 문구만 쓰는 환경에서도 앱이 뜨게 한다
+    from app_core import pipeline
+
+    copies = st.session_state.get("copies") or []
+    if not copies:
+        with st.spinner("문구 만드는 중..."):
+            copies = copy_gen.generate(brief, store, ads.recent(store.id))
+        if not copies:
+            st.error("문구를 만들지 못했습니다. 다시 눌러주세요.")
+            return False
+        st.session_state.copies = copies
+
+    images = {}
+    for style, label in STYLES:
+        with st.spinner(f"{label} 만드는 중... (20~30초)"):
+            images[style] = pipeline.generate_ad(brief, store, copies[0], style=style)
+
+    st.session_state.images = images
+    st.session_state.brief = brief
+    return True
+
+
+def image_view(store: Store, draft: AdBriefDraft) -> None:
+    """광고 이미지 ─ 감성 피드형과 정보 포스터형을 나란히 만든다."""
+    if draft.next_slot():
+        st.caption("더 안 알려주셔도 지금 바로 만들 수 있습니다")
+    if st.button("광고 이미지 만들기", type="primary"):
+        _make_images(store, draft.to_brief())
+
+    images = st.session_state.get("images") or {}
+    if not images:
+        return
+    for col, (style, label) in zip(st.columns(2), STYLES, strict=True):
+        with col, st.container(border=True):
+            st.markdown(f"**{label}**")
+            st.image(images[style], use_container_width=True)
 
 
 def chat_view(store: Store) -> None:
@@ -364,7 +499,10 @@ def chat_view(store: Store) -> None:
     # 위쪽 좁은 칸에는 개발 확인용 주문서만 남긴다.
     if not draft.missing():
         st.divider()
-        copy_view(store, draft)
+        if draft.goal == "image":
+            image_view(store, draft)
+        else:
+            copy_view(store, draft)
 
 
 # ── 라우팅 ────────────────────────────────────────────────

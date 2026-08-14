@@ -12,8 +12,9 @@ from __future__ import annotations
 
 from functools import partial
 from hashlib import sha256
-from typing import Any
+from typing import Any, Final, NamedTuple
 
+from app_core.panel.contrast import Note, copy_defects
 from app_core.panel.evaluator import evaluate
 from app_core.panel.features import build_features
 from app_core.panel.narrator import narrate
@@ -45,6 +46,86 @@ def to_panel(features: dict[str, Any], personas: list[dict[str, Any]]) -> Panel:
         features=TradeAreaFeatures(**features),
         personas=[Persona(**p) for p in personas],
     )
+
+
+class Ranked(NamedTuple):
+    """후보 하나의 평가 결과와 문구 결함."""
+
+    copy: CopyCandidate
+    result: EvaluationResult
+    defects: list[Note]
+
+
+#: 이보다 벌어져야 "1등이 낫다"고 말한다. 그 아래면 "비슷합니다"라고 해야 한다.
+#:
+#: 재실행 잡음을 재서 정했다 (2026-08-13, 같은 광고 2회씩):
+#:
+#:     좋은 광고   눈길 63.8 / 63.8   이해 75.9 / 75.9   의향 54.0 / 54.0
+#:     나쁜 광고   눈길 56.4 / 56.4   이해 70.4 / 70.4   의향 50.4 / 49.7
+#:                                                       ↑ 관측된 최대 흔들림 0.7
+#:
+#: 3배인 2.0 을 기준으로 뒀다. 실제 후보 3개의 폭은 눈길 5.5 · 이해 3.6 · 의향 2.0
+#: 이었으므로, 이 선이면 갈릴 때만 갈렸다고 말한다.
+CLEAR_MARGIN: Final = 2.0
+
+
+def rank(
+    store: Store,
+    brief: AdBrief,
+    copies: list[CopyCandidate],
+    *,
+    ad_id: str = "ad",
+    coord: tuple[float, float] | None = None,
+    client: Any = None,
+    **kw: Any,
+) -> list[Ranked]:
+    """후보 여러 건을 평가해 **좋은 순으로** 돌려준다.
+
+    **절대 점수는 못 쓰고 비교는 쓸 수 있다** — 이게 이 함수가 있는 이유다.
+    실측(2026-08-13): 손님들이 매기는 방문의향이 49.7~54.0 사이에만 머물러서
+    "52.4점"이라는 숫자 자체로는 좋은지 나쁜지 알 수 없다. 반면 후보끼리의
+    차이는 재실행 잡음(0.7)의 3~8배라 **순위는 믿을 수 있다.**
+
+    사장님의 질문도 "이 광고 몇 점인가"가 아니라 "어느 걸 쓸까"다.
+
+    순서는 사전식으로 정한다. 가중치를 지어내지 않으려는 것이다.
+      ① 방문의향 — 사장님이 원하는 결과 그 자체. **`CLEAR_MARGIN` 폭으로 뭉쳐서**
+                   본다. 잡음보다 작은 차이는 차이가 아니다
+      ② 결함 적은 순 — 점수로 못 가르면 결정적 점검이 가른다
+      ③ 눈길 높은 순 — 신호가 가장 큰 지표라 마지막으로 가른다
+      ④ 만들어진 순  — 그래도 같으면 순서를 흔들지 않는다
+
+    ⚠️ **콜이 후보 수만큼 든다** (1건당 약 20콜). 07 §5.1 이 "3건 전부는 비용
+    3배"라며 1건만 평가하기로 한 그 3배가 맞다. 다만 그렇게 아낀 결과로 얻은
+    것이 "가격"이라는 한 단어뿐이었고, 3배를 쓰면 **어느 문구를 쓸지**가 나온다.
+
+    ⚠️ 순차로 돈다. `evaluate` 가 이미 손님 12명을 스레드로 부르고 있어서 후보까지
+    병렬로 돌리면 동시 호출이 36개가 된다. 후보 3개면 1분쯤 걸린다.
+    """
+    out = [
+        Ranked(
+            copy=c,
+            result=review(store, brief, c, ad_id=f"{ad_id}#{i}", coord=coord, client=client, **kw),
+            defects=copy_defects(brief, c, store),
+        )
+        for i, c in enumerate(copies)
+    ]
+    return [r for _, r in sorted(enumerate(out), key=lambda p: rank_key(p[1], p[0]))]
+
+
+def rank_key(r: Ranked, made_at: int) -> tuple[float, int, float, int]:
+    """`rank()` 의 정렬 기준. 순수 함수라 LLM 없이 검증된다.
+
+    **방문의향을 `CLEAR_MARGIN` 폭으로 뭉쳐서 본다.** 그러지 않으면 0.1점 차이로
+    결함 있는 문구가 1등이 된다 — 실측(2026-08-13): 1위와 2위가 반올림해서 둘 다
+    52 인데 1위에만 "금액이 문구에 없습니다"가 붙어, 사장님 화면에서 "1위" 바로
+    밑에 경고가 뜨는 모양이 됐다. 잡음보다 작은 차이는 차이가 아니다.
+
+    `made_at` 은 만들어진 순서 — 앞의 셋이 전부 같을 때만 쓴다.
+    """
+    s = r.result.scores
+    band = round(s.get("intent", 0.0) / CLEAR_MARGIN)
+    return (-band, len(r.defects), -s.get("attention", 0.0), made_at)
 
 
 def _key(store: Store, brief: AdBrief, copy: CopyCandidate, ad_id: str) -> str:
