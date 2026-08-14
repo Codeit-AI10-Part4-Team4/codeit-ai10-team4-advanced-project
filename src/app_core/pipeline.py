@@ -16,6 +16,7 @@ from app_core import photo_store
 from app_core.background import remove_background
 from app_core.compose import compose_ad
 from app_core.gen_background import generate_background
+from app_core.photo_router import keep_largest, mask_stats, route_photo
 from app_core.poster import generate_poster
 from app_core.poster_plan import plan_poster
 from app_core.prompt_builder import build_bg_prompt, build_hero_prompt
@@ -30,7 +31,16 @@ def _info_line(store: Store) -> str:
 
 
 def _simple_ad(brief: AdBrief, store: Store, copy: CopyCandidate, product: Image.Image | None):
-    prompt = build_bg_prompt(store.industry_label, brief.situation, brief.tone)
+    """제품 누끼가 있으면 빈 무대 배경에 얹고, 없으면 제품이 든 장면을 통째로 그린다.
+
+    빈 무대 프롬프트(_BASE)는 누끼를 얹으려고 제품을 일부러 뺀 캔버스다. 제품 없이
+    그대로 쓰면 광고 대상이 사라진다 — generate 갈래·사진 없는 주문이 그 경우라,
+    그때는 hero 프롬프트로 제품이 화면에 있게 그린다.
+    """
+    if product is None:
+        prompt = build_hero_prompt(store.industry_label, brief.product, brief.tone)
+    else:
+        prompt = build_bg_prompt(store.industry_label, brief.situation, brief.tone)
     bg = generate_background(prompt)
     return compose_ad(product, copy.headline, copy.sub, background=bg)
 
@@ -68,6 +78,9 @@ def _poster_ad(brief: AdBrief, store: Store, copy: CopyCandidate, product: Image
     )
 
 
+_MIME = {".png": "image/png", ".webp": "image/webp"}
+
+
 def generate_ad(
     brief: AdBrief,
     store: Store,
@@ -76,15 +89,30 @@ def generate_ad(
 ) -> Image.Image:
     """주문서·가게·문구를 받아 완성 광고 이미지를 돌려준다.
 
-    사진(photo_id)이 없으면 제품 없이 만든다 — 텍스트만으로 주문한 경우다.
+    사진이 있으면 갈래 판정(photo_router)이 사용법을 정한다 —
+      keep      원본을 배경으로 그대로 쓴다 (확산 모델도 안 부른다)
+      cutout    청소한 누끼를 새 배경에 얹는다
+      generate  사진을 참고하지 않고 새로 그린다
+    포스터형은 원본을 배경으로 쓸 수 없는 형태라 갈래와 무관하게 누끼를 쓰고,
+    누끼가 빈손이면 주인공을 생성해 채운다.
     """
-    product = None
+    photo = cut = route = None
     if brief.photo_id is not None:
         path = photo_store.path_of(brief.photo_id)
         if path is None:
             raise FileNotFoundError(f"보관함에 {brief.photo_id}번 사진이 없습니다")
-        product = remove_background(Image.open(path))
+        photo = Image.open(path)
+        cut = keep_largest(remove_background(photo))
+        if style == "simple":
+            mime = _MIME.get(path.suffix.lower(), "image/jpeg")
+            route = route_photo(path.read_bytes(), mime, cut)
 
     if style == "poster":
+        # 누끼가 빈손(전경 5% 미만)이면 없는 셈 친다 — 실오라기가 제품 자리에 앉는 것 방지
+        product = cut if cut is not None and mask_stats(cut).area >= 0.05 else None
         return _poster_ad(brief, store, copy, product)
-    return _simple_ad(brief, store, copy, product)
+
+    if route == "keep" and photo is not None:
+        # 사진이 이미 광고 배경감 — 확산 모델 없이 원본 위에 문구만 얹는다
+        return compose_ad(None, copy.headline, copy.sub, background=photo.convert("RGB"))
+    return _simple_ad(brief, store, copy, cut if route == "cutout" else None)

@@ -1,5 +1,8 @@
 """photo_router 테스트 — 마스크 분석은 합성 이미지로, 비전 판정은 가짜 응답으로."""
 
+from types import SimpleNamespace
+
+import pytest
 from PIL import Image
 
 from app_core import photo_router
@@ -70,3 +73,26 @@ def test_빈_마스크는_청소해도_그대로다():
 
     cut = _canvas([])
     assert _alpha_at(keep_largest(cut), 30, 30) == 0
+
+
+def _fake_openai(content):
+    rsp = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+
+    class _Fake:
+        class chat:
+            class completions:
+                create = staticmethod(lambda **kwargs: rsp)
+
+    return lambda **kw: _Fake()
+
+
+def test_판정_JSON이_깨져도_cutout으로_물러선다(monkeypatch):
+    pytest.importorskip("openai")
+    monkeypatch.setattr("openai.OpenAI", _fake_openai("not json"))
+    assert photo_router.judge_photo(b"x", "image/jpeg") == "cutout"
+
+
+def test_판정_갈래가_엉뚱해도_cutout으로_물러선다(monkeypatch):
+    pytest.importorskip("openai")
+    monkeypatch.setattr("openai.OpenAI", _fake_openai('{"route": "unknown"}'))
+    assert photo_router.judge_photo(b"x", "image/jpeg") == "cutout"

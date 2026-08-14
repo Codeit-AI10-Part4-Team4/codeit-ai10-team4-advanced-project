@@ -75,16 +75,23 @@ def route_by_mask(stats: MaskStats) -> Route | None:
     return None
 
 
-_JUDGE_SYSTEM = """너는 동네 가게 광고의 사진 심사원이다. 사장님이 올린 제품 사진을 보고
-이 사진을 광고에 어떻게 쓸지 딱 하나 고른다.
+_JUDGE_SYSTEM = """너는 동네 가게 광고 제작자다. 사장님이 올린 제품 사진 위에 흰 글자
+문구를 얹어 인스타그램 광고 한 장을 만든다. 이 사진을 어떻게 쓸지 딱 하나 고른다.
 
-keep      사진이 이미 광고 배경감이다 — 구도와 조명이 좋아 그대로 두고 글자만 얹으면 된다
-cutout    또렷한 주인공이 하나 있는데 배경이 밋밋하거나 지저분하다 — 주인공만 오려 쓴다
-generate  또렷한 주인공이 없다 — 물건이 잔뜩 흩어진 진열대·매대처럼 오릴 것도 살릴 것도 없다
+keep      사진을 통째로 배경으로 쓴다
+cutout    주인공만 오려내 새 배경에 얹는다
+generate  사진은 버리고 배경을 새로 그린다
 
-규칙:
-- 주인공이 있어도 사진 전체가 이미 분위기 있으면 keep 이다. 오리는 건 배경이 아쉬울 때만.
-- JSON 만 출력한다: {"route": "keep|cutout|generate", "reason": "한 문장"}"""
+판단 기준 — 예쁜 사진인지가 아니라 광고 재료로 문제가 없는지를 본다:
+- 주인공(팔려는 것)이 또렷하고 배경에 아래 문제가 없을 때만 keep 이다.
+- 배경에 문제가 있으면 cutout 이다: 모르는 사람이 찍혔다 · 팔려는 것과 상관없는
+  물건(책·소품·남의 상품)이 같이 나온다 · 어수선해서 글자가 묻힌다.
+- 팔려는 것 하나를 짚을 수 없으면 generate 다: 물건이 잔뜩 깔린 진열대 · 매대 ·
+  여러 접시가 흩어진 상. 단, 가게 풍경 전체가 정돈된 무드라 그대로 배경이 되면 keep.
+- 전문가가 찍은 듯 예뻐도 위 문제가 있으면 keep 이 아니다. "분위기가 좋다"는
+  이유만으로 keep 을 고르지 마라.
+
+JSON 만 출력한다: {"route": "keep|cutout|generate", "reason": "한 문장"}"""
 
 
 def judge_photo(data: bytes, mime: str) -> Route:
@@ -107,7 +114,12 @@ def judge_photo(data: bytes, mime: str) -> Route:
             {"role": "user", "content": [{"type": "image_url", "image_url": {"url": url}}]},
         ],
     )
-    route = json.loads(rsp.choices[0].message.content or "{}").get("route")
+
+    try:
+        out = json.loads(rsp.choices[0].message.content or "{}")
+    except json.JSONDecodeError:
+        out = {}
+    route = out.get("route") if isinstance(out, dict) else None
     return route if route in ("keep", "cutout", "generate") else "cutout"
 
 
