@@ -426,10 +426,21 @@ def _make_images(store: Store, brief: AdBrief) -> bool:
             return False
         st.session_state.copies = copies
 
+    # 부품들이 사장님께 보여줄 문장을 이미 써뒀다 — "보관함에 3번 사진이 없습니다",
+    # "한글 글꼴을 찾지 못했습니다", "모르는 팔레트입니다". 안 받으면 그 문장 대신
+    # 화면에 트레이스백이 뜬다. GPU 가 없는 환경도 여기로 떨어진다.
     images = {}
     for style, label in STYLES:
-        with st.spinner(f"{label} 만드는 중... (20~30초)"):
-            images[style] = pipeline.generate_ad(brief, store, copies[0], style=style)
+        try:
+            with st.spinner(f"{label} 만드는 중... (20~30초)"):
+                images[style] = pipeline.generate_ad(brief, store, copies[0], style=style)
+        except (OSError, ValueError, RuntimeError, ImportError) as e:
+            st.error(f"{label}을(를) 만들지 못했습니다. {e}")
+            if llm.profile() == "stub":
+                st.caption(
+                    "⚠️ MODEL_PROFILE 이 stub 이라 기획 단계에서 멈춥니다 — .env 를 확인하세요."
+                )
+            return False
 
     st.session_state.images = images
     st.session_state.brief = brief
