@@ -7,7 +7,7 @@ from app_core.poster_plan import PosterPlan
 from app_core.schema import AdBrief, CopyCandidate, Store
 
 
-def _fake_font(role: str, size: int) -> ImageFont.FreeTypeFont:
+def _fake_font(role: str, size: int) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
     return ImageFont.load_default(size)
 
 
@@ -52,7 +52,7 @@ def test_poster_style_uses_plan(monkeypatch):
 def test_simple_style_uses_generated_background(monkeypatch):
     """심플 형태는 배경을 생성해 그 위에 얹는다."""
     monkeypatch.setattr(fonts, "load", _fake_font)
-    monkeypatch.setattr(pipeline, "build_bg_prompt", lambda *a, **k: "prompt")
+    monkeypatch.setattr(pipeline, "build_hero_prompt", lambda *a, **k: "prompt")
     monkeypatch.setattr(
         pipeline, "generate_background", lambda prompt: Image.new("RGB", (1080, 1080), (10, 20, 30))
     )
@@ -79,3 +79,85 @@ def test_poster_style_without_photo_generates_hero(monkeypatch):
     brief = AdBrief(goal="image", product="꽃다발", price=0, photo_id=None)
     ad = pipeline.generate_ad(brief, _store(), CopyCandidate(headline="봄 꽃다발"), "poster")
     assert ad.size == (1080, 1080)
+
+
+def _photo(tmp_path):
+    p = tmp_path / "제품.jpg"
+    Image.new("RGB", (64, 64), (120, 80, 40)).save(p)
+    return p
+
+
+def test_keep_갈래는_원본을_배경으로_쓰고_생성하지_않는다(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: _photo(tmp_path))
+    monkeypatch.setattr(
+        pipeline, "remove_background", lambda im: Image.new("RGBA", (64, 64), (0, 0, 0, 255))
+    )
+    monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, cut: "keep")
+
+    def _boom(prompt):
+        raise AssertionError("keep 갈래는 확산 모델을 부르면 안 된다")
+
+    monkeypatch.setattr(pipeline, "generate_background", _boom)
+
+    def _spy(product, headline, sub="", background=None, **kwargs):
+        seen["product"] = product
+        seen["background"] = background
+        return Image.new("RGB", (1080, 1080))
+
+    monkeypatch.setattr(pipeline, "compose_ad", _spy)
+    brief = AdBrief(goal="image", product="크로플", price=0, photo_id=7)
+    pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
+    assert seen["product"] is None
+    assert seen["background"] is not None
+    assert seen["background"].size == (64, 64)  # 원본 사진 크기 그대로
+
+
+def test_cutout_갈래는_청소된_누끼가_그대로_전달된다(tmp_path, monkeypatch):
+    seen = {}
+    cleaned = Image.new("RGBA", (10, 10))  # keep_largest 가 돌려준 표식
+    monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: _photo(tmp_path))
+    monkeypatch.setattr(
+        pipeline, "remove_background", lambda im: Image.new("RGBA", (64, 64), (255, 255, 255, 255))
+    )
+    monkeypatch.setattr(pipeline, "keep_largest", lambda cut: cleaned)
+    monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, cut: "cutout")
+    monkeypatch.setattr(pipeline, "build_bg_prompt", lambda *a, **k: "bg")
+    monkeypatch.setattr(
+        pipeline, "generate_background", lambda prompt: Image.new("RGB", (256, 256))
+    )
+
+    def _spy(product, headline, sub="", **kwargs):
+        seen["product"] = product
+        return Image.new("RGB", (1080, 1080))
+
+    monkeypatch.setattr(pipeline, "compose_ad", _spy)
+    brief = AdBrief(goal="image", product="크로플", price=0, photo_id=7)
+    pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
+    assert seen["product"] is cleaned
+
+
+def test_generate_갈래는_제품이_든_장면을_그린다(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(fonts, "load", _fake_font)
+    monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: _photo(tmp_path))
+    monkeypatch.setattr(
+        pipeline, "remove_background", lambda im: Image.new("RGBA", (64, 64), (255, 255, 255, 255))
+    )
+    monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, cut: "generate")
+
+    def _hero(industry, product, tone=""):
+        seen["product"] = product
+        return "hero prompt"
+
+    monkeypatch.setattr(pipeline, "build_hero_prompt", _hero)
+
+    def _gen(prompt):
+        seen["prompt"] = prompt
+        return Image.new("RGB", (256, 256))
+
+    monkeypatch.setattr(pipeline, "generate_background", _gen)
+    brief = AdBrief(goal="image", product="크로플", price=0, photo_id=7)
+    pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
+    assert seen["product"] == "크로플"
+    assert seen["prompt"] == "hero prompt"
