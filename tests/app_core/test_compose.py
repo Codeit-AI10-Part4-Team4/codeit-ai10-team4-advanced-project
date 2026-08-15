@@ -110,7 +110,8 @@ def test_복잡한_영역엔_방향이_맞는_그라데이션_판(monkeypatch):
     assert max(row_dense) < max(row_far)  # 진한 쪽이 더 어둡다 = 방향이 맞다
 
 
-def test_긴_제목은_최대_2줄이고_안전영역을_안_넘는다():
+def test_긴_제목은_최대_2줄이고_안전영역을_안_넘는다(monkeypatch):
+    monkeypatch.setattr(fonts, "load", _fake_font)
     font, lines = compose.wrap_to_fit(
         "아주 긴 제목 문구가 여기에 계속 이어집니다 정말로", 120, "display", 40, 12
     )
