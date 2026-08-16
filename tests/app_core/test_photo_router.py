@@ -3,7 +3,7 @@
 from PIL import Image
 
 from app_core import photo_router
-from app_core.photo_router import keep_largest, mask_area, route_by_mask, route_photo
+from app_core.photo_router import mask_area, route_by_mask, route_photo
 
 
 def _canvas(boxes: list[tuple[int, int, int, int]]) -> Image.Image:
@@ -85,15 +85,50 @@ def test_판정은_공용_비전_클라이언트를_쓴다(monkeypatch):
     assert photo_router.judge_photo(b"x", "image/jpeg") == "keep"
 
 
-# ── 누끼 청소 ──────────────────────────────────────────────
+# ── 다제품 안전장치 (실측 2026-08-16: 2.6% 조각이 삭제되던 결함) ──────────
 
 
-def test_큰_덩어리만_남기고_작은_조각은_지운다():
-    cut = _canvas([(8, 8, 40, 40), (50, 50, 60, 60)])  # 주인공 + 딸려온 조각
-    cleaned = keep_largest(cut)
-    assert _alpha_at(cleaned, 20, 20) == 255  # 주인공은 그대로
-    assert _alpha_at(cleaned, 55, 55) == 0  # 조각은 지워짐
+def test_부스러기를_뺀_조각_수를_센다():
+    cut = _canvas([(8, 8, 40, 40), (48, 48, 56, 56), (60, 60, 62, 62)])  # 25% / 1.6% / 0.1%
+    assert photo_router.significant_pieces(cut) == 2  # 부스러기는 안 센다
+
+
+def test_상품이_여럿이면_비전이_generate라도_keep(monkeypatch):
+    monkeypatch.setattr(photo_router, "judge_photo", lambda data, mime: "generate")
+    cut = _canvas([(8, 8, 40, 40), (48, 48, 56, 56)])
+    assert route_photo(b"", "image/jpeg", cut) == "keep"  # 새로 그리면 상품이 바뀐다
+
+
+def test_상품이_여럿이면_비전을_아예_부르지_않는다(monkeypatch):
+    def _boom(data, mime):
+        raise AssertionError("다제품이면 판정 전에 keep 이어야 한다")
+
+    monkeypatch.setattr(photo_router, "judge_photo", _boom)
+    cut = _canvas([(8, 8, 40, 40), (48, 48, 56, 56)])
+    assert route_photo(b"", "image/jpeg", cut) == "keep"
+
+
+def test_전경이_넓어도_상품이_여럿이면_keep(monkeypatch):
+    """면적 규칙(generate)보다 다제품 보존이 우선."""
+    monkeypatch.setattr(photo_router, "judge_photo", lambda data, mime: "generate")
+    cut = _canvas([(0, 0, 64, 30), (0, 34, 64, 64)])  # 합쳐서 94% — route_by_mask 면 generate
+    assert photo_router.mask_area(cut) > 0.75
+    assert route_photo(b"", "image/jpeg", cut) == "keep"
+
+
+def test_상품이_하나면_cutout_그대로(monkeypatch):
+    monkeypatch.setattr(photo_router, "judge_photo", lambda data, mime: "cutout")
+    cut = _canvas([(8, 8, 40, 40), (60, 60, 62, 62)])  # 상품 1 + 부스러기
+    assert route_photo(b"", "image/jpeg", cut) == "cutout"
+
+
+def test_청소는_부스러기만_지우고_작은_상품은_남긴다():
+    cut = _canvas([(8, 8, 40, 40), (48, 48, 56, 56), (60, 60, 62, 62)])
+    cleaned = photo_router.remove_crumbs(cut)
+    assert _alpha_at(cleaned, 20, 20) == 255  # 큰 상품
+    assert _alpha_at(cleaned, 52, 52) == 255  # 작은 상품 — v1 은 여기를 지웠다
+    assert _alpha_at(cleaned, 61, 61) == 0  # 부스러기
 
 
 def test_빈_마스크는_청소해도_그대로다():
-    assert _alpha_at(keep_largest(_canvas([])), 30, 30) == 0
+    assert _alpha_at(photo_router.remove_crumbs(_canvas([])), 30, 30) == 0

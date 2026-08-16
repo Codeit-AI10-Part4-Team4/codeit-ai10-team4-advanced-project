@@ -16,7 +16,7 @@ from app_core import photo_store
 from app_core.background import remove_background
 from app_core.compose import compose_ad
 from app_core.gen_background import generate_background
-from app_core.photo_router import keep_largest, mask_area, route_photo
+from app_core.photo_router import mask_area, remove_crumbs, route_photo
 from app_core.poster import generate_poster
 from app_core.poster_plan import plan_poster
 from app_core.prompt_builder import build_bg_prompt, build_hero_prompt
@@ -102,10 +102,12 @@ def generate_ad(
         if path is None:
             raise FileNotFoundError(f"보관함에 {brief.photo_id}번 사진이 없습니다")
         photo = Image.open(path)
-        cut = keep_largest(remove_background(photo))
+        # 판정은 **청소 전** 누끼로 한다 — 먼저 청소하면 라우터가 보기도 전에 상품이 사라진다
+        raw_cut = remove_background(photo)
         if style == "simple":
             mime = _MIME.get(path.suffix.lower(), "image/jpeg")
-            route = route_photo(path.read_bytes(), mime, cut)
+            route = route_photo(path.read_bytes(), mime, raw_cut)
+        cut = remove_crumbs(raw_cut)
 
     if style == "poster":
         # 누끼가 빈손(전경 5% 미만)이면 없는 셈 친다 — 실오라기가 제품 자리에 앉는 것 방지
