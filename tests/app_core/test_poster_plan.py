@@ -90,3 +90,54 @@ def test_빈_응답은_원인을_말한다():
     """
     with pytest.raises(ValueError, match="MODEL_PROFILE"):
         poster_plan.plan_poster("가게", "꽃집", "꽃", client=FakePlanner({}))
+
+
+# ── 지어내기 방지 (프롬프트 계약) ──────────────────────────────
+
+
+def test_기본값은_전부_빈칸이다():
+    """근거가 없으면 비우는 게 정답 — palette 만 필수다."""
+    plan = poster_plan.PosterPlan(palette="fresh_mint")
+    assert plan.tagline == "" and plan.badge == "" and plan.date_line == ""
+    assert plan.features == [] and plan.event == ""
+
+
+def test_정보가_없는_주문은_빈_블록으로_받는다():
+    """평범한 카페 주문 — 모델이 tagline·palette 만 채워 보내도 정상 파싱된다."""
+    plan = poster_plan.plan_poster(
+        "동네 카페",
+        "카페·디저트",
+        "아메리카노",
+        client=FakePlanner({"tagline": "천천히 머무는 오후", "palette": "warm_bakery"}),
+    )
+    assert plan.features == [] and plan.badge == "" and plan.event == ""
+
+
+def test_사장님이_말한_정보는_유지된다():
+    plan = poster_plan.plan_poster(
+        "연남 플라워",
+        "꽃집",
+        "봄 꽃다발",
+        transcript="3월 한 달 할인해요. 선물하기 좋게 정성껏 포장해드려요",
+        client=FakePlanner(
+            {
+                "tagline": "봄과 함께",
+                "badge": "봄 시즌",
+                "date_line": "3월",
+                "features": ["선물 포장|정성껏 포장"],
+                "event": "3월 한 달 할인",
+                "palette": "soft_pink",
+            }
+        ),
+    )
+    assert plan.event == "3월 한 달 할인"
+    assert plan.date_line == "3월"
+    assert plan.features == ["선물 포장|정성껏 포장"]
+
+
+def test_프롬프트에_지어내기_금지_계약이_있다():
+    """막는 것은 코드가 아니라 프롬프트다 — 계약 문구가 사라지면 이 테스트가 잡는다."""
+    s = poster_plan._SYSTEM
+    assert "말하지 않은 것은 쓰지 않는다" in s
+    assert "추론하지 마라" in s
+    assert "사실과 다른 광고" in s
