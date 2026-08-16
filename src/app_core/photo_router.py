@@ -24,6 +24,10 @@ _GRID = 64
 #: 갈래 문턱값 — 골든셋 15장 라벨(eval/run_photo_router.py)로 맞춘 값
 _TOO_SMALL = 0.05  #: 전경이 5% 미만 — 누끼가 빈손이라 cutout 불가
 _TOO_BIG = 0.75  #: 전경이 75% 이상 — 전경/배경 구분 실패
+_PIECE_GRID = 256  #: 조각 분석 격자 — 작은 상품도 보이게 마스크 격자보다 촘촘히
+#: 이 미만은 부스러기. 폰 사진 3장 실측(2026-08-16): 부스러기 최대 0.23% / 가장 작은 실제 상품 2.57%.
+#: 표본 3장의 임시 실측값이며 일반 기준이 아니다 — 근거: data/component_study/조각면적.csv
+_CRUMB = 0.01
 
 
 def mask_area(cut: Image.Image) -> float:
@@ -78,31 +82,32 @@ def judge_photo(data: bytes, mime: str, client: llm.VisionClient | None = None) 
 
 
 def route_photo(data: bytes, mime: str, cut: Image.Image) -> Route:
-    """갈래 최종 판정 — 1층(마스크 규칙)이 확신하면 그걸로, 아니면 2층(비전)."""
+    """갈래 최종 판정 — `cut` 은 **청소 전** 누끼여야 한다(조각을 모두 봐야 하므로).
+
+    1층(마스크 규칙)이 확신하면 그걸로, 아니면 2층(비전). 마지막에 안전장치 둘 —
+      - 의미 있는 조각이 여럿이면 **판정 전에** keep: cutout 은 상품을 지우고
+        generate 는 새로 그린다 (실측 2026-08-16: 2.6% 조각이 삭제됨)
+      - 누끼가 빈손이면 cutout 금지: 오릴 게 없다
+    둘 다 keep 으로 물러난다. generate 는 상품을 새로 그려 모양이 바뀌므로 보존 경로가 아니다.
+    """
+    if significant_pieces(cut) >= 2:
+        return "keep"
     area = mask_area(cut)
     if (verdict := route_by_mask(area)) is not None:
         return verdict
     route = judge_photo(data, mime)
     if route == "cutout" and area < _TOO_SMALL:
-        return "keep"  # 오리라는데 누끼가 빈손이다 — 원본이라도 살리는 쪽이 안전하다
+        return "keep"
     return route
 
 
-def keep_largest(cut: Image.Image, grid: int = 256) -> Image.Image:
-    """누끼 결과에서 가장 큰 덩어리만 남긴다 — 딸려온 조각(책·대리석 등) 청소.
-
-    골든셋 실측에서 나온 처방: 꽃집_밝음(책 더미), 분식_밝음(대리석 조각).
-    조각 구분은 축소판(256)에서 빠르게 하고, 지우는 것만 원본 해상도에 적용한다
-    — 주인공의 가장자리 품질은 원본 알파가 그대로 지킨다.
-    """
-    from PIL import ImageChops
-
+def _components(cut: Image.Image, grid: int) -> tuple[list[list[int]], int]:
+    """알파 마스크의 연결 성분 목록(격자 칸 번호)과 전체 칸 수."""
     alpha = cut.getchannel("A")
     raw = alpha.resize((grid, grid), Image.Resampling.NEAREST).tobytes()
     on = [b > 127 for b in raw]
-
-    best: list[int] = []
     seen = [False] * (grid * grid)
+    comps: list[list[int]] = []
     for start in range(grid * grid):
         if not on[start] or seen[start]:
             continue
@@ -118,16 +123,36 @@ def keep_largest(cut: Image.Image, grid: int = 256) -> Image.Image:
                     if on[j] and not seen[j]:
                         seen[j] = True
                         queue.append(j)
-        if len(comp) > len(best):
-            best = comp
+        comps.append(comp)
+    return comps, grid * grid
 
-    if not best:
+
+def piece_areas(cut: Image.Image, grid: int = _PIECE_GRID) -> list[float]:
+    """누끼 조각들의 면적비(화면 대비), 큰 것부터."""
+    comps, cells = _components(cut, grid)
+    return sorted((len(c) / cells for c in comps), reverse=True)
+
+
+def significant_pieces(cut: Image.Image) -> int:
+    """부스러기를 뺀 조각 수 — 2 이상이면 상품이 여럿이라는 뜻이다."""
+    return sum(1 for a in piece_areas(cut) if a >= _CRUMB)
+
+
+def remove_crumbs(cut: Image.Image, grid: int = _PIECE_GRID) -> Image.Image:
+    """부스러기(_CRUMB 미만 조각)만 지우고 의미 있는 조각은 모두 남긴다.
+
+    v1 의 `keep_largest` 는 가장 큰 조각 하나만 남겼는데, 실측에서 그 규칙이 두 번째
+    상품(2.6%)을 통째로 지웠다. 상품이 사라지면 허위 광고가 되므로 계약을 바꿨다.
+    """
+    from PIL import ImageChops
+
+    comps, cells = _components(cut, grid)
+    keep = {i for c in comps if len(c) / cells >= _CRUMB for i in c}
+    if not keep:
         return cut
-
-    chosen = set(best)
-    keep = Image.frombytes(
-        "L", (grid, grid), bytes(255 if i in chosen else 0 for i in range(grid * grid))
-    )
+    mask = Image.frombytes("L", (grid, grid), bytes(255 if i in keep else 0 for i in range(cells)))
     out = cut.copy()
-    out.putalpha(ImageChops.multiply(alpha, keep.resize(cut.size, Image.Resampling.NEAREST)))
+    out.putalpha(
+        ImageChops.multiply(cut.getchannel("A"), mask.resize(cut.size, Image.Resampling.NEAREST))
+    )
     return out

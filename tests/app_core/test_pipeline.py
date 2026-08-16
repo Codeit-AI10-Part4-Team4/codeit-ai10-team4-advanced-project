@@ -2,7 +2,7 @@
 
 from PIL import Image, ImageFont
 
-from app_core import fonts, pipeline
+from app_core import fonts, photo_router, pipeline
 from app_core.poster_plan import PosterPlan
 from app_core.schema import AdBrief, CopyCandidate, Store
 
@@ -120,7 +120,7 @@ def test_cutout_갈래는_청소된_누끼가_그대로_전달된다(tmp_path, m
     monkeypatch.setattr(
         pipeline, "remove_background", lambda im: Image.new("RGBA", (64, 64), (255, 255, 255, 255))
     )
-    monkeypatch.setattr(pipeline, "keep_largest", lambda cut: cleaned)
+    monkeypatch.setattr(pipeline, "remove_crumbs", lambda cut: cleaned)
     monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, cut: "cutout")
     monkeypatch.setattr(pipeline, "build_bg_prompt", lambda *a, **k: "bg")
     monkeypatch.setattr(
@@ -161,3 +161,49 @@ def test_generate_갈래는_제품이_든_장면을_그린다(tmp_path, monkeypa
     pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
     assert seen["product"] == "크로플"
     assert seen["prompt"] == "hero prompt"
+
+
+def test_라우터는_청소_전_누끼를_받는다(tmp_path, monkeypatch):
+    """청소를 먼저 하면 라우터가 보기 전에 상품이 사라진다 — 순서를 고정한다."""
+    seen = {}
+    raw = Image.new("RGBA", (64, 64), (255, 255, 255, 255))
+    monkeypatch.setattr(fonts, "load", _fake_font)
+    monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: _photo(tmp_path))
+    monkeypatch.setattr(pipeline, "remove_background", lambda im: raw)
+    monkeypatch.setattr(pipeline, "remove_crumbs", lambda cut: Image.new("RGBA", (64, 64)))
+
+    def _route(data, mime, cut):
+        seen["cut"] = cut
+        return "keep"
+
+    monkeypatch.setattr(pipeline, "route_photo", _route)
+    brief = AdBrief(goal="image", product="크로플", price=0, photo_id=7)
+    pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
+    assert seen["cut"] is raw  # 청소 전 누끼여야 한다
+
+
+def test_poster는_다제품을_하나로_줄이지_않는다(tmp_path, monkeypatch):
+    """포스터 제품 이미지까지 두 조각이 살아서 간다 — 가장 큰 것만 남기기 금지."""
+    seen = {}
+    two = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    two.paste((255, 255, 255, 255), (8, 8, 40, 40))  # 큰 상품 25%
+    two.paste((255, 255, 255, 255), (48, 48, 56, 56))  # 작은 상품 1.6%
+    monkeypatch.setattr(fonts, "load", _fake_font)
+    monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: _photo(tmp_path))
+    monkeypatch.setattr(pipeline, "remove_background", lambda im: two)
+    monkeypatch.setattr(
+        pipeline,
+        "plan_poster",
+        lambda **kwargs: PosterPlan(
+            tagline="t", badge="b", date_line="", features=["a|b"], event="", palette="fresh_mint"
+        ),
+    )
+
+    def _spy(product, shop, **kwargs):
+        seen["pieces"] = photo_router.significant_pieces(product)
+        return Image.new("RGB", (1080, 1080))
+
+    monkeypatch.setattr(pipeline, "generate_poster", _spy)
+    brief = AdBrief(goal="image", product="크로플", price=0, photo_id=7)
+    pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "poster")
+    assert seen["pieces"] == 2  # 두 상품이 그대로 포스터로 간다
