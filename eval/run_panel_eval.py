@@ -127,8 +127,11 @@ def report(result: EvaluationResult, counter: FailureCounter, elapsed: float) ->
     total = len(result.persona_comments)
     print(f"\n  ⚠ 가격을 괜찮다면서 걸림돌은 price: {len(bad)}/{total}")
     if bad:
-        print("    걸림돌이 price 로 쏠리는 것 자체는 결함이 아니다 — 정말 비싼")
-        print("    광고면 맞는 답이다. 위 숫자가 큰 것이 결함이다.")
+        print("    가격이 괜찮다고 해놓고 걸림돌은 price 다. 광고가 아니라")
+        print("    프롬프트를 보고 답했다는 뜻이다.")
+    else:
+        print("    쏠림 자체는 결함이 아니다 — 정말 비싼 광고면 맞는 답이고,")
+        print("    광고에 가격 말고 구체적인 게 없으면 반응할 것도 가격뿐이다.")
 
     if counter.samples:
         print("\n  탈락 로그 (최대 5건)")

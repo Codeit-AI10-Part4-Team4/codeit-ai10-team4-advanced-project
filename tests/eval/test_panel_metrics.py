@@ -46,15 +46,47 @@ def test_invalid_input_raises(pred: list[float], truth: list[float]) -> None:
 
 
 # --- 걸림돌 라벨의 자기모순 (2026-08-14) ------------------------------------
+#
+# 아래 코멘트는 전부 **실제 API 응답**이다. 지어낸 문장으로 테스트하면
+# 계측기가 실전에서 어떻게 틀리는지 알 수 없다. 첫 판(낱말 줄기 매칭)이
+# 실측에서 5건을 잡았는데 5건 다 오탐이었던 것도 그래서 못 봤다.
+
+
+#: 6,000원 크로플 광고 — 광고에 가격 말고 구체적인 게 없다.
+#: 12명 전원이 price 를 골랐는데, **읽어 보면 다 정당한 반응이다.**
+CHEAP_AD_PRICE_ONLY = [
+    "크로플이 맛있어 보이는데, 가격이 적당한지 고민이 되네요.",
+    "크로플이 맛있어 보이긴 한데, 가격이 좀 더 저렴했으면 좋겠어요.",
+    "크로플이 맛있을 것 같지만, 가격이 다른 카페와 비슷해서 고민하게 돼요.",
+    "크로플이 맛있을 것 같지만, 가격이 조금 더 저렴했으면 좋겠어요.",
+    "크로플이 맛있을 것 같지만, 가격이 조금 부담스러워서 고민이 되네요.",
+    "크로플이 맛있을 것 같긴 한데, 가격이 좀 애매하네요.",
+]
+
+#: 3,000원 아메리카노 광고 — 동네 평균의 1/3 인데 price 를 골랐다.
+#: 코멘트가 **가격은 괜찮다고 단정하고** 다른 이유를 댄다. 이것이 모순이다.
+CHEAP_AD_REAL_REASON_ELSEWHERE = [
+    "가격은 괜찮지만, 늘 가던 곳이 있어서 고민이 됩니다.",
+    "가격이 매력적이긴 한데, 늘 가던 곳이 있어서 고민이 됩니다.",
+    "가격이 저렴해서 가볼까 싶지만, 다른 카페와 비교하게 될 것 같아요.",
+    "가격이 적당해 보이지만, 점심 시간에 가는 곳이 많아서 고민이 됩니다.",
+    "가격은 괜찮은데, 늘 가던 카페가 있어서 고민이네요.",
+]
+
+
+def test_uncertainty_about_price_is_not_praise() -> None:
+    """ "적당한지 고민" 은 "적당하다" 가 아니다 — 어미가 뜻을 뒤집는다.
+
+    첫 판이 낱말 줄기만 봐서 이 여섯을 전부 모순으로 셌다. 5/5 오탐이었다.
+    """
+    pairs = [(c, "price") for c in CHEAP_AD_PRICE_ONLY]
+    assert price_contradictions(pairs) == []
 
 
 def test_praised_price_with_price_label_is_a_contradiction() -> None:
-    """실측에서 12명이 가격이 괜찮다고 말하면서 걸림돌은 price 를 골랐다."""
-    pairs = [
-        ("가격은 괜찮지만, 늘 가던 곳이 있어서 고민이 됩니다", "price"),
-        ("가격이 저렴해서 가볼까 싶지만, 다른 카페와 비교하게 되네요", "price"),
-    ]
-    assert len(price_contradictions(pairs)) == 2
+    """가격이 괜찮다고 단정하고 다른 이유를 대면서 라벨은 price 다."""
+    pairs = [(c, "price") for c in CHEAP_AD_REAL_REASON_ELSEWHERE]
+    assert len(price_contradictions(pairs)) == len(CHEAP_AD_REAL_REASON_ELSEWHERE)
 
 
 def test_genuine_price_complaint_is_not_flagged() -> None:
@@ -62,6 +94,7 @@ def test_genuine_price_complaint_is_not_flagged() -> None:
     pairs = [
         ("맛있을 것 같지만 가격이 부담스럽네요", "price"),
         ("9,500원이면 한 번 더 생각하게 됩니다", "price"),
+        ("가격이 좀 더 저렴했으면 좋겠어요", "price"),
     ]
     assert price_contradictions(pairs) == []
 

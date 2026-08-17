@@ -600,10 +600,7 @@ def _summarize(
 
     raw = client.complete_json(
         SUMMARY_SYSTEM,
-        "## 사실 (이 숫자만 쓸 수 있다)\n"
-        + fact_block
-        + "\n\n## 손님 반응\n"
-        + "\n".join(lines),
+        "## 사실 (이 숫자만 쓸 수 있다)\n" + fact_block + "\n\n## 손님 반응\n" + "\n".join(lines),
     )
 
     out: list[str] = []
@@ -658,9 +655,7 @@ def _classify_resistance(
 
     # 코멘트에 줄바꿈이 있으면 모델이 항목을 더 세어 개수가 어긋난다
     # (2026-08-14 실측: 12개를 물었는데 13개가 왔다).
-    listed = "\n".join(
-        f"{i + 1}. {' '.join(e.comment.split())}" for i, e in enumerate(evals)
-    )
+    listed = "\n".join(f"{i + 1}. {' '.join(e.comment.split())}" for i, e in enumerate(evals))
     system = RESISTANCE_SYSTEM
     if not show_price:
         # 코드가 아는 사실은 양쪽 콜에 다 걸어야 한다. 손님 콜만 막아 두었더니

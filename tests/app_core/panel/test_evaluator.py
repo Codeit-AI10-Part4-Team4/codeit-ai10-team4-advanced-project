@@ -1091,9 +1091,7 @@ def test_summary_sees_more_than_price(yeoksam: Panel, shop, brief, copy) -> None
 
     assert seen, "요약 콜이 안 갔다"
     facts = seen[0].split("## 손님 반응")[0]
-    non_price = [
-        ln for ln in facts.splitlines() if ln.startswith("- ") and "원" not in ln
-    ]
+    non_price = [ln for ln in facts.splitlines() if ln.startswith("- ") and "원" not in ln]
     assert non_price, f"사실이 여전히 가격뿐이다:\n{facts}"
 
 
@@ -1120,16 +1118,12 @@ def test_price_numbers_hidden_when_ad_has_no_price(yeoksam: Panel, shop, copy) -
 def test_common_numbers_are_not_price_dominated(yeoksam: Panel, shop, copy) -> None:
     """공통 숫자가 가격 쪽으로 쏠려 있으면 손님이 댈 이야기도 가격뿐이 된다."""
     persona = yeoksam.personas[0]
-    common = offered_paths(yeoksam.features, persona, copy) - {
-        ref.path for ref in persona.evidence
-    }
+    common = offered_paths(yeoksam.features, persona, copy) - {ref.path for ref in persona.evidence}
     price_ish = {p for p in common if "ticket" in p}
     assert len(price_ish) * 2 <= len(common), f"공통 {len(common)}개 중 가격 {price_ish}"
 
 
-def test_price_sense_is_a_person_not_a_neighbourhood(
-    yeoksam: Panel, shop, brief, copy
-) -> None:
+def test_price_sense_is_a_person_not_a_neighbourhood(yeoksam: Panel, shop, brief, copy) -> None:
     """가격 감각은 손님의 성격이지 동네의 성격이 아니다.
 
     옛 문장은 `narrator.PRICE_KO` 와 이어져 `"가격에 민감한 동네에 산다"` 가
@@ -1157,9 +1151,7 @@ def test_every_price_sense_has_a_person_phrase() -> None:
         assert phrase.endswith("편이다.")
 
 
-def test_price_resistance_is_challenged_when_ad_has_no_price(
-    yeoksam: Panel, shop, copy
-) -> None:
+def test_price_resistance_is_challenged_when_ad_has_no_price(yeoksam: Panel, shop, copy) -> None:
     """가격 없는 광고에 price 라고 답하면 한 번 되묻는다.
 
     코드가 아는 사실이므로 모델의 자기검열에 맡기지 않는다.
@@ -1183,7 +1175,7 @@ def test_price_resistance_is_challenged_when_ad_has_no_price(
 
 
 def test_alternative_resistance_exists() -> None:
-    """"다른 데가 있다"를 담을 라벨이 없어서 price 로 몰렸다.
+    """ "다른 데가 있다"를 담을 라벨이 없어서 price 로 몰렸다.
 
     실측(3,000원 아메리카노 · 동네 결제 평균 9,546원): 12명 전원이 `price`
     를 골랐는데 코멘트는 하나같이 가격이 괜찮다고 말했다. 진짜 이유는
@@ -1233,9 +1225,7 @@ def test_resistance_comes_from_the_comment_not_the_persona_call(
     써놓고 라벨은 price 를 골랐다. 그래서 분류를 떼어냈다.
     """
     n = len(yeoksam.personas)
-    client = FakeClient(
-        _reply_by_demo(yeoksam, resistance="price"), labels=["alternative"] * n
-    )
+    client = FakeClient(_reply_by_demo(yeoksam, resistance="price"), labels=["alternative"] * n)
     result = evaluate(yeoksam, shop, brief, copy, client=client, consistency_k=1)
 
     assert {c.resistance for c in result.persona_comments} == {"alternative"}
@@ -1261,9 +1251,7 @@ def test_resistance_classifier_sees_only_comments(yeoksam: Panel, shop, brief, c
     assert str(yeoksam.features.avg_ticket) not in payload
 
 
-def test_bad_classifier_response_keeps_original_labels(
-    yeoksam: Panel, shop, brief, copy
-) -> None:
+def test_bad_classifier_response_keeps_original_labels(yeoksam: Panel, shop, brief, copy) -> None:
     """분류가 헛소리를 하면 손님이 고른 라벨을 그대로 쓴다.
 
     부가 콜 하나 때문에 이미 끝난 12명의 평가를 버리지 않는다.
@@ -1348,9 +1336,7 @@ def test_every_system_prompt_says_json() -> None:
         assert "json" in text.lower(), f"{name} 에 'json' 이라는 단어가 없다"
 
 
-def test_classifier_tolerates_extra_and_missing_numbers(
-    yeoksam: Panel, shop, brief, copy
-) -> None:
+def test_classifier_tolerates_extra_and_missing_numbers(yeoksam: Panel, shop, brief, copy) -> None:
     """번호가 하나 더 오거나 빠져도 어긋난 자리만 버린다.
 
     2026-08-14 실측: 12명을 물었는데 라벨 13개가 왔다. 목록으로 받아 자리로
@@ -1363,7 +1349,7 @@ def test_classifier_tolerates_extra_and_missing_numbers(
         def complete_json(self, system: str, user: str) -> dict[str, Any]:
             if system.startswith("손님이 남긴 한 줄을"):
                 labels = {str(i + 1): "alternative" for i in range(n)}
-                labels.pop("2")           # 하나 빠뜨리고
+                labels.pop("2")  # 하나 빠뜨리고
                 labels[str(n + 1)] = "none"  # 없는 번호를 더한다
                 return {"labels": labels}
             return super().complete_json(system, user)
@@ -1429,9 +1415,7 @@ def test_classifier_cannot_pick_price_without_a_price(yeoksam: Panel, shop, copy
     assert "price" not in result.top_resistance
 
 
-def test_classifier_rule_is_not_added_when_price_exists(
-    yeoksam: Panel, shop, brief, copy
-) -> None:
+def test_classifier_rule_is_not_added_when_price_exists(yeoksam: Panel, shop, brief, copy) -> None:
     """가격이 있는 광고에는 그 규칙을 붙이지 않는다 — 붙이면 price 를 못 고른다."""
     seen: list[str] = []
 

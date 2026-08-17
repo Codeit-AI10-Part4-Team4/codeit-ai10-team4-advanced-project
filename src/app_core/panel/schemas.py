@@ -53,9 +53,7 @@ TimeContext = Literal["morning", "weekday_lunch", "afternoon", "evening", "night
 #: 무엇보다 이건 우리가 만든 상황이다. 프롬프트가 12명 전원에게
 #: "늘 가던 곳을 다시 찾는 편"이라고 말해 놓고(`motive=habitual`),
 #: 무엇이 걸리냐 물으면서 "가던 데가 있어서"라는 답을 주지 않았다.
-Resistance = Literal[
-    "price", "message", "visual", "relevance", "alternative", "none"
-]
+Resistance = Literal["price", "message", "visual", "relevance", "alternative", "none"]
 Confidence = Literal["ok", "low"]
 
 #: 비중 합이 1.0에서 벗어나도 되는 허용치. 반올림 오차만 흡수한다.
