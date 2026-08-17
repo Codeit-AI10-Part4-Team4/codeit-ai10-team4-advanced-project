@@ -1,21 +1,49 @@
-"""광고 조립 부품 ─ 배경 생성 + 제품 합성 + 문구 오버레이 (실험 근거: notebooks/pipeline_v0.ipynb)"""
+"""광고 조립 부품 v2 ─ 배경 위에 제품·문구를 레퍼런스 규칙대로 얹는다.
 
-from PIL import Image, ImageDraw, ImageFont
+규칙 근거: 문서/compose_v2_규칙명세.md (인스타 카페 광고 18장 분석, 2026-08-15)
+  - 글자는 상단 1/3 또는 하단 1/3 (레퍼런스 13/18) — 중앙 박치기 금지
+  - 모든 문구 두꺼운 외곽선 일괄 적용 0/18 → stroke 제거, 배경 대비색 또는 그라데이션 판
+  - 폰트 역할 2종(display 제목 + body_light 부제), 디자인 색 3색 이내
+  - 제품(cutout)은 글자 아래 '사용 가능 상자' 안에 축소, 바닥 그림자
 
-_FONT_CANDIDATES = [
-    "C:/Windows/Fonts/malgunbd.ttf",  # 윈도우
-    "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",  # 리눅스
-]
+입력 계약(pipeline.py): product 가 있으면 cutout(누끼 레이어), 없으면 keep/hero/generate —
+compose 는 뒤 셋을 구분하지 못하므로 product 유무 두 갈래로만 동작한다.
+"""
 
+import logging
+from typing import Literal
 
-def _load_font(size: int) -> ImageFont.FreeTypeFont:
-    """OS마다 다른 한글 폰트 경로를 순서대로 시도한다."""
-    for path in _FONT_CANDIDATES:
-        try:
-            return ImageFont.truetype(path, size)
-        except OSError:
-            continue
-    raise OSError("한글 폰트를 찾지 못했습니다. _FONT_CANDIDATES에 경로를 추가하세요.")
+from PIL import Image, ImageDraw, ImageFilter, ImageOps, ImageStat
+
+# 글꼴 후보는 `fonts.py` 한 곳에서만 관리한다. 여기 따로 두면 새 OS 를 지원할 때
+# 한쪽만 고치게 되고, 그 한쪽은 반드시 잊힌다.
+from app_core import fonts
+
+Zone = Literal["top", "bottom"]
+
+# ── 비율 규칙 (명세 §2) — 전부 캔버스 비율이라 1080 외 크기에도 그대로 ─────
+_MARGIN_X = 0.07  #: 좌우 안전 여백
+_ZONE_H = 0.33  #: 글자 영역 높이 (상단 또는 하단 1/3)
+_HEAD_TOP = 0.08  #: 상단형 제목 시작 y
+_HEAD_BOTTOM_START = 0.72  #: 하단형 제목 시작 y
+_HEAD_SIZE = 0.085  #: 제목 시작 크기 (캔버스 폭 비율)
+_HEAD_FLOOR = 0.055  #: 제목 하한
+_SUB_RATIO = 0.42  #: 부제 = 제목 × 0.42
+_LINE_GAP = 0.35  #: 제목·부제 간격 = 제목 글자 높이 × 0.35
+_MAX_LINES = 2
+_PRODUCT_GAP = 0.03  #: 글자 영역과 제품 사이
+_PRODUCT_BOTTOM = 0.08  #: 제품 하단 여백
+#: 글자 영역 밝기 std 가 이보다 크면 그라데이션 판. 55 로 시작했다가 실제 생성 배경에서
+#: std 50.5·53.5 인 사례(꽃집)가 안 읽혀 50 으로 보정 — 코드 밖 자료 없이 이 숫자만 근거.
+_STD_THRESHOLD = 50.0
+_PANEL_ALPHA = 0.55  #: 판 최대 불투명도
+_PANEL_EXTRA = 0.06  #: 판 높이 = 글자 영역 + 6%
+_SHADOW_ALPHA = 0.25
+_SHADOW_BLUR = 0.022  #: 그림자 흐림 반경 = 캔버스 높이 비율 (1080 기준 24px)
+
+_DARK = (26, 26, 26)  #: 밝은 배경 위 글자
+_LIGHT = (250, 250, 250)  #: 어두운 배경 위 글자
+_log = logging.getLogger(__name__)
 
 
 def make_gradient_background(
@@ -34,15 +62,168 @@ def make_gradient_background(
     return bg
 
 
-def _fit_font(text: str, max_width: int, start: int, floor: int = 30) -> ImageFont.FreeTypeFont:
-    """글자가 폭을 넘치면 폰트 크기를 줄여 한 줄에 들어가게 한다."""
-    size = start
-    while size > floor:
-        font = _load_font(size)
-        if font.getlength(text) <= max_width:
-            return font
-        size -= 4
-    return _load_font(floor)
+# ── 분석 ─────────────────────────────────────────────────────
+
+
+def zone_box(size: tuple[int, int], zone: Zone) -> tuple[int, int, int, int]:
+    """글자 영역 사각형 — 좌우 7% 제외, 상단 또는 하단 33%."""
+    w, h = size
+    x0, x1 = int(w * _MARGIN_X), int(w * (1 - _MARGIN_X))
+    if zone == "top":
+        return (x0, 0, x1, int(h * _ZONE_H))
+    return (x0, int(h * (1 - _ZONE_H)), x1, h)
+
+
+def zone_stats(bg: Image.Image, zone: Zone) -> tuple[float, float]:
+    """글자 영역의 밝기 (평균, 표준편차). 표준편차가 곧 '복잡도'다."""
+    g = ImageOps.grayscale(bg).crop(zone_box(bg.size, zone))
+    s = ImageStat.Stat(g)
+    return s.mean[0], s.stddev[0]
+
+
+def pick_zone(bg: Image.Image, product: Image.Image | None) -> Zone:
+    """글자를 어디 둘지 — 제품(누끼)이 있으면 상단 고정, 없으면 덜 복잡한 쪽."""
+    if product is not None:
+        return "top"
+    _, top_std = zone_stats(bg, "top")
+    _, bottom_std = zone_stats(bg, "bottom")
+    return "top" if top_std <= bottom_std else "bottom"
+
+
+# ── 글자 ─────────────────────────────────────────────────────
+
+
+def wrap_to_fit(text: str, max_width: int, role: str, start: int, floor: int) -> tuple:
+    """폭에 맞게 크기를 줄이고, 그래도 안 되면 최대 2줄, 그래도 넘치면 말줄임.
+
+    반환: (font, lines)
+    """
+    font = fonts.fit(text, max_width, start, role, floor=floor)
+    if font.getlength(text) <= max_width:
+        return font, [text]
+
+    font = fonts.load(role, floor)
+    words = text.split()
+    if len(words) >= 2:
+        # 공백 기준으로 두 줄 — 앞줄이 폭 안에 들어가는 가장 긴 분할
+        best = None
+        for i in range(1, len(words)):
+            a, b = " ".join(words[:i]), " ".join(words[i:])
+            if font.getlength(a) <= max_width:
+                best = (a, b)
+        lines = list(best) if best else [words[0], " ".join(words[1:])]
+    else:
+        half = max(1, len(text) // 2)
+        lines = [text[:half], text[half:]]
+
+    return font, [_ellipsize(line, font, max_width) for line in lines[:_MAX_LINES]]
+
+
+def _ellipsize(line: str, font, max_width: int) -> str:
+    if font.getlength(line) <= max_width:
+        return line
+    original = line
+    while line and font.getlength(line + "…") > max_width:
+        line = line[:-1]
+    _log.info("문구가 폭을 넘어 말줄임: %r → %r", original, line + "…")
+    return line + "…"
+
+
+def _text_color(bg: Image.Image, zone: Zone) -> tuple[int, int, int]:
+    mean, _ = zone_stats(bg, zone)
+    return _DARK if mean > 128 else _LIGHT
+
+
+def _draw_panel(canvas: Image.Image, zone: Zone) -> None:
+    """글자 영역 뒤 검정 그라데이션 판 — 상단형은 위가 진하고, 하단형은 아래가 진하다."""
+    w, h = canvas.size
+    ph = int(h * (_ZONE_H + _PANEL_EXTRA))
+    panel = Image.new("RGBA", (w, ph), (0, 0, 0, 0))
+    d = ImageDraw.Draw(panel)
+    for y in range(ph):
+        t = y / ph  # 0(위) → 1(아래)
+        a = (1 - t) if zone == "top" else t
+        d.line([(0, y), (w, y)], fill=(0, 0, 0, int(255 * _PANEL_ALPHA * a)))
+    canvas.alpha_composite(panel, (0, 0 if zone == "top" else h - ph))
+
+
+def _draw_text(canvas: Image.Image, bg: Image.Image, zone: Zone, headline: str, sub: str) -> int:
+    """제목·부제를 글자 영역에 그린다. 반환: 글자 블록의 마지막 y (제품 상자 계산용)."""
+    w, h = canvas.size
+    x0, _, x1, _ = zone_box(canvas.size, zone)
+    max_w = x1 - x0
+
+    _, std = zone_stats(bg, zone)
+    if std > _STD_THRESHOLD:
+        _draw_panel(canvas, zone)
+        color = _LIGHT
+    else:
+        color = _text_color(bg, zone)
+
+    head_font, head_lines = wrap_to_fit(
+        headline, max_w, "display", int(w * _HEAD_SIZE), int(w * _HEAD_FLOOR)
+    )
+    head_h = head_font.size
+    sub_font, sub_lines = (None, [])
+    if sub:
+        sub_start = int(head_font.size * _SUB_RATIO)
+        sub_font, sub_lines = wrap_to_fit(
+            sub, max_w, "body_light", sub_start, max(12, sub_start // 2)
+        )
+
+    # 블록 총 높이 — 33% 를 넘으면 부제를 1줄 말줄임으로
+    gap = int(head_h * _LINE_GAP)
+    block_h = head_h * len(head_lines)
+    if sub_font is not None:
+        block_h += gap + sub_font.size * len(sub_lines)
+    if sub_font is not None and block_h > h * _ZONE_H:
+        sub_lines = [_ellipsize(" ".join(sub_lines), sub_font, max_w)]
+
+    y = int(h * (_HEAD_TOP if zone == "top" else _HEAD_BOTTOM_START))
+    d = ImageDraw.Draw(canvas)
+    for line in head_lines:
+        d.text((w // 2, y), line, font=head_font, fill=color, anchor="ma")
+        y += head_h
+    if sub_lines and sub_font is not None:
+        y += gap
+        for line in sub_lines:
+            d.text((w // 2, y), line, font=sub_font, fill=color, anchor="ma")
+            y += sub_font.size
+    return y
+
+
+# ── 제품 ─────────────────────────────────────────────────────
+
+
+def _place_product(canvas: Image.Image, product: Image.Image, text_bottom: int) -> None:
+    """제품을 '사용 가능 상자'(글자 아래 3% ~ 하단 8%) 안에 축소해 넣고 바닥 그림자를 깐다."""
+    w, h = canvas.size
+    blur = max(2, int(h * _SHADOW_BLUR))
+    x0, x1 = int(w * _MARGIN_X), int(w * (1 - _MARGIN_X))
+    y0 = text_bottom + int(h * _PRODUCT_GAP)
+    y1 = int(h * (1 - _PRODUCT_BOTTOM))
+    if y1 - y0 < h * 0.1:  # 상자가 너무 작으면 그리지 않는 것보다 최소한은 보이게
+        y0 = y1 - int(h * 0.1)
+
+    bbox = product.getbbox()
+    prod = product.crop(bbox) if bbox else product.copy()
+    prod.thumbnail((x1 - x0, y1 - y0))
+    px = (w - prod.width) // 2
+    py = y1 - prod.height
+
+    # 바닥 그림자 — 제품 아래 납작한 타원, 제품보다 먼저 그려서 뒤에 깔린다
+    sw, sh = int(prod.width * 0.9), max(4, int(prod.height * 0.06))
+    shadow = Image.new("RGBA", (sw + blur * 4, sh + blur * 4), (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).ellipse(
+        [blur * 2, blur * 2, blur * 2 + sw, blur * 2 + sh],
+        fill=(0, 0, 0, int(255 * _SHADOW_ALPHA)),
+    )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(blur))
+    canvas.alpha_composite(shadow, ((w - shadow.width) // 2, py + prod.height - sh // 2 - blur * 2))
+    canvas.alpha_composite(prod, (px, py))
+
+
+# ── 조립 ─────────────────────────────────────────────────────
 
 
 def compose_ad(
@@ -52,49 +233,19 @@ def compose_ad(
     size: tuple[int, int] = (1080, 1080),
     background: Image.Image | None = None,
 ) -> Image.Image:
-    """누끼 딴 제품 이미지를 배경 위에 얹고 문구를 그려 광고 이미지를 만든다.
+    """배경 위에 문구(와 제품)를 레퍼런스 규칙대로 얹어 광고 이미지를 만든다.
 
-    headline·sub는 문구 생성이 주는 형식(CopyCandidate) 그대로다 —
-    헤드라인은 크게, 서브는 그 아래 작게. 가격은 보통 sub에 녹아 온다.
-    background를 주면 크기를 맞춰 배경으로 쓰고, 없으면 그라데이션(임시)을 깐다.
-    product가 None이면 사진 없이 배경과 문구만으로 만든다(텍스트 광고).
+    headline·sub 는 문구 생성이 주는 형식(CopyCandidate) 그대로다.
+    background 를 주면 크기를 맞춰 쓰고, 없으면 그라데이션(임시)을 깐다.
+    product 가 있으면(cutout) 글자는 상단, 제품은 그 아래 상자에. 없으면 글자만 —
+    상단·하단 중 덜 복잡한 쪽에.
     """
-    w, h = size
-    bg = background.resize(size) if background else make_gradient_background(size)
+    bg = (background.resize(size) if background else make_gradient_background(size)).convert("RGB")
     canvas = bg.convert("RGBA")
 
+    zone = pick_zone(bg, product)
+    text_bottom = _draw_text(canvas, bg, zone, headline, sub)
     if product is not None:
-        # 투명 여백을 잘라 제품이 크게 보이게 (개선 1호)
-        bbox = product.getbbox()
-        prod = product.crop(bbox) if bbox else product.copy()
-        prod.thumbnail((int(w * 0.75), int(h * 0.62)))
-        canvas.alpha_composite(prod, ((w - prod.width) // 2, h - prod.height - 100))
-
-    # 사진이 없으면 위쪽이 허전하므로 문구를 가운데로 내린다.
-    head_y = 140 if product is not None else int(h * 0.42)
-
-    d = ImageDraw.Draw(canvas)
-    max_text_w = int(w * 0.9)
-    head_font = _fit_font(headline, max_text_w, 76)
-    d.text(
-        (w // 2, head_y),
-        headline,
-        font=head_font,
-        fill=(255, 255, 255),
-        anchor="mm",
-        stroke_width=4,
-        stroke_fill=(60, 35, 15),
-    )
-    if sub:
-        sub_font = _fit_font(sub, max_text_w, 52)
-        d.text(
-            (w // 2, head_y + 95),
-            sub,
-            font=sub_font,
-            fill=(255, 245, 230),
-            anchor="mm",
-            stroke_width=3,
-            stroke_fill=(60, 35, 15),
-        )
+        _place_product(canvas, product, text_bottom)
 
     return canvas.convert("RGB")

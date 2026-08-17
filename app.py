@@ -235,15 +235,16 @@ def photo_panel(draft: AdBriefDraft) -> None:
 
 
 def brief_panel(draft: AdBriefDraft) -> None:
-    """개발용 — LLM 이 제대로 알아들었는지 눈으로 보려고 띄운다. 배포 시 뺀다."""
-    st.subheader("주문서")
-    st.caption("개발 확인용")
-    st.json(draft.model_dump())
+    """개발용 — LLM 이 제대로 알아들었는지 눈으로 보려고 띄운다. 배포 시 뺀다.
+
+    **접어 둔다.** 펼친 채로 두면 화면 오른쪽 2/5 를 개발용 JSON 이 차지해서,
+    사장님 화면에서 제일 큰 것이 개발 부산물이 된다 (2026-08-14 클릭 검증).
+    정작 필요한 "다 찼나"는 접힌 제목에 남겨서 한눈에 보인다.
+    """
     missing = draft.missing()
-    if missing:
-        st.warning(f"아직 안 찬 것: {', '.join(missing)}")
-    else:
-        st.success("다 찼습니다")
+    state = f"아직 안 찬 것: {', '.join(missing)}" if missing else "다 찼습니다"
+    with st.expander(f"🧾 주문서 (개발 확인용) — {state}", expanded=False):
+        st.json(draft.model_dump())
 
 
 def _make_copies(store: Store, brief: AdBrief, parent_id: int | None = None) -> bool:
@@ -372,15 +373,22 @@ def revise_view(store: Store) -> None:
 
 
 def copy_view(store: Store, draft: AdBriefDraft) -> None:
-    # 필수만 차면 바로 뜬다. 봇이 느낌·상황을 더 묻고 있어도 사장님은
-    # 언제든 여기서 끊고 만들 수 있다.
-    if draft.next_slot():
-        st.caption("더 안 알려주셔도 지금 바로 만들 수 있습니다")
-    if st.button("문구 만들기", type="primary"):
-        _make_copies(store, draft.to_brief())
-
     copies = st.session_state.get("copies") or []
     ranked: list[Ranked] = st.session_state.get("ranked") or []
+
+    # **아직 안 만들었을 때만 띄운다.** 결과가 나온 뒤에도 이 빨간 버튼이 맨 위에
+    # 남으면 화면에서 제일 눈에 띄는 것이 "누르면 순위가 날아가는 버튼"이 된다
+    # (_make_copies 가 ranked 를 지운다). 2026-08-14 클릭 검증에서 눈으로 봤다.
+    # 다시 만들기는 아래 revise_view 가 맡는다.
+    if not copies:
+        # 필수만 차면 바로 뜬다. 봇이 느낌·상황을 더 묻고 있어도 사장님은
+        # 언제든 여기서 끊고 만들 수 있다.
+        if draft.next_slot():
+            st.caption("더 안 알려주셔도 지금 바로 만들 수 있습니다")
+        # copies 를 위에서 읽었으므로 rerun 없이는 방금 만든 문구가 이번 화면에
+        # 안 나온다. 실패했을 때는 그대로 둬야 에러 문구가 남는다.
+        if st.button("문구 만들기", type="primary") and _make_copies(store, draft.to_brief()):
+            st.rerun()
 
     if copies and not ranked and st.button("🧑‍🤝‍🧑 동네 손님 12명에게 셋 다 보여주기"):
         _rank_copies(store, st.session_state.brief, copies)
@@ -428,10 +436,21 @@ def _make_images(store: Store, brief: AdBrief) -> bool:
             return False
         st.session_state.copies = copies
 
+    # 부품들이 사장님께 보여줄 문장을 이미 써뒀다 — "보관함에 3번 사진이 없습니다",
+    # "한글 글꼴을 찾지 못했습니다", "모르는 팔레트입니다". 안 받으면 그 문장 대신
+    # 화면에 트레이스백이 뜬다. GPU 가 없는 환경도 여기로 떨어진다.
     images = {}
     for style, label in STYLES:
-        with st.spinner(f"{label} 만드는 중... (20~30초)"):
-            images[style] = pipeline.generate_ad(brief, store, copies[0], style=style)
+        try:
+            with st.spinner(f"{label} 만드는 중... (20~30초)"):
+                images[style] = pipeline.generate_ad(brief, store, copies[0], style=style)
+        except (OSError, ValueError, RuntimeError, ImportError) as e:
+            st.error(f"{label}을(를) 만들지 못했습니다. {e}")
+            if llm.profile() == "stub":
+                st.caption(
+                    "⚠️ MODEL_PROFILE 이 stub 이라 기획 단계에서 멈춥니다 — .env 를 확인하세요."
+                )
+            return False
 
     st.session_state.images = images
     st.session_state.brief = brief
