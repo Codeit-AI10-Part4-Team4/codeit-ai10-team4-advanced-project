@@ -58,19 +58,32 @@ from app_core.schema import AdBrief, CopyCandidate, Feedback, Store
 #: 좌표를 박아두면 카카오 지오코딩을 건너뛴다 — 호출이 줄고 매번 같은 상권이 나온다.
 #: 홍대·수유는 테스트에서 쓰던 값 그대로다.
 STORES: list[tuple[Store, tuple[float, float]]] = [
-    (Store(id=1, user_id=1, industry="cafe", name="한나절커피",
-           address="서울 강남구 역삼동"), (127.0364, 37.5006)),
-    (Store(id=2, user_id=1, industry="korean_food", name="홍대반상",
-           address="서울 마포구 서교동"), (126.9250, 37.5610)),
-    (Store(id=3, user_id=1, industry="chicken", name="수유통닭",
-           address="서울 강북구 수유동"), (127.0155, 37.6893)),
+    (
+        Store(id=1, user_id=1, industry="cafe", name="한나절커피", address="서울 강남구 역삼동"),
+        (127.0364, 37.5006),
+    ),
+    (
+        Store(
+            id=2, user_id=1, industry="korean_food", name="홍대반상", address="서울 마포구 서교동"
+        ),
+        (126.9250, 37.5610),
+    ),
+    (
+        Store(id=3, user_id=1, industry="chicken", name="수유통닭", address="서울 강북구 수유동"),
+        (127.0155, 37.6893),
+    ),
 ]
 
 #: 사장님이 실제로 낼 법한 평범한 광고. **일부러 어긋나게 만들지 않았다** —
 #: 고칠 게 많은 광고만 고르면 개선폭이 부풀려져 결과를 믿을 수 없다.
 BRIEFS: dict[str, list[dict[str, Any]]] = {
     "cafe": [
-        {"product": "아이스 아메리카노", "price": 4500, "situation": "여름 시즌 음료", "tone": "시원한"},
+        {
+            "product": "아이스 아메리카노",
+            "price": 4500,
+            "situation": "여름 시즌 음료",
+            "tone": "시원한",
+        },
         {"product": "크로플 세트", "price": 8900, "situation": "신메뉴 출시", "tone": "친근한"},
         {"product": "원두 드립백", "price": 12000, "situation": "선물용 상품", "tone": "차분한"},
     ],
@@ -132,11 +145,24 @@ def verdict(before: dict[str, Any], after: dict[str, Any]) -> str:
     """개선인가 회피인가.
 
     채점 항목이 하나라도 사라졌으면 점수가 올라도 개선이라 부르지 않는다.
+
+    **천장에 붙은 표본은 따로 뺀다.** `fit` 은 1.0 이 만점이라 시작점이 이미 1.0
+    이면 `a > b + NOISE` 가 성립할 수 없다 — 무엇을 해도 "변화 없음"이 나온다.
+    그대로 세면 *못 잰 것*이 *효과 없음*으로 읽힌다. 1차 측정(9건)이 실제로 그랬다:
+    `before.weak` 가 1.0 인 표본이 6건이었는데 패널·대조군이 나란히 "변화 없음 8/9"
+    라, 표만 보면 패널이 아무 값도 못 한 것처럼 보인다.
+
+    천장이 예외가 아니라 **기본값**이라는 것은 나중에 알았다. `_price_fit` 은
+    가격이 객단가 이하면 1.0 을 주고(싼 쪽은 감점하지 않는다), 시점·주말을 말하지
+    않은 광고는 채점 항목이 `price` 하나뿐이다. 즉 평범한 광고일수록 천장에 붙는다.
+    다시 잴 때는 **약점이 있는 광고로 표본을 골라야** 한다.
     """
     lost = sorted(set(before["scored"]) - set(after["scored"]))
     b, a = before["weak"], after["weak"]
     if b is None or a is None:
         return "잴 수 없음"
+    if b >= 1.0 - NOISE:
+        return "천장(잴 수 없음)"
     if lost:
         return ("회피" if a > b + NOISE else "항목 사라짐") + f"({','.join(lost)})"
     if a > b + NOISE:
@@ -146,8 +172,15 @@ def verdict(before: dict[str, Any], after: dict[str, Any]) -> str:
     return "변화 없음"
 
 
-def _arm(brief: AdBrief, base: CopyCandidate, store: Store, feats: TradeAreaFeatures,
-         source: str, notes: list[str], resistance: list[str]) -> dict[str, Any] | None:
+def _arm(
+    brief: AdBrief,
+    base: CopyCandidate,
+    store: Store,
+    feats: TradeAreaFeatures,
+    source: str,
+    notes: list[str],
+    resistance: list[str],
+) -> dict[str, Any] | None:
     """재생성 한 갈래. 제안이 없으면 재생성할 이유가 없으므로 None."""
     if not notes:
         return None
@@ -181,19 +214,24 @@ def run(limit: int) -> list[dict[str, Any]]:
             # 패널에 물어본다. 호출의 대부분이 여기서 나간다.
             ev = review(store, brief, base, ad_id=f"{store.id}-{i}", coord=coord, client=client)
 
-            panel = _arm(brief, base, store, feats, "panel", list(ev.suggestions),
-                         list(ev.top_resistance))
+            panel = _arm(
+                brief, base, store, feats, "panel", list(ev.suggestions), list(ev.top_resistance)
+            )
             control = _arm(brief, base, store, feats, "option", CONTROL_NOTES, [])
 
             row = {
-                "store": store.name, "area": feats.area_nm, "category": feats.category_nm,
-                "product": spec["product"], "price": spec["price"],
+                "store": store.name,
+                "area": feats.area_nm,
+                "category": feats.category_nm,
+                "product": spec["product"],
+                "price": spec["price"],
                 "before": before,
                 "suggestions": list(ev.suggestions),
                 "top_resistance": list(ev.top_resistance),
                 "confidence": ev.confidence,
                 "excluded_cnt": ev.excluded_cnt,
-                "panel": panel, "control": control,
+                "panel": panel,
+                "control": control,
                 "verdict_panel": verdict(before, panel) if panel else "제안 없음",
                 "verdict_control": verdict(before, control) if control else "-",
                 "secs": round(time.time() - t0, 1),
