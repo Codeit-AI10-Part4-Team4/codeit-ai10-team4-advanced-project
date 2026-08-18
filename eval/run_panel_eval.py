@@ -27,6 +27,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from panel_metrics import price_contradictions
+
 from app_core.config import load_env
 from app_core.panel.aggregate import AggregationError
 from app_core.panel.evaluator import MAX_EVAL_CALLS, evaluate
@@ -37,7 +39,9 @@ FIXTURE = ROOT / "tests" / "fixtures" / "features_yeoksam_20261.json"
 
 #: 역삼역 커피-음료 상권에 맞춘 샘플. 가격은 이 상권 객단가(9,546원) 근처로 잡아
 #: 가격 저항이 나오는지 보려는 것이다.
-SAMPLE_COPY = CopyCandidate(headline="점심 10분 컷, 크로플", sub="주문하고 자리 잡으면 나옵니다")
+SAMPLE_HEADLINE = "점심 10분 컷, 크로플"
+SAMPLE_SUB = "주문하고 자리 잡으면 나옵니다"
+SAMPLE_COPY = CopyCandidate(headline=SAMPLE_HEADLINE, sub=SAMPLE_SUB)
 
 
 class FailureCounter(logging.Handler):
@@ -73,11 +77,17 @@ def sample_store() -> Store:
     return Store(**base.model_dump(), id=1, user_id=1)
 
 
-def sample_brief() -> AdBrief:
+def sample_brief(price: int = 9500, product: str = "크로플") -> AdBrief:
+    """평가에 쓸 주문서.
+
+    `price=0` 은 "가격 없음"이다(`AdBrief.show_price`). 걸림돌이 입력에
+    반응하는지 재는 **결정적 시험**이라 옵션으로 뺐다 — 적히지도 않은 가격을
+    걸림돌로 고르면 그건 광고를 본 게 아니다 (아인님 실측 2026-08-13).
+    """
     return AdBrief(
         goal="copy",
-        product="크로플",
-        price=9500,
+        product=product,
+        price=price,
         situation="신메뉴 출시",
         tone="따뜻하고 담백하게",
     )
@@ -107,9 +117,21 @@ def report(result: EvaluationResult, counter: FailureCounter, elapsed: float) ->
         print(f"    · {s}")
     print()
     print("  손님 코멘트 (가중치순)")
+    bad = set(price_contradictions((c.comment, c.resistance) for c in result.persona_comments))
     for c in result.persona_comments:
         mark = "△" if c.is_boundary else " "
-        print(f"    {mark} {c.demo:<10} [{c.resistance:<9}] {c.comment}")
+        # 가격이 괜찮다고 말하면서 걸림돌이 price 인 줄을 눈에 띄게 표시한다.
+        flag = " ⚠" if c.comment in bad else ""
+        print(f"    {mark} {c.demo:<10} [{c.resistance:<9}] {c.comment}{flag}")
+
+    total = len(result.persona_comments)
+    print(f"\n  ⚠ 가격을 괜찮다면서 걸림돌은 price: {len(bad)}/{total}")
+    if bad:
+        print("    가격이 괜찮다고 해놓고 걸림돌은 price 다. 광고가 아니라")
+        print("    프롬프트를 보고 답했다는 뜻이다.")
+    else:
+        print("    쏠림 자체는 결함이 아니다 — 정말 비싼 광고면 맞는 답이고,")
+        print("    광고에 가격 말고 구체적인 게 없으면 반응할 것도 가격뿐이다.")
 
     if counter.samples:
         print("\n  탈락 로그 (최대 5건)")
@@ -138,6 +160,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="실제 LLM 으로 패널 평가 1회 실행")
     parser.add_argument("--runs", type=int, default=1, help="같은 입력 반복 횟수")
     parser.add_argument("--no-summary", action="store_true", help="제안 요약 콜 끄기")
+    parser.add_argument(
+        "--price", type=int, default=9500, help="광고 가격. 0 이면 가격 없는 광고"
+    )
+    parser.add_argument("--product", default="크로플", help="광고 상품명")
+    parser.add_argument("--headline", default=SAMPLE_HEADLINE, help="광고 헤드라인")
+    parser.add_argument("--sub", default=SAMPLE_SUB, help="광고 서브카피")
     args = parser.parse_args()
 
     load_env()
@@ -148,7 +176,10 @@ def main() -> int:
         return 1
 
     panel = load_panel()
-    per_run = len(panel.personas) + (0 if args.no_summary else 1)
+    # 자기일관성(k)이 켜져 있으면 남는 예산만큼 더 물어본다. 상한이 있으니
+    # 실제 콜은 `MAX_EVAL_CALLS` 를 넘지 않는다.
+    follow_up = 1 + (0 if args.no_summary else 1)
+    per_run = min(MAX_EVAL_CALLS, len(panel.personas) + follow_up)
     print(f"페르소나 {len(panel.personas)}명 · {args.runs}회 실행")
     print(f"예상 콜 {per_run * args.runs}회 (재시도 제외) — 팀 공용 키를 씁니다.\n")
 
@@ -157,7 +188,12 @@ def main() -> int:
     logger.setLevel(logging.DEBUG)
     logger.addHandler(counter)
 
-    store, brief = sample_store(), sample_brief()
+    store, brief = sample_store(), sample_brief(args.price, args.product)
+    copy = CopyCandidate(headline=args.headline, sub=args.sub)
+    if not brief.show_price:
+        print("※ 주문서에 가격이 없습니다 — 손님에게 `avg_ticket` 을 보여주지 않습니다.\n")
+    if args.product not in args.headline + args.sub:
+        print(f"⚠️ 문구에 '{args.product}' 이(가) 없습니다. 입력이 어긋나면 결과를 못 믿습니다.\n")
     results: list[EvaluationResult] = []
 
     for i in range(args.runs):
@@ -167,7 +203,7 @@ def main() -> int:
                 panel,
                 store,
                 brief,
-                SAMPLE_COPY,
+                copy,
                 ad_id=f"trial-{i + 1}",
                 summarize=not args.no_summary,
             )
