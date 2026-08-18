@@ -369,22 +369,41 @@ MODEL_PROFILE=openai python eval/run_label_check.py --fixture  # DuckDB 없이
 광고          기대        기대 라벨의 비중   맞은 횟수
 price_bad    price              100%        3/3   맞음
 target_bad   relevance           14%        0/3   틀림(밀려 있음)
-clear_bad    message              0%        0/3   틀림(아예 없음)
+clear_bad    message              0%        0/3   → 판정에서 뺐다 (아래)
 ```
 
 **1회만 재면 못 믿는다.** 같은 코드로 `target_bad` 를 1회씩 세 번 쟀을 때
 `alternative`(틀림) · `relevance`(맞음) · `relevance`(맞음) 로 갈렸는데,
 `--runs 3` 으로는 0/3 이었다. 1회 결과로 "고쳤다/망가졌다"를 말하면 안 된다.
 
-원인 가설: `RESISTANCE_SYSTEM` 의 예시 네 줄에 `relevance` 만 없다. 같은 코멘트에
-예시 한 줄만 더해 분류를 다시 돌리면 `alternative` 7 → 0, `relevance` 1 → 8 로
-뒤집힌다(2026-08-18 실측). 상세는 `진행보고서/2026-08-18_수호님전달_*.md`.
+`target_bad` 원인 가설: `RESISTANCE_SYSTEM` 의 예시 네 줄에 `relevance` 만 없다.
+같은 코멘트에 예시 한 줄만 더해 분류를 다시 돌리면 `alternative` 7 → 0,
+`relevance` 1 → 8 로 뒤집힌다. 상세는 `진행보고서/2026-08-18_수호님전달_*.md`.
+
+## 닿지 않는 라벨 — `message` · `none`
+
+`clear_bad` 는 처음에 `message` 를 기대했다가 **판정에서 뺐다.** 지금 구조에서
+나올 수 없기 때문이다. 손님 프롬프트가 반응마다 **동네 숫자로 근거를 대라**고
+요구하는데, "무슨 말인지 모르겠다"는 상권의 성질이 아니라 **문구의 성질**이라
+댈 숫자가 없다.
+
+```
+라벨          인용할 동네 숫자          손님이 고르나
+price        avg_ticket               예 — clear_bad 에서 12/12
+alternative  competitor_cnt           예 — 상품·상황을 가리니 11/12
+relevance    age_share · work_ratio   예 — target_bad 에서 9/18
+message      없음                     0
+none         없음                     0
+```
+
+그래서 `relevance` 와 `message` 는 성격이 다르다. `relevance` 는 인용할 숫자가
+있으니 분류 예시로 살아나지만 `message` 는 예시를 넣어도 안 나온다. 근거 관문을
+손보는 것은 설계 결정이라 담당(수호님)께 넘겼다.
 
 ## 알려진 제약
 
-- 상권 1곳(역삼) · 광고 3건만 판정한다. 다른 상권·업종은 안 봤다.
-- 좋은 광고의 `none` 은 판정하지 않는다. 지금은 12명 전원이 `price` 를 골라
-  못 고치는 것을 빨간불로 박게 되고, 그러면 사람이 빨간불을 무시한다.
+- 상권 1곳(역삼) · **판정은 광고 2건**뿐이다. 다른 상권·업종은 안 봤다.
+- `message` · `none` 은 위 이유로 기대값에 못 쓴다. 근거 관문이 바뀌면 다시 넣는다.
 - CI 에 넣지 않는다 — 실호출이 나가고, 팀 규칙상 테스트는 mock 만 쓴다.
 
 ## 변경 이력

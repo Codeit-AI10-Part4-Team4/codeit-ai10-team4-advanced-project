@@ -37,6 +37,35 @@
 그래서 이 스크립트는 **기대 라벨의 비중을 같이 찍고**(0% 인지 14% 인지가
 "아예 없다"와 "밀려 있다"를 가른다), `--runs` 로 여러 번 돌려 과반으로 판정한다.
 
+## 닿지 않는 라벨 — `message` · `none` 은 기대값으로 못 쓴다
+
+`clear_bad`("당신의 순간을 위하여")에 `message` 를 기대했다가 **뺐다.**
+지금 구조에서 나올 수 없기 때문이다.
+
+손님 프롬프트가 이렇게 요구한다:
+
+    **evidence** — 왜 그렇게 느꼈는지를 아래 "우리 동네 숫자"에서 골라 인용한다.
+
+반응마다 **동네 숫자로 근거를 대야** 하는데, "무슨 말인지 모르겠다"는 상권의
+성질이 아니라 **문구의 성질**이라 댈 숫자가 없다. 2026-08-18 실측이 전부
+이 표로 설명된다:
+
+    라벨          인용할 동네 숫자          손님이 고르나
+    price        avg_ticket               예 — clear_bad 에서 12/12
+    alternative  competitor_cnt           예 — 상품·상황을 가리니 11/12
+    relevance    age_share · work_ratio   예 — target_bad 에서 9/18
+    message      없음                     0
+    none         없음                     0
+
+그래서 `relevance` 와 `message` 는 **성격이 다르다.** `relevance` 는 인용할
+숫자가 있으니 분류 예시 한 줄로 살아나지만(실측: alternative 7 → 0,
+relevance 1 → 8), `message` 는 예시를 넣어도 안 나온다.
+
+여기 빨간불로 박아두면 **못 고치는 것이 늘 빨갛고, 사람이 빨간불을 무시하게
+된다.** 근거 관문을 손보는 것은 설계 결정이라 담당(수호님)께 넘긴다.
+
+같은 이유로 좋은 광고의 `none` 도 기대값으로 쓰지 않는다.
+
     MODEL_PROFILE=openai python eval/run_label_check.py                # 1회 (빠른 눈대중)
     MODEL_PROFILE=openai python eval/run_label_check.py --runs 3       # 판정하려면 이쪽
     MODEL_PROFILE=openai python eval/run_label_check.py --fixture      # DuckDB 없이
@@ -76,12 +105,12 @@ YEOKSAM = (127.0365, 37.5005)
 EXPECT: dict[str, str] = {
     "price_bad": "price",  # 9,546원 동네에 45,000원 — 값이 부담이다
     "target_bad": "relevance",  # 직장인 93.6% 동네에 "10대 필수템" — 나와 상관없다
-    "clear_bad": "message",  # "당신의 순간을 위하여" — 무엇을 파는지 모른다
 }
 
 #: 판정하지 않고 눈으로만 보는 것. 이유를 적어둬야 나중에 "왜 뺐지"가 안 생긴다.
 WATCH: dict[str, str] = {
     "time_bad": "시점 어긋남 — 담을 라벨이 없어 정답을 못 정한다",
+    "clear_bad": "message 는 지금 구조에서 안 나온다 — 독스트링 '닿지 않는 라벨' 참고",
 }
 
 
