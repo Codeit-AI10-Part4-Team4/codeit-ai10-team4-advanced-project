@@ -21,7 +21,7 @@ import statistics
 import time
 from collections import Counter
 from concurrent.futures import Future, ThreadPoolExecutor, wait
-from typing import Any, Final
+from typing import Any, Final, get_args
 
 from pydantic import ValidationError
 
@@ -29,7 +29,7 @@ from app_core.llm import ChatClient, get_client
 from app_core.panel.aggregate import DEFAULT_SIGMA_MAX, aggregate
 from app_core.panel.contrast import TIME_WORDS, contrast
 from app_core.panel.evidence import evidence_failures
-from app_core.panel.narrator import MOTIVE_KO, PRICE_KO, TIME_KO
+from app_core.panel.narrator import MOTIVE_KO, TIME_KO
 from app_core.panel.schemas import (
     METRIC_FIELDS,
     ContrastNote,
@@ -37,6 +37,7 @@ from app_core.panel.schemas import (
     Panel,
     Persona,
     PersonaEval,
+    Resistance,
     TradeAreaFeatures,
 )
 from app_core.schema import AdBrief, CopyCandidate, Store
@@ -92,26 +93,27 @@ SYSTEM = """너는 아래 특성의 손님이다. 광고를 보고 솔직하게 
   61~80   한번 가볼까 싶다
   81~100  지금 가고 싶다. 저장하거나 남에게 보낸다
 
-  **60점대에 몰아 쓰지 마라.** 안 끌리면 20점대를, 확 끌리면 90점대를 쓴다.
+  **세 지표를 비슷한 숫자로 채우지 마라.** 눈에는 띄는데 갈 마음은 없을 수 있고,
+  그 반대도 있다. 안 끌리면 20~30 을, 확 끌리면 80~90 을 주저 없이 써라.
 
-**resistance** — 가장 큰 걸림돌을 **딱 하나** 고른다.
-  price      가격이 부담되거나 값어치를 모르겠다
-  message    무슨 말인지 모르겠거나 와닿지 않는다
-  relevance  나와 상관없는 광고로 느껴진다
-  none       걸리는 게 없다
+**resistance** — 발길을 돌리게 만든 것이 있으면 **딱 하나** 고른다.
+  none         걸리는 게 없다
+  relevance    나와 상관없는 광고로 느껴진다
+  alternative  다른 데가 더 낫거나, 늘 가던 데가 있다
+  message      무슨 말인지 모르겠거나 와닿지 않는다
+  price        값이 부담되거나 값어치를 모르겠다
 
-  **넷 중 하나를 그대로 적는다.** `"price"` 처럼 한 단어만 넣는다.
+  **다섯 중 하나를 그대로 적는다.** `"none"` 처럼 한 단어만 넣는다.
   두 개 이상을 세로줄이나 쉼표로 잇거나 목록으로 주면 그 응답은 버려진다.
 
   **걸림돌은 광고의 흠이 아니라 네가 발길을 돌리는 이유다.**
-  `intent` 를 61 이상으로 줬다면 `none` 을 골라라 — 가겠다고 해놓고 걸림돌을
-  대는 것은 말이 안 된다.
+  걸리는 게 없으면 `none` 이다. **점수가 몇 점이든 상관없다** — 억지로 찾지 마라.
 
-  **가격이 이 동네 평균과 비슷하면 `price` 가 아니다.** 위 "우리 동네 숫자"의
-  `avg_ticket` 과 견줘봐라. 비슷한데 비싸다고 하면 그건 이 동네 얘기가 아니다.
+  **네 코멘트와 앞뒤가 맞아야 한다.** 코멘트에서 "괜찮다" "적당하다"고 말한 것을
+  걸림돌로 고를 수 없다. 코멘트가 실제로 불만을 말한 것만 고른다.
 
   **네 처지에서 고른다.** 이 동네가 놓치고 있는 층이라면 "나와 상관없다"
-  (relevance)가 더 정확할 때가 많다. 억지로 흠을 찾지 마라.
+  (relevance)가 더 정확할 때가 많다.
 
   ※ 광고 이미지는 보지 않았다. **visual 은 고르지 마라.**
 
@@ -145,31 +147,57 @@ def _retry_hint(reason: str) -> str:
     return f"\n\n## 직전 응답이 규칙을 어겼다\n{reason}\n설명 없이 JSON 하나만 다시 답하라."
 
 
+RESISTANCE_SYSTEM = """손님이 남긴 한 줄을 읽고 **무엇이 발길을 돌리게 했는지** 고른다.
+
+  none         걸리는 게 없다. 좋게만 말했다
+  relevance    나와 상관없는 광고다. 내 취향·상황이 아니다
+  alternative  다른 데가 더 낫거나, 늘 가던 데가 있다
+  message      무슨 말인지 모르겠다. 정보가 부족하다
+  price        값이 부담된다. 값어치를 모르겠다
+
+**손님이 실제로 쓴 말만 보고 고른다.** 가격을 말했더라도 "괜찮다" "적당하다"
+"저렴하다" 처럼 **문제가 아니라고** 말했으면 `price` 가 아니다. 그 문장에서
+정작 발길을 돌린 이유를 찾아라 — 대개 "그렇지만" 뒤에 있다.
+
+  "가격은 괜찮지만, 늘 가던 곳이 있어서 고민이 됩니다"   → alternative
+  "점심 10분 컷은 매력적인데 정보가 부족해요"            → message
+  "맛있을 것 같지만 가격이 부담스럽네요"                 → price
+  "10분 컷이 편해 보이네요"                              → none
+
+**받은 번호를 열쇠로** 답한다. 번호 하나에 라벨 하나, **JSON** 으로 돌려준다.
+없는 번호를 만들지 말고, 받은 번호를 빠뜨리지도 마라.
+
+{"labels": {"1": "none", "2": "alternative", "3": "message"}}"""
+
+
 SUMMARY_SYSTEM = """손님들의 평가를 사장님이 바로 쓸 수 있는 **개선 제안**으로 옮긴다.
 
 불평을 나열하지 마라. 사장님이 **문구를 어떻게 고치면 되는지**를 쓴다.
-  나쁜 예: "가격이 비싸다는 의견이 많았습니다"
-  좋은 예: "가격이 걸린다는 반응이 많으니 양이나 소요 시간을 함께 적어보세요"
 
-**금액을 만들어내지 마라.** 아래 "사실"에 적힌 숫자 말고 다른 금액은 한 글자도
-쓸 수 없다. "얼마로 낮추세요" 같은 제안도 하지 마라 — 가격은 사장님이 정하는
-값이고, 우리는 **가격을 어떻게 보여줄지**만 제안한다.
-  쓸 수 없음: "9,500원에서 8,500원으로 낮춰보세요"
-  쓸 수 있음: "가격을 낮추기보다 세트 구성으로 묶어 보여주세요"
+**아래 "사실"에 적힌 것만 근거로 쓴다.** 사실이 여럿이면 서로 다른 사실을
+짚어라 — 세 제안이 같은 사실을 물고 늘어지면 하나만 쓴 것과 같다.
+
+**숫자를 만들어내지 마라.** "얼마로 낮추세요" 같은 제안도 하지 마라 —
+가격은 사장님이 정하는 값이고, 우리는 **어떻게 보여줄지**만 제안한다.
 
 - **2~3개**만. 많으면 아무것도 안 고친다.
 - 광고 문구·표현으로 바꿀 수 있는 것만 쓴다. 메뉴를 바꾸라거나 가게를
   옮기라는 제안은 하지 마라.
-- 주어진 평가에 없는 내용을 지어내지 마라.
+- 주어진 평가와 사실에 없는 내용을 지어내지 마라.
 
 아래 JSON 형식으로만 답해라.
 
-{"suggestions": ["가격을 낮추기보다 세트 구성으로 묶어 보여주세요"]}"""
+{"suggestions": ["<제안 한 줄>", "<다른 사실을 짚은 제안 한 줄>"]}"""
 
 
 #: 제안에서 "9,500원" 같은 금액을 찾는다. 사장님 화면에 실제와 다른 금액이
 #: 뜨는 것을 코드로 막기 위한 것이다.
 _AMOUNT_RE: Final = re.compile(r"(\d[\d,]*)\s*원")
+
+#: 대조 문장이 사실 블록에 들어오면서 금액 말고도 인용할 수치가 생겼다.
+#: 금액만 두 겹으로 막아 둔 것은 팀 규칙(01 P0, 가격은 사장님이 입력) 때문인데,
+#: `48%` · `1,847곳` 은 아무 가드도 없이 나갈 수 있었다 (아인님 지적 2026-08-13).
+_QUANTITY_RE: Final = re.compile(r"(\d[\d,.]*)\s*(%|퍼센트|곳|명)")
 
 
 def _amounts(text: str) -> set[int]:
@@ -182,10 +210,36 @@ def _amounts(text: str) -> set[int]:
     return out
 
 
+def _quantities(text: str) -> set[str]:
+    """`48%` · `1,847곳` 처럼 단위가 붙은 수치를 정규화해 모은다.
+
+    사실 블록에 있는 것만 인용할 수 있다. 금액과 같은 기준이다.
+    """
+    return {f"{raw.replace(',', '')}{unit}" for raw, unit in _QUANTITY_RE.findall(text)}
+
+
 #: "있는 만큼 사는가" 판정 경계. `narrator` 와 같은 값을 쓴다 — 서사와 평가가
 #: 다른 기준으로 같은 손님을 설명하면 모델이 헷갈린다.
 _POOL_HIGH: Final = 1.15
 _POOL_LOW: Final = 0.85
+
+
+#: 가격 감각을 **사람 이야기**로 옮긴다.
+#:
+#: `narrator.PRICE_KO` 는 `"가격에 민감한"` + `"동네에 산다"` 로 이어져 주어가
+#: 동네가 됐다. 바로 앞 둘은 사람 이야기인데(`"점심에 주로 움직이고"`,
+#: `"늘 가던 곳을 다시 찾는 편"`) 가격만 주어가 바뀌었던 것이다.
+#:
+#: 나는 그 줄을 통째로 뺐었는데, 아인님이 사람 문장으로 바꿔 재보니 싼 광고에서
+#: 걸림돌 price 가 8/12 → 4/12 로 줄었다(2026-08-14). 빼는 것보다 고쳐 쓰는 쪽이
+#: 낫다 — 손님을 가르는 축 하나를 통째로 버릴 이유가 없다.
+#:
+#: `narrator.PRICE_KO` 는 아인님 파일이라 두고, 평가용 표현만 여기서 갖는다.
+_PRICE_SENS_KO: Final[dict[str, str]] = {
+    "low": "가격보다 다른 걸 먼저 보는 편이다.",
+    "mid": "가격은 적당하면 넘어가는 편이다.",
+    "high": "가격을 꼼꼼히 따지는 편이다.",
+}
 
 
 def standing(features: TradeAreaFeatures, persona: Persona) -> str:
@@ -239,6 +293,8 @@ def offered_paths(
     features: TradeAreaFeatures,
     persona: Persona,
     copy: CopyCandidate | None = None,
+    *,
+    show_price: bool = True,
 ) -> frozenset[str]:
     """이 손님에게 실제로 보여준 숫자의 경로.
 
@@ -252,7 +308,22 @@ def offered_paths(
     방법이 없었고, 시간대 쌍 판별 점수차가 +2.3 에 그쳤다(가격 쌍은 +25.5).
     """
     paths = {ref.path for ref in persona.evidence}
-    paths |= {"avg_ticket", "avg_ticket_pct", "competitor_cnt", "weekend_ratio"}
+    paths |= {"competitor_cnt", "weekend_ratio"}
+    # 개업·폐업은 가격과 무관한 동네 신호다. 공통 숫자가 객단가 쪽으로만
+    # 쏠려 있으면 손님이 댈 수 있는 이야기도 가격뿐이 된다 (아래 참고).
+    paths |= {"open_cnt", "close_cnt"}
+
+    # 광고에 가격이 없으면 객단가를 아예 보여주지 않는다.
+    #
+    # 실측(아인님 2026-08-13): **금액이 한 글자도 없는 광고**에 12/12 가
+    # 걸림돌로 price 를 골랐다. 원인은 근거 규칙과 이 목록이 맞물린 데 있다 —
+    # 손님은 반드시 이 목록에서 숫자를 인용해야 하는데, 공통 4개 중 2개
+    # (`avg_ticket`, `avg_ticket_pct`)가 가격이었다. 광고를 견줄 수 있는
+    # 숫자가 사실상 객단가뿐이라, 댈 것이 없으면 가격 이야기를 지어냈다.
+    #
+    # 견줄 가격이 없으면 객단가는 광고 평가와 무관하다. 그래서 뺀다.
+    if show_price:
+        paths |= {"avg_ticket", "avg_ticket_pct"}
     if features.work_ratio is not None:
         paths.add("work_ratio")
     if copy is not None:
@@ -263,7 +334,11 @@ def offered_paths(
 
 
 def _feature_lines(
-    features: TradeAreaFeatures, persona: Persona, copy: CopyCandidate | None = None
+    features: TradeAreaFeatures,
+    persona: Persona,
+    copy: CopyCandidate | None = None,
+    *,
+    show_price: bool = True,
 ) -> str:
     """평가에 쓸 숫자만 골라 준다.
 
@@ -274,7 +349,7 @@ def _feature_lines(
     from app_core.panel.evidence import resolve
 
     lines = []
-    for path in sorted(offered_paths(features, persona, copy)):
+    for path in sorted(offered_paths(features, persona, copy, show_price=show_price)):
         resolved = resolve(features, path)
         if resolved is not None:
             value = int(resolved.value) if resolved.exact else round(resolved.value, 4)
@@ -311,10 +386,10 @@ def build_user_prompt(
     return (
         f"## 나\n{persona.demo}. {persona.narrative}\n"
         f"{TIME_KO.get(axes.time, axes.time)}에 주로 움직이고, "
-        f"{MOTIVE_KO[axes.motive]} 편, {PRICE_KO[axes.price_sens]} 동네에 산다.\n"
+        f"{MOTIVE_KO[axes.motive]} 편이고, {_PRICE_SENS_KO[axes.price_sens]}\n"
         f"{standing(features, persona)}\n\n"
         f"## 우리 동네 숫자 (evidence 는 여기서만 고른다)\n"
-        f"{_feature_lines(features, persona, copy)}\n\n"
+        f"{_feature_lines(features, persona, copy, show_price=brief.show_price)}\n\n"
         f"## 광고물\n{_ad_lines(store, brief, copy)}"
     )
 
@@ -351,7 +426,7 @@ def _evaluate_one(
 ) -> PersonaEval | None:
     """한 명을 평가한다. 두 관문 중 하나라도 실패하면 1회만 다시 부른다."""
     user = build_user_prompt(persona, features, store, brief, copy)
-    allowed = offered_paths(features, persona, copy)
+    allowed = offered_paths(features, persona, copy, show_price=brief.show_price)
     hint = ""
 
     for attempt in range(RETRY_ONCE + 1):
@@ -360,7 +435,20 @@ def _evaluate_one(
         if result is None:
             hint = _retry_hint(
                 "JSON 형식이나 값이 스키마에 맞지 않았다. resistance 는 "
-                "price · message · relevance · none 중 **하나만** 적는다."
+                "none · relevance · alternative · message · price 중 "
+                "**하나만** 적는다."
+            )
+            continue
+
+        # 광고에 가격이 없는데 가격이 걸린다고 하면 앞뒤가 안 맞는다.
+        # 코드가 아는 사실이므로 모델의 자기검열에 맡기지 않고 여기서 되묻는다.
+        # 한 번만 되묻고, 그래도 같으면 점수는 살려 둔다 — 걸림돌 하나 때문에
+        # 그 손님의 평가 전체를 버리면 12명이 통째로 날아갈 수 있다.
+        if attempt == 0 and result.resistance == "price" and not brief.show_price:
+            logger.debug("가격 없는 광고에 price 응답 %s — 되묻는다", persona.persona_id)
+            hint = _retry_hint(
+                "이 광고에는 **가격이 적혀 있지 않다.** 적히지도 않은 가격을 "
+                "걸림돌로 고를 수는 없다. 광고에 실제로 있는 것만 놓고 다시 골라라."
             )
             continue
 
@@ -409,14 +497,19 @@ def _merge_samples(samples: list[PersonaEval]) -> PersonaEval:
     return representative.model_copy(update={**medians, "resistance": resistance})
 
 
+#: 손님 평가가 끝난 뒤에 나가는 콜 — 걸림돌 분류 1 + 제안 요약 1.
+#: 예산(`MAX_EVAL_CALLS`)에서 미리 빼두지 않으면 자기일관성이 다 먹는다.
+FOLLOW_UP_CALLS: Final = 2
+
+
 def _sample_plan(targets: list[Persona], k: int) -> dict[str, int]:
     """누구를 몇 번 물어볼지. 남는 콜을 가중치 큰 순으로 나눠준다.
 
-    요약 콜 1개를 남겨두고 계산한다.
+    뒤따르는 콜(`FOLLOW_UP_CALLS`)을 남겨두고 계산한다.
     """
     if k <= 1:
         return {p.persona_id: 1 for p in targets}
-    budget = MAX_EVAL_CALLS - len(targets) - 1
+    budget = MAX_EVAL_CALLS - len(targets) - FOLLOW_UP_CALLS
     plan = {p.persona_id: 1 for p in targets}
     for persona in targets:  # 이미 가중치 내림차순
         extra = min(k - 1, budget)
@@ -461,6 +554,7 @@ def _summarize(
     panel: Panel,
     evals: list[PersonaEval],
     brief: AdBrief,
+    notes: list[ContrastNote],
 ) -> list[str]:
     """저항 요인과 코멘트를 개선 제안으로 옮긴다 (07 §7.3).
 
@@ -497,12 +591,16 @@ def _summarize(
     else:
         facts.insert(0, "- 광고에 가격이 없다. 가격 얘기를 꺼내지 마라.")
 
+    # 대조 문장은 근거 A등급이고 LLM 을 쓰지 않는다. 이걸 안 넘겨서 요약 콜이
+    # 볼 수 있는 사실이 가격 두 줄뿐이었고, 제안이 전부 가격으로 쏠렸다
+    # (아인님 실측 2026-08-13: 제안 18개 중 가격 12개, 시점 0개).
+    facts += [f"- {n.text}" for n in notes]
+    fact_block = "\n".join(facts)
+    allowed_q = _quantities(fact_block)
+
     raw = client.complete_json(
         SUMMARY_SYSTEM,
-        "## 사실 (이 숫자만 쓸 수 있다)\n"
-        + "\n".join(facts)
-        + "\n\n## 손님 반응\n"
-        + "\n".join(lines),
+        "## 사실 (이 숫자만 쓸 수 있다)\n" + fact_block + "\n\n## 손님 반응\n" + "\n".join(lines),
     )
 
     out: list[str] = []
@@ -510,7 +608,8 @@ def _summarize(
         if not isinstance(item, str) or not item.strip():
             continue
         text = item.strip()[:200]
-        invented = _amounts(text) - allowed
+        invented: set[object] = set(_amounts(text) - allowed)
+        invented |= _quantities(text) - allowed_q
         if invented:
             # 버리고 로그로 남긴다. 고쳐 쓰면 문장이 어색해지고, 무엇보다
             # 그 제안의 근거 자체가 없던 숫자다.
@@ -518,6 +617,114 @@ def _summarize(
             continue
         out.append(text)
     return out[:3]
+
+
+#: 요약 콜 없이도 낼 수 있는 한 줄. 지표별로 문구가 다르다.
+_METRIC_NOTE: Final[dict[str, str]] = {
+    "attention": "눈길을 끄는 힘이 가장 약했습니다 — 첫 줄을 더 구체적으로 바꿔 보세요",
+    "message": "무엇을 파는 곳인지가 가장 약했습니다 — 상품을 문구 앞쪽에 드러내 보세요",
+    "intent": "가 볼 이유가 가장 약했습니다 — 지금 가야 할 이유를 한 줄 넣어 보세요",
+}
+
+_GENERIC_NOTE: Final = "손님 반응이 갈렸습니다 — 문구를 바꿔 다시 만들어 보세요"
+
+
+def _classify_resistance(
+    client: ChatClient, evals: list[PersonaEval], *, show_price: bool = True
+) -> list[str] | None:
+    """코멘트만 보고 걸림돌 라벨을 다시 매긴다.
+
+    손님 콜은 자기 라벨을 못 고른다. 근거를 "우리 동네 숫자" 에서 인용해야
+    하는데, 광고를 견줄 수 있는 값이 사실상 객단가뿐이라 댈 것이 없으면
+    가격 이야기를 지어냈다.
+
+    실측(아인님, 2026-08-17 · 광고 4종 × 손님 12명 × 실호출):
+
+        손님이 고른 원본   price 62/76
+        분류가 다시 매김   price 32       (alternative 13 신규)
+
+    ⚠️ 앞서 이 자리에 "avg_ticket 을 빼면 price 0/12" 라고 적었는데
+    **철회한다.** 그 측정은 `--price 0` 으로 돌린 것이라 객단가가 숨겨지는
+    것과 `_evaluate_one` 의 되묻기가 **동시에** 걸렸다. 되묻기 없이 경로만
+    빼면 거의 안 움직인다 (아인님 재현: 76건에서 price 67 → 60).
+
+    즉 **근거 목록만 손대서는 안 움직이고, 분류를 별도 콜로 떼어내야
+    움직인다.** 결론은 같지만 근거가 달라졌다.
+
+    코멘트에는 진짜 이유가 한국어로 적혀 있다. 12명이 "늘 가던 곳이 있어서"
+    라고 써놓고 라벨은 price 를 골랐다. 그래서 **분류를 떼어낸다** — 이 콜은
+    숫자도 근거 목록도 안 본다. 볼 것이 코멘트뿐이라 오염될 자리가 없다.
+
+    이 모듈의 원칙("정량은 코드, LLM 은 서사만")을 걸림돌에도 적용하는 것이다.
+    손님은 서사(코멘트)를 쓰고, 분류는 따로 한다.
+
+    실패하면 None 을 돌려주고 부르는 쪽이 원래 라벨을 그대로 쓴다 —
+    부가 콜 하나 때문에 끝난 평가를 버리지 않는다.
+    """
+    if not evals:
+        return None
+
+    # 코멘트에 줄바꿈이 있으면 모델이 항목을 더 세어 개수가 어긋난다
+    # (2026-08-14 실측: 12개를 물었는데 13개가 왔다).
+    listed = "\n".join(f"{i + 1}. {' '.join(e.comment.split())}" for i, e in enumerate(evals))
+    system = RESISTANCE_SYSTEM
+    if not show_price:
+        # 코드가 아는 사실은 양쪽 콜에 다 걸어야 한다. 손님 콜만 막아 두었더니
+        # 분류가 "가격이 궁금해서"를 price 로 읽어 그대로 샜다 (2026-08-14 회귀).
+        system += (
+            "\n\n이 광고에는 **가격이 적혀 있지 않다.** 그러니 `price` 는 고를 수 "
+            "없다. 손님이 가격을 궁금해했다면 그건 정보가 없다는 뜻이라 `message` 다."
+        )
+    raw = client.complete_json(system, listed)
+
+    labels = raw.get("labels")
+    if not labels:
+        # 분류를 안 해주는 클라이언트다. 손님이 고른 라벨을 그대로 쓴다.
+        logger.debug("걸림돌 분류 응답이 비어 있음 — 원래 라벨 유지")
+        return None
+    if not isinstance(labels, dict):
+        logger.warning("걸림돌 분류 응답이 번호→라벨 꼴이 아님: %r", labels)
+        return None
+
+    # 번호를 열쇠로 받으므로 순서나 개수가 어긋나도 어긋난 자리만 버린다.
+    # 목록으로 받아 자리로 맞추면 하나만 밀려도 12명이 통째로 뒤섞인다.
+    allowed = set(get_args(Resistance))
+    out: list[str] = []
+    relabeled = 0
+    for i, ev in enumerate(evals):
+        lab = labels.get(str(i + 1))
+        if lab == "price" and not show_price:
+            # 적히지도 않은 가격은 걸림돌이 될 수 없다. 손님 콜은 이미 되물어
+            # 고쳤으므로(`_evaluate_one`) 그 답으로 돌아간다.
+            logger.debug("분류가 가격 없는 광고에 price — 손님 답으로 되돌린다")
+            lab = None
+        if isinstance(lab, str) and lab in allowed:
+            out.append(lab)
+            relabeled += 1
+        else:
+            out.append(ev.resistance)
+    if not relabeled:
+        logger.warning("걸림돌 분류가 한 명도 못 맞췄다: %r", labels)
+        return None
+    if relabeled < len(evals):
+        logger.warning("걸림돌 분류가 %d/%d 명만 맞췄다", relabeled, len(evals))
+    return out
+
+
+def _fallback_suggestions(result: EvaluationResult) -> list[str]:
+    """요약 콜이 없거나 실패했을 때 채우는 제안 한 줄.
+
+    재생성 입력인 `schema.Feedback.notes` 가 `min_length=1` 이라(건오님)
+    빈 리스트를 넘기면 ValidationError 로 다시 만들기가 통째로 죽는다.
+    LLM 을 쓰지 않고 집계된 점수에서만 뽑는다.
+    """
+    if not result.scores:
+        return [_GENERIC_NOTE]
+    metric, score = min(result.scores.items(), key=lambda kv: kv[1])
+    note = _METRIC_NOTE.get(metric)
+    if note is None:
+        return [_GENERIC_NOTE]
+    return [f"{note} (손님 12명 가중평균 {score:.0f}점)"]
 
 
 def evaluate(
@@ -610,15 +817,27 @@ def evaluate(
         for n in contrast(features, brief, copy)
     ]
 
+    # 걸림돌은 손님 콜이 아니라 코멘트에서 정한다 (`_classify_resistance`).
+    if evals:
+        try:
+            labels = _classify_resistance(chat, evals, show_price=brief.show_price)
+            if labels is not None:
+                evals = [
+                    e.model_copy(update={"resistance": lab})
+                    for e, lab in zip(evals, labels, strict=True)
+                ]
+        except Exception:
+            logger.exception("걸림돌 분류 실패 %s — 손님이 고른 라벨을 쓴다", ad_id or "(무명)")
+
     suggestions: list[str] = []
     if summarize and evals:
         try:
-            suggestions = _summarize(chat, panel, evals, brief)
+            suggestions = _summarize(chat, panel, evals, brief, notes)
         except Exception:
             # 요약은 부가물이다. 여기서 터졌다고 이미 끝난 평가를 버리면 안 된다.
             logger.exception("제안 요약 실패 %s — 제안 없이 반환", ad_id or "(무명)")
 
-    return aggregate(
+    result = aggregate(
         panel,
         evals,
         ad_id=ad_id,
@@ -629,3 +848,6 @@ def evaluate(
         elapsed_ms=int((time.perf_counter() - started) * 1000),
         sigma_max=sigma_max,
     )
+    if not result.suggestions:
+        result.suggestions = _fallback_suggestions(result)
+    return result
