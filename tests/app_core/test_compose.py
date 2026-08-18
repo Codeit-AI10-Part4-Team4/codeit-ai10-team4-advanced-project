@@ -1,5 +1,7 @@
 """compose 부품 테스트 — 폰트·GPU 없이 돌도록 작은 이미지와 기본 폰트를 쓴다."""
 
+from itertools import pairwise
+
 from PIL import Image, ImageDraw, ImageFont
 
 from app_core import compose, fonts
@@ -206,3 +208,31 @@ def test_540x675_실제_출력에서_제품과_글자가_캔버스_안에_있다
     assert red not in _pixels(ad.crop((0, 0, margin, 675)))  # 좌 7%
     assert red not in _pixels(ad.crop((540 - margin, 0, 540, 675)))  # 우 7%
     assert red in _pixels(ad)  # 제품이 실제로 그려짐
+
+
+def test_두_줄_제목은_줄_간격이_붙지_않는다(monkeypatch):
+    """줄 advance 를 em(font.size)으로 쓰면 아랫줄이 윗줄에 달라붙는다.
+
+    글꼴이 권장하는 줄높이는 asc+desc 라 em 보다 크다. 화면으로 재는 이유는
+    `head_h` 가 `_draw_text` 안의 지역 변수라 밖에서 볼 수 없어서다 —
+    두 글자 띠 사이의 빈 행 수를 세면 같은 것을 잰다.
+    """
+    monkeypatch.setattr(fonts, "load", _fake_font)
+    size = 540
+    white = Image.new("RGB", (size, size), (255, 255, 255))
+    ad = compose.compose_ad(
+        None,
+        "여름 한정 수박 빙수 지금 만나보세요 오늘만 매장에서 드시면 시원한 "
+        "아이스 아메리카노까지 함께 드려요 정말로",
+        "",
+        size=(size, size),
+        background=white,
+    )
+    gray = ad.convert("L")
+    inked = [
+        y for y in range(int(size * 0.36)) if min(gray.crop((0, y, size, y + 1)).tobytes()) < 100
+    ]
+    holes = [b - a - 1 for a, b in pairwise(inked) if b - a > 1]
+    assert holes, "제목이 두 줄로 안 나뉘었다 — 문구가 짧아졌는지 확인"
+    # em 을 쓰면 9px, asc+desc 면 16px (540 기준 실측). 2.5% 를 문턱으로 둔다.
+    assert max(holes) >= size * 0.025
