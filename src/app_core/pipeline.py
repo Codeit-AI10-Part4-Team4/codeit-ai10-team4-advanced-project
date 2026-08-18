@@ -59,16 +59,20 @@ def _simple_ad(brief: AdBrief, store: Store, copy: CopyCandidate, product: Image
     """제품 누끼가 있으면 빈 무대 배경에 얹고, 없으면 제품이 든 장면을 통째로 그린다.
 
     빈 무대 프롬프트(_BASE)는 누끼를 얹으려고 제품을 일부러 뺀 캔버스다. 그 위에
-    올릴 게 없으면 광고 대상이 사라진다. 그런 경우가 둘이라 같이 묶는다 —
+    올릴 게 없으면 광고 대상이 사라진다 — generate 갈래·사진 없는 주문이 그 경우다.
 
-      product is None        얹을 누끼가 없다 (generate 갈래 · 사진 없는 주문)
-      sketch_id 가 있다      스케치는 "여기에 이걸 그려라" 라서 빈 무대와 부딪힌다.
-                             실제로 배경 프롬프트로 돌렸더니 그린 접시가 흐릿한
-                             덩어리로 나왔다 (이미지 4번)
+    **스케치는 여기서 갈래를 바꾸지 않는다.** 각 입력의 뜻이 그대로 유지된다 —
 
-    둘 다 hero 프롬프트로 제품이 화면에 있게 그린다.
+      제품 사진 있음 + 스케치   빈 무대를 스케치 구도로 그리고 그 위에 누끼를 얹는다
+                               (사진 = 이 상품을 살린다 · 스케치 = 이 배치로)
+      제품 사진 없음 + 스케치   product 가 None 이라 hero 로 간다. 스케치가 상품을 그린다
+
+    ⚠️ 전에 `or brief.sketch_id is not None` 을 달았다가 뺐다. 스케치 기능을
+    만들 때는 이 함수에 `product is None` 분기가 없어서 필요했는데, #22 가
+    들어오면서 그쪽이 이미 같은 경우를 덮었다. 남겨두니 **사진과 스케치를 같이
+    올렸을 때 배경에도 제품이 그려지고 누끼도 얹혀 제품이 둘로** 나왔다.
     """
-    if product is None or brief.sketch_id is not None:
+    if product is None:
         prompt = build_hero_prompt(store.industry_label, brief.product, brief.tone)
     else:
         prompt = build_bg_prompt(store.industry_label, brief.situation, brief.tone)
