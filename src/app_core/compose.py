@@ -163,7 +163,9 @@ def _draw_text(canvas: Image.Image, bg: Image.Image, zone: Zone, headline: str, 
     head_font, head_lines = wrap_to_fit(
         headline, max_w, "display", int(w * _HEAD_SIZE), int(w * _HEAD_FLOOR)
     )
-    head_h = head_font.size
+    # 줄 advance 는 em(font.size) 이 아니라 asc+desc 다. em 을 쓰면 2줄 제목에서
+    # 아랫줄이 윗줄에 달라붙는다 — display 91px 기준 잉크 간격이 4px 밖에 안 남는다.
+    head_h = sum(head_font.getmetrics())
     sub_font, sub_lines = (None, [])
     if sub:
         sub_start = int(head_font.size * _SUB_RATIO)
