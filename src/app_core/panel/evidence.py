@@ -28,6 +28,9 @@ RELATIVE_TOLERANCE: Final = 0.05
 #: 07 §4.4① 이후 성별·연령이 분리됐고, 배후지가 더해져 다섯 개다.
 _MAPPING_FIELDS: Final = frozenset(MAPPING_FIELDS)
 
+#: 매핑이지만 값이 정수(원)라 정확 일치를 요구하는 필드.
+_INT_MAPPING_FIELD: Final = "age_ticket"
+
 #: 값은 실재하지만 근거로 인용할 수 없는 필드.
 #:
 #: 상권 특성이 아니라 **매칭·데이터 품질 지표**다. 페르소나가 "상권 중심에서
@@ -65,6 +68,16 @@ def resolve(features: TradeAreaFeatures, path: str) -> ResolvedValue | None:
     >>> # age_share.30 → 매핑 조회, avg_ticket → 스칼라 조회
     """
     head, _, rest = path.partition(".")
+
+    if head == _INT_MAPPING_FIELD:
+        # 나이대별 객단가는 원 단위 정수라 비중과 달리 정확 일치를 요구한다.
+        # 건수가 적어 A가 None 으로 둔 칸은 값이 없다는 뜻이라 인용할 수 없다.
+        if not rest:
+            return None
+        val = features.age_ticket.get(rest)
+        if val is None:
+            return None
+        return ResolvedValue(float(val), exact=True)
 
     if head in _MAPPING_FIELDS:
         if not rest:
