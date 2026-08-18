@@ -40,17 +40,12 @@ def to_panel(features: dict[str, Any], personas: list[dict[str, Any]]) -> Panel:
     """A 의 dict 산출물을 B 의 Pydantic 계약으로 옮긴다.
 
     `TradeAreaFeatures` 가 `extra="ignore"` 라 스키마에 없는 키는 조용히 버려진다.
-    실측(2026-08-17, 30 키 중): **`age_ticket` · `age_ticket_base` 둘이 버려진다.**
+    실측(2026-08-18, #27 머지 후, 30 키 중): **버려지는 키가 없다.**
 
-    (전에 여기 "버려지는 것은 `match_distance_m` 하나"라고 적어뒀는데 반대였다.
-    수호님이 그 뒤 스키마에 넣어주셔서 지금은 살아서 넘어간다 — 대신 인용은
-    금지다(`evidence._NON_CITABLE`). 조용히 버리는 계약이라 틀린 주석을
-    아무도 못 잡았다.)
-
-    버려도 지금은 해가 없다. 연령대별 객단가는 페르소나 `price_sens` 를 정할 때
-    `panel_builder` 가 **dict 단계에서** 이미 쓰고, 페르소나 근거가 그 경로를
-    인용하지 않아 근거 관문에도 안 걸린다(3개 상권 36명 실측: 해석 실패 0건).
-    평가 프롬프트에서 연령대별 객단가를 쓰고 싶어지면 그때 스키마에 넣는다.
+    여기 적어둔 목록이 두 번 틀렸었다 — 처음엔 `match_distance_m` 하나라고 했는데
+    그건 스키마에 있었고 정작 `age_ticket` 둘이 새고 있었다. 조용히 버리는 계약이라
+    사람 눈으로는 못 잡는다. 그래서 주석 대신 테스트로 못 박았다
+    (`test_스키마가_버리는_피처가_없다`).
     """
     return Panel(
         features=TradeAreaFeatures(**features),

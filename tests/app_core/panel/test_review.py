@@ -220,15 +220,17 @@ def test_서사를_LLM_이_쓴다() -> None:
     assert len(r.persona_comments) == 12
 
 
-def test_스키마가_버리는_피처를_적어둔다() -> None:
+def test_스키마가_버리는_피처가_없다() -> None:
     """`extra="ignore"` 는 조용히 버려서, 주석이 틀려도 아무도 못 잡는다.
 
-    실제로 틀려 있었다 — "버려지는 것은 match_distance_m 하나"라고 적혀 있었는데
-    그건 스키마에 있었고, 정작 age_ticket 두 개가 버려지고 있었다.
-    버리는 목록이 바뀌면 여기서 걸리게 둔다.
+    두 번 틀렸다. 처음엔 "버려지는 것은 match_distance_m 하나"라고 적혀 있었는데
+    그건 스키마에 있었고, 정작 age_ticket 두 개가 버려지고 있었다. 그래서 이
+    테스트를 심었고 — **#27 머지 때 실제로 걸렸다.** 수호님이 그 둘을 스키마에
+    넣어주셔서 이제 버려지는 것이 없다.
+
+    빈 집합으로 못 박아 둔다. 뭔가 다시 새면 여기서 걸린다.
     """
     from app_core.panel.schemas import TradeAreaFeatures
 
     f = build_features("", "cafe", coord=YEOKSAM)
-    dropped = set(f) - set(TradeAreaFeatures.model_fields)
-    assert dropped == {"age_ticket", "age_ticket_base"}
+    assert set(f) - set(TradeAreaFeatures.model_fields) == set()
