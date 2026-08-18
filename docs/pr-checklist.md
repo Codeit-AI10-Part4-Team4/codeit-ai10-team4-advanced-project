@@ -14,9 +14,20 @@
 1. **자신의 작업물을 모두 commit** 합니다.
    - ⚠️ 노트북(`.ipynb`)은 commit 전 **출력 셀이 제거**됐는지 확인하세요(`nbstripout`). 안 하면 CI `Notebook Sanity Check`가 실패합니다.
    ```bash
-   git add -A
+   # 아래 git add 줄은 예시입니다 - 이번에 실제로 수정한 파일 경로로 바꿔 쓰세요.
+   git add src/app_core/compose.py tests/app_core/test_compose.py
+   git status --short                  # 무엇이 스테이징됐는지
+   git diff --cached --name-only       # 이 커밋에 들어갈 파일 목록
    git commit -m "작업 내용 요약"
    ```
+   - ⚠️ **`git add -A` 는 쓰지 마세요.** 작업과 무관한 미추적 파일까지 함께 담깁니다.
+     커밋할 파일을 직접 적고, 위 두 명령으로 **담긴 것을 눈으로 확인한 뒤** 커밋하세요.
+   - 고친 파일이 많아 빠뜨릴 것 같으면 `git add -u` 를 쓰세요 — **추적 중인 파일의 변경만**
+     담고 미추적 파일은 손대지 않습니다. 새로 만든 파일만 따로 적으면 됩니다.
+     ```bash
+     git add -u                          # 고친 파일 전부 (미추적은 안 담김)
+     git add src/app_core/new_thing.py   # 새로 만든 것만 직접
+     ```
 
 2. **main 브랜치를 최신 상태로** 갱신합니다.
    ```bash
