@@ -16,7 +16,7 @@ from collections.abc import Sequence
 
 from PIL import Image, ImageDraw
 
-from app_core import fonts
+from app_core import compose, fonts
 from app_core.palettes import PALETTES
 
 _MARGIN = 64
@@ -46,11 +46,15 @@ def generate_poster(
     info: str = "",
     palette: str = "retro_green",
     size: int = 1080,
+    staged: bool = False,
 ) -> Image.Image:
     """포스터형 광고를 만든다.
 
     features 는 "제목|설명" 형식의 문자열 목록이다(최대 3개).
     빈 인자는 그 블록을 그리지 않는다 — 없는 정보를 지어내지 않기 위해서다.
+
+    `staged` 는 상품 이미지를 AI 가 그렸는지다(pipeline 이 정해서 준다).
+    켜지면 "연출된 이미지" 를 새긴다 — 근거는 compose.draw_staged_notice.
     """
     if palette not in PALETTES:
         raise ValueError(f"모르는 팔레트입니다: {palette!r}")
@@ -142,5 +146,9 @@ def generate_poster(
             fill=(220, 224, 216),
             anchor="mm",
         )
+    if staged:
+        # 좌상단 — 배지는 우상단, 문구·정보 줄은 가운데 정렬이라 여기가 비어 있다
+        # (태그라인이 y=118 부터라 그 위가 한산하다).
+        compose.draw_staged_notice(canvas, "top")
 
     return canvas.convert("RGB")

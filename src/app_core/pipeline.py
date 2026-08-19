@@ -79,7 +79,9 @@ def _simple_ad(brief: AdBrief, store: Store, copy: CopyCandidate, product: Image
 
     prompt = _with_reference(brief, prompt)
     bg = _background(brief, prompt)
-    return compose_ad(product, copy.headline, copy.sub, background=bg)
+    # product 가 없으면 상품까지 AI 가 그린 것이다 → "연출된 이미지" 표기.
+    # 여기서 정해 넘기는 이유는 compose 가 keep(사장님 사진)과 구분하지 못해서다.
+    return compose_ad(product, copy.headline, copy.sub, background=bg, staged=product is None)
 
 
 def _poster_ad(brief: AdBrief, store: Store, copy: CopyCandidate, product: Image.Image | None):
@@ -87,6 +89,10 @@ def _poster_ad(brief: AdBrief, store: Store, copy: CopyCandidate, product: Image
 
     사장님에게 특징 3개를 직접 쓰게 하면 서비스가 아니라 양식 작성이 된다.
     """
+    # ⚠️ product 는 아래에서 덮어써지므로 **지금** 판단해야 한다.
+    # 덮어쓴 뒤에 보면 항상 사진이 있는 것처럼 보여 표기가 영영 안 붙는다.
+    staged = product is None
+
     if product is None:
         # 사진이 없으면 주인공 이미지를 생성해 그 자리를 채운다 (사진 카드처럼 얹힌다)
         hero_prompt = build_hero_prompt(store.industry_label, brief.product, brief.tone)
@@ -114,6 +120,7 @@ def _poster_ad(brief: AdBrief, store: Store, copy: CopyCandidate, product: Image
         headline=copy.headline,
         info=_info_line(store),
         palette=plan.palette,
+        staged=staged,
     )
 
 
@@ -154,6 +161,10 @@ def generate_ad(
         return _poster_ad(brief, store, copy, product)
 
     if route == "keep" and photo is not None:
-        # 사진이 이미 광고 배경감 — 확산 모델 없이 원본 위에 문구만 얹는다
-        return compose_ad(None, copy.headline, copy.sub, background=photo.convert("RGB"))
+        # 사진이 이미 광고 배경감 — 확산 모델 없이 원본 위에 문구만 얹는다.
+        # staged 는 False 다: product 인자가 None 이지만 화면에 나오는 것은
+        # **사장님이 찍은 진짜 사진**이다. 여기에 "연출된 이미지" 를 붙이면 거짓말이 된다.
+        return compose_ad(
+            None, copy.headline, copy.sub, background=photo.convert("RGB"), staged=False
+        )
     return _simple_ad(brief, store, copy, cut if route == "cutout" else None)

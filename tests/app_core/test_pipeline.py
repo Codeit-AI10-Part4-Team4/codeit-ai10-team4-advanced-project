@@ -441,3 +441,102 @@ def test_사진과_레퍼런스와_스케치를_다_올려도_제품이_하나�
 
     assert seen["prompt"] == "base prompt, warm light"
     assert seen["누끼"] is True
+
+
+# ── 연출 표기 ────────────────────────────────────────────────
+#
+# "제품 사진 없이 만든 광고는 상품을 AI 가 그린 것이라 표기해야 한다"
+# (README §생성 모드 · docs/01 §생성 모드).
+#
+# 여기서 보는 것은 **판단**이다 — 어느 갈래에 표기가 붙는가.
+# 실제로 그려지는지는 tests/app_core/test_compose.py 에서 픽셀로 본다.
+# 둘을 나눈 이유: 대역만 보면 "부르기는 하는데 아무것도 안 그리는" 상태를 놓친다.
+
+
+def _notice_spy(monkeypatch) -> list[str]:
+    """draw_staged_notice 가 불렸는지 기록한다. compose·poster 양쪽을 한 번에 잡는다 —
+    둘 다 compose 모듈의 전역을 호출 시점에 찾기 때문이다."""
+    from app_core import compose
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        compose, "draw_staged_notice", lambda canvas, corner="bottom": calls.append(corner)
+    )
+    return calls
+
+
+def test_사진_없이_만들면_연출_표기가_붙는다(monkeypatch):
+    """상품까지 AI 가 그렸다. 표기가 없으면 사장님이 자기 상품 사진인 양 올리게 된다."""
+    _simple_ready(monkeypatch)
+    calls = _notice_spy(monkeypatch)
+    monkeypatch.setattr(
+        pipeline, "generate_background", lambda prompt: Image.new("RGB", (1080, 1080), (10, 20, 30))
+    )
+
+    pipeline.generate_ad(_brief(), _store(), CopyCandidate(headline="크로플"), "simple")
+
+    assert calls, "사진 없이 만든 광고인데 연출 표기가 붙지 않았다"
+
+
+def test_사진_없이_만든_포스터에도_연출_표기가_붙는다(monkeypatch):
+    """포스터는 주인공을 생성해서 채운다 — 그것도 AI 가 그린 상품이다."""
+    monkeypatch.setattr(fonts, "load", _fake_font)
+    monkeypatch.setattr(pipeline, "build_hero_prompt", lambda *a, **k: "hero prompt")
+    calls = _notice_spy(monkeypatch)
+    monkeypatch.setattr(
+        pipeline,
+        "generate_background",
+        lambda prompt: Image.new("RGB", (512, 512), (200, 180, 160)),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "plan_poster",
+        lambda **kwargs: PosterPlan(
+            tagline="동네 크로플",
+            badge="",
+            date_line="",
+            features=[],
+            event="",
+            palette="warm_bakery",
+        ),
+    )
+
+    pipeline.generate_ad(_brief(), _store(), CopyCandidate(headline="크로플"), "poster")
+
+    assert calls, "생성한 주인공을 쓰는데 연출 표기가 붙지 않았다"
+
+
+def test_사장님_사진을_그대로_쓰면_표기하지_않는다(tmp_path, monkeypatch):
+    """🪤 keep 갈래는 compose_ad(product=None) 으로 부르지만 화면에 나오는 것은
+    **사장님이 찍은 진짜 사진**이다. product 유무로 짐작하면 여기에 딱지가 붙는다."""
+    _photo_dir(tmp_path, monkeypatch)
+    _simple_ready(monkeypatch)
+    calls = _notice_spy(monkeypatch)
+    monkeypatch.setattr(
+        pipeline, "remove_background", lambda im: Image.new("RGBA", (64, 64), (0, 0, 0, 255))
+    )
+    monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, cut: "keep")
+
+    brief = _brief().model_copy(update={"photo_id": _put()})
+    pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
+
+    assert not calls, "진짜 사진에 '연출된 이미지' 를 붙이면 그것이 거짓말이다"
+
+
+def test_누끼를_얹으면_표기하지_않는다(tmp_path, monkeypatch):
+    """배경은 AI 가 그렸어도 **상품은 사장님 것**이다. 표기 대상은 상품 쪽이다."""
+    _photo_dir(tmp_path, monkeypatch)
+    _simple_ready(monkeypatch)
+    calls = _notice_spy(monkeypatch)
+    cut = Image.new("RGBA", (64, 64), (255, 255, 255, 255))
+    monkeypatch.setattr(pipeline, "remove_background", lambda im: cut)
+    monkeypatch.setattr(pipeline, "remove_crumbs", lambda c: cut)
+    monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, c: "cutout")
+    monkeypatch.setattr(
+        pipeline, "generate_background", lambda prompt: Image.new("RGB", (1080, 1080), (10, 20, 30))
+    )
+
+    brief = _brief().model_copy(update={"photo_id": _put()})
+    pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
+
+    assert not calls
