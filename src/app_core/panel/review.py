@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from functools import partial
 from hashlib import sha256
+from itertools import pairwise
 from typing import Any, Final, NamedTuple
 
 from app_core.panel.contrast import Note, copy_defects
@@ -39,8 +40,12 @@ def to_panel(features: dict[str, Any], personas: list[dict[str, Any]]) -> Panel:
     """A 의 dict 산출물을 B 의 Pydantic 계약으로 옮긴다.
 
     `TradeAreaFeatures` 가 `extra="ignore"` 라 스키마에 없는 키는 조용히 버려진다.
-    지금 버려지는 것은 `match_distance_m` 하나다 (매칭 신뢰도 — 화면용이라
-    평가 프롬프트에는 필요 없다). 나머지 7개는 수호님이 스키마에 넣어주셨다.
+    실측(2026-08-18, #27 머지 후, 30 키 중): **버려지는 키가 없다.**
+
+    여기 적어둔 목록이 두 번 틀렸었다 — 처음엔 `match_distance_m` 하나라고 했는데
+    그건 스키마에 있었고 정작 `age_ticket` 둘이 새고 있었다. 조용히 버리는 계약이라
+    사람 눈으로는 못 잡는다. 그래서 주석 대신 테스트로 못 박았다
+    (`test_스키마가_버리는_피처가_없다`).
     """
     return Panel(
         features=TradeAreaFeatures(**features),
@@ -110,22 +115,47 @@ def rank(
         )
         for i, c in enumerate(copies)
     ]
-    return [r for _, r in sorted(enumerate(out), key=lambda p: rank_key(p[1], p[0]))]
+    band = bands([r.result.scores.get("intent", 0.0) for r in out])
+    return [r for _, r in sorted(enumerate(out), key=lambda p: rank_key(p[1], p[0], band[p[0]]))]
 
 
-def rank_key(r: Ranked, made_at: int) -> tuple[float, int, float, int]:
+def bands(intents: list[float]) -> list[int]:
+    """방문의향을 무리로 묶는다 — **간격이 `CLEAR_MARGIN` 미만이면 같은 무리다.**
+
+    처음엔 고정 격자(`round(intent / CLEAR_MARGIN)`)로 묶었는데, 격자선을 사이에
+    둔 두 후보는 그대로 갈렸다. 실측:
+
+        52.9 → 26 번 무리      53.1 → 27 번 무리      (0.2 점 차이)
+
+    0.2 는 재실행 잡음 0.7 보다 작다. 잡음만큼도 안 되는 차이로 결함 있는 문구가
+    1위가 되는 것을 막으려고 넣은 장치인데 격자선 위에서는 뚫렸다. 무리는 격자가
+    아니라 **후보 사이의 간격**으로 지어야 그 성질이 지켜진다.
+
+    붙은 것이 이어지면 한 무리가 길어질 수 있다 (54.0 · 52.5 · 51.0 은 간격이
+    각각 1.5 라 셋 다 0 번). 그쪽으로 틀리는 것은 "비슷합니다"라고 더 자주 말하는
+    쪽이라 안전하다 — 없는 차이를 있다고 말하지는 않는다.
+    """
+    order = sorted(range(len(intents)), key=lambda i: -intents[i])
+    out = [0] * len(intents)
+    band = 0
+    for prev, cur in pairwise(order):
+        if intents[prev] - intents[cur] >= CLEAR_MARGIN:
+            band += 1
+        out[cur] = band
+    return out
+
+
+def rank_key(r: Ranked, made_at: int, band: int) -> tuple[int, int, float, int]:
     """`rank()` 의 정렬 기준. 순수 함수라 LLM 없이 검증된다.
 
-    **방문의향을 `CLEAR_MARGIN` 폭으로 뭉쳐서 본다.** 그러지 않으면 0.1점 차이로
-    결함 있는 문구가 1등이 된다 — 실측(2026-08-13): 1위와 2위가 반올림해서 둘 다
-    52 인데 1위에만 "금액이 문구에 없습니다"가 붙어, 사장님 화면에서 "1위" 바로
-    밑에 경고가 뜨는 모양이 됐다. 잡음보다 작은 차이는 차이가 아니다.
+    `band` 는 `bands()` 가 지은 무리 번호로 0 이 가장 좋은 무리다. **같은 무리
+    안은 점수로 가르지 않는다** — 실측(2026-08-13) 1위와 2위가 둘 다 52 점대인데
+    1위에만 "금액이 문구에 없습니다"가 붙어, 사장님 화면에서 "1위" 바로 밑에
+    경고가 뜨는 모양이 됐다. 잡음보다 작은 차이는 차이가 아니다.
 
     `made_at` 은 만들어진 순서 — 앞의 셋이 전부 같을 때만 쓴다.
     """
-    s = r.result.scores
-    band = round(s.get("intent", 0.0) / CLEAR_MARGIN)
-    return (-band, len(r.defects), -s.get("attention", 0.0), made_at)
+    return (band, len(r.defects), -r.result.scores.get("attention", 0.0), made_at)
 
 
 def _key(store: Store, brief: AdBrief, copy: CopyCandidate, ad_id: str) -> str:

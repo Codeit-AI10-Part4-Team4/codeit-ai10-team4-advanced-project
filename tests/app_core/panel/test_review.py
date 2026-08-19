@@ -15,7 +15,7 @@ import pytest
 
 from app_core.panel.features import DB_PATH, build_features
 from app_core.panel.panel_builder import build_panel
-from app_core.panel.review import Ranked, rank, rank_key, review, to_panel
+from app_core.panel.review import Ranked, bands, rank, rank_key, review, to_panel
 from app_core.schema import AdBrief, CopyCandidate, Store, StoreInput
 
 from .test_evaluator import FakeClient, _good
@@ -91,9 +91,19 @@ def _ranked(intent: float, attention: float = 60.0, defects: int = 0) -> Ranked:
     )
 
 
+def _keys(*rs: Ranked) -> list[tuple[int, int, float, int]]:
+    """`rank()` 와 같은 순서로 정렬 키를 만든다.
+
+    무리 짓기(`bands`)를 거쳐야 `rank_key` 가 실제로 쓰이는 모양이 된다.
+    전에는 `rank_key` 만 따로 불러서, 무리를 잘못 짓는 결함을 테스트가 못 봤다.
+    """
+    band = bands([r.result.scores["intent"] for r in rs])
+    return [rank_key(r, n, band[n]) for n, r in enumerate(rs)]
+
+
 def test_방문의향이_높은_문구가_앞에_온다() -> None:
     """사장님이 원하는 결과 그 자체라 첫 기준으로 둔다."""
-    keys = [rank_key(_ranked(intent=i), n) for n, i in enumerate([46.0, 54.0, 50.0])]
+    keys = _keys(*(_ranked(intent=i) for i in [46.0, 54.0, 50.0]))
     assert [n for *_, n in sorted(keys)] == [1, 2, 0]
 
 
@@ -103,32 +113,38 @@ def test_잡음보다_작은_차이는_차이가_아니다() -> None:
     사장님 화면에서 "1위" 바로 밑에 경고가 뜨는 모양이 된다. 0.1점 차로 결함 있는
     문구가 1등이 되면 안 된다.
     """
-    keys = [
-        rank_key(_ranked(intent=52.4, defects=1), 0),  # 아주 조금 높지만 결함 있음
-        rank_key(_ranked(intent=52.0, defects=0), 1),  # 결함 없음
-    ]
+    keys = _keys(
+        _ranked(intent=52.4, defects=1),  # 아주 조금 높지만 결함 있음
+        _ranked(intent=52.0, defects=0),  # 결함 없음
+    )
+    assert min(keys)[3] == 1
+
+
+def test_격자선을_사이에_둔_두_후보도_같은_무리다() -> None:
+    """고정 격자로 묶던 시절의 결함.
+
+    `round(intent / 2.0)` 은 52.9 를 26 번, 53.1 을 27 번으로 갈랐다. 0.2 점
+    차이는 재실행 잡음 0.7 보다 작은데도 결함 있는 쪽이 1위가 됐다 — 위 테스트가
+    고른 52.4/52.0 은 마침 같은 칸이라 이 구멍을 지나쳤다.
+    """
+    keys = _keys(_ranked(intent=53.1, defects=1), _ranked(intent=52.9, defects=0))
     assert min(keys)[3] == 1
 
 
 def test_잡음보다_큰_차이는_결함을_이긴다() -> None:
     """결함이 있어도 손님들이 확실히 더 좋아하면 그쪽이 1위다."""
-    keys = [
-        rank_key(_ranked(intent=58.0, defects=1), 0),
-        rank_key(_ranked(intent=50.0, defects=0), 1),
-    ]
+    keys = _keys(_ranked(intent=58.0, defects=1), _ranked(intent=50.0, defects=0))
     assert min(keys)[3] == 0
 
 
 def test_결함까지_같으면_눈길이_가른다() -> None:
     """눈길은 신호가 가장 큰 지표다 (실측: 후보 3개 폭 5.5 vs 잡음 0.7)."""
-    keys = [
-        rank_key(_ranked(intent=52.0, attention=a), n) for n, a in enumerate([59.8, 65.3, 59.8])
-    ]
+    keys = _keys(*(_ranked(intent=52.0, attention=a) for a in [59.8, 65.3, 59.8]))
     assert min(keys)[3] == 1
 
 
 def test_전부_같으면_만든_순서를_지킨다() -> None:
-    keys = [rank_key(_ranked(intent=52.0), n) for n in range(3)]
+    keys = _keys(*(_ranked(intent=52.0) for _ in range(3)))
     assert [n for *_, n in sorted(keys)] == [0, 1, 2]
 
 
@@ -202,3 +218,19 @@ def test_서사를_LLM_이_쓴다() -> None:
     assert "narrate" in c.calls  # 서사 콜이 실제로 나갔다
     assert c.calls.count("narrate") == 1  # 12명을 배치 1콜로
     assert len(r.persona_comments) == 12
+
+
+def test_스키마가_버리는_피처가_없다() -> None:
+    """`extra="ignore"` 는 조용히 버려서, 주석이 틀려도 아무도 못 잡는다.
+
+    두 번 틀렸다. 처음엔 "버려지는 것은 match_distance_m 하나"라고 적혀 있었는데
+    그건 스키마에 있었고, 정작 age_ticket 두 개가 버려지고 있었다. 그래서 이
+    테스트를 심었고 — **#27 머지 때 실제로 걸렸다.** 수호님이 그 둘을 스키마에
+    넣어주셔서 이제 버려지는 것이 없다.
+
+    빈 집합으로 못 박아 둔다. 뭔가 다시 새면 여기서 걸린다.
+    """
+    from app_core.panel.schemas import TradeAreaFeatures
+
+    f = build_features("", "cafe", coord=YEOKSAM)
+    assert set(f) - set(TradeAreaFeatures.model_fields) == set()

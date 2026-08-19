@@ -25,7 +25,8 @@ repos:
   # ruff — CI의 lint/format 게이트와 동일 검사 (pyproject [tool.ruff] 설정 공유).
   # ruff-check는 자동 수정(--fix), ruff-format은 자동 포맷.
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
+    # pyproject 의 ruff 와 같은 값이어야 한다 - 어긋나면 pull 받은 남의 파일이 재포맷된다
+    rev: v0.16.3
     hooks:
       - id: ruff
         args: ["--fix"]
