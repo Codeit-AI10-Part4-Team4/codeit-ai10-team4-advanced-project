@@ -206,9 +206,13 @@ def main() -> int:
         else:
             if verdict.startswith("틀림"):
                 failed += 1
+            # 무엇이 이겼는지도 찍는다. 기대 라벨이 41% 인데 1위가 아니면
+            # **무엇이 그보다 높은지**가 다음 수를 정한다 — 2026-08-19 에
+            # 이걸 안 찍어서 원인을 보려고 한 판을 더 돌렸다.
+            won = " ".join(f"{lab}×{t.tops.count(lab)}" for lab in dict.fromkeys(t.tops))
             line = (
                 f"  {t.ad.key:<12} {t.want:<12} {share:>6.0%}  "
-                f"{t.hits:>4}/{len(t.tops):<4}  {verdict}"
+                f"{t.hits:>4}/{len(t.tops):<4}  {verdict:<16} 1위: {won}"
             )
         print(line)
         print(f"  {'':<12} {t.ad.copy.headline}")
