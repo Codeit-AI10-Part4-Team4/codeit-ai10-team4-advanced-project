@@ -12,7 +12,7 @@ from typing import Literal
 
 from PIL import Image
 
-from app_core import photo_store
+from app_core import photo_store, ref_style, sketch_gen
 from app_core.background import remove_background
 from app_core.compose import compose_ad
 from app_core.gen_background import generate_background
@@ -30,18 +30,55 @@ def _info_line(store: Store) -> str:
     return "  ·  ".join(part for part in (store.address, store.phone) if part)
 
 
+def _with_reference(brief: AdBrief, prompt: str) -> str:
+    """레퍼런스가 있으면 그 분위기를 프롬프트 뒤에 얹는다 (이미지 2번).
+
+    이미지를 확산 모델에 직접 넣는 길(IP-Adapter·img2img)은 둘 다 막혀서
+    말로 바꿔 넣는다 — 자세한 근거는 ref_style 참고.
+    """
+    if brief.ref_id is None:
+        return prompt
+    loaded = photo_store.load(brief.ref_id)
+    if loaded is None:
+        return prompt  # 보관함에서 사라졌어도 광고는 만든다
+    return ref_style.apply_to(prompt, ref_style.describe_style(*loaded))
+
+
+def _background(brief: AdBrief, prompt: str) -> Image.Image:
+    """배경 한 장. 스케치가 있으면 그 구도를 따라 그린다 (이미지 4번)."""
+    if brief.sketch_id is None:
+        return generate_background(prompt)
+    path = photo_store.path_of(brief.sketch_id)
+    if path is None:
+        return generate_background(prompt)
+    with Image.open(path) as sketch:
+        return sketch_gen.generate_from_sketch(sketch.copy(), prompt)
+
+
 def _simple_ad(brief: AdBrief, store: Store, copy: CopyCandidate, product: Image.Image | None):
     """제품 누끼가 있으면 빈 무대 배경에 얹고, 없으면 제품이 든 장면을 통째로 그린다.
 
-    빈 무대 프롬프트(_BASE)는 누끼를 얹으려고 제품을 일부러 뺀 캔버스다. 제품 없이
-    그대로 쓰면 광고 대상이 사라진다 — generate 갈래·사진 없는 주문이 그 경우라,
-    그때는 hero 프롬프트로 제품이 화면에 있게 그린다.
+    빈 무대 프롬프트(_BASE)는 누끼를 얹으려고 제품을 일부러 뺀 캔버스다. 그 위에
+    올릴 게 없으면 광고 대상이 사라진다 — generate 갈래·사진 없는 주문이 그 경우다.
+
+    **스케치는 여기서 갈래를 바꾸지 않는다.** 각 입력의 뜻이 그대로 유지된다 —
+
+      제품 사진 있음 + 스케치   빈 무대를 스케치 구도로 그리고 그 위에 누끼를 얹는다
+                               (사진 = 이 상품을 살린다 · 스케치 = 이 배치로)
+      제품 사진 없음 + 스케치   product 가 None 이라 hero 로 간다. 스케치가 상품을 그린다
+
+    ⚠️ 전에 `or brief.sketch_id is not None` 을 달았다가 뺐다. 스케치 기능을
+    만들 때는 이 함수에 `product is None` 분기가 없어서 필요했는데, #22 가
+    들어오면서 그쪽이 이미 같은 경우를 덮었다. 남겨두니 **사진과 스케치를 같이
+    올렸을 때 배경에도 제품이 그려지고 누끼도 얹혀 제품이 둘로** 나왔다.
     """
     if product is None:
         prompt = build_hero_prompt(store.industry_label, brief.product, brief.tone)
     else:
         prompt = build_bg_prompt(store.industry_label, brief.situation, brief.tone)
-    bg = generate_background(prompt)
+
+    prompt = _with_reference(brief, prompt)
+    bg = _background(brief, prompt)
     return compose_ad(product, copy.headline, copy.sub, background=bg)
 
 
@@ -53,7 +90,9 @@ def _poster_ad(brief: AdBrief, store: Store, copy: CopyCandidate, product: Image
     if product is None:
         # 사진이 없으면 주인공 이미지를 생성해 그 자리를 채운다 (사진 카드처럼 얹힌다)
         hero_prompt = build_hero_prompt(store.industry_label, brief.product, brief.tone)
-        product = generate_background(hero_prompt).convert("RGBA")
+        # 레퍼런스는 여기에도 얹는다 — 배경만 분위기를 따르고 주인공은 안 따르면
+        # 한 장 안에서 두 느낌이 부딪힌다.
+        product = generate_background(_with_reference(brief, hero_prompt)).convert("RGBA")
 
     plan = plan_poster(
         shop=store.name,

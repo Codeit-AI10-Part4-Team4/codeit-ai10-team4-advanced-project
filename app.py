@@ -409,7 +409,9 @@ def copy_view(store: Store, draft: AdBriefDraft) -> None:
             for note in scored.defects if scored else []:
                 st.warning(note.text, icon="⚠️")
             if st.button("이걸로 할게요", key=f"pick_copy{i}"):
-                ads.choose_copy(st.session_state.ad_id, candidate.headline)
+                # store.id 는 소유권 검사용(내 쪽), picked 는 손님 패널이 평가할
+                # 대상(아인님 쪽). 둘 다 필요해서 합쳤다.
+                ads.choose_copy(store.id, st.session_state.ad_id, candidate.headline)
                 st.session_state.picked = candidate
                 st.success("선택했습니다")
 
