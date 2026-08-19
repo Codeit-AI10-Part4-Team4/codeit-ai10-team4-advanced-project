@@ -1,0 +1,439 @@
+[
+  {
+    "store": "한나절커피",
+    "area": "역삼역",
+    "category": "커피-음료",
+    "product": "아이스 아메리카노",
+    "price": 4500,
+    "before": {
+      "headline": "퇴근길, 시원한 한 잔",
+      "sub": "한나절커피의 아이스 아메리카노 4,500원",
+      "weak": 0.3128,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.3128
+      }
+    },
+    "suggestions": [
+      "가격이 적당하다는 긍정적인 반응을 강조하여 '합리적인 가격의 아이스 아메리카노'와 같은 문구로 수정해보세요.",
+      "저녁 시간대의 매출 비율을 고려하여 '저녁에도 즐길 수 있는 시원한 음료'라는 문구를 추가해보세요."
+    ],
+    "top_resistance": [
+      "alternative",
+      "price"
+    ],
+    "confidence": "ok",
+    "excluded_cnt": 0,
+    "panel": {
+      "headline": "퇴근 후, 시원한 한 잔",
+      "sub": "합리적인 가격의 아이스 아메리카노 4,500원",
+      "weak": 0.3128,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.3128
+      }
+    },
+    "control": {
+      "headline": "퇴근 후, 시원함을 담다",
+      "sub": "한나절커피의 아이스 아메리카노 4,500원",
+      "weak": 0.3128,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.3128
+      }
+    },
+    "verdict_panel": "변화 없음",
+    "verdict_control": "변화 없음",
+    "secs": 22.8
+  },
+  {
+    "store": "한나절커피",
+    "area": "역삼역",
+    "category": "커피-음료",
+    "product": "크로플 세트",
+    "price": 8900,
+    "before": {
+      "headline": "아침의 달콤한 시작",
+      "sub": "갓 구운 크로플 세트, 8,900원에!",
+      "weak": 0.3358,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.3358
+      }
+    },
+    "suggestions": [
+      "크로플의 매력을 강조하는 문구를 추가해 보세요. 예: '갓 구운 크로플, 아침의 특별한 시작!'",
+      "가격에 대한 부담을 줄이기 위해 '합리적인 가격의 크로플'이라는 표현을 사용해 보세요."
+    ],
+    "top_resistance": [
+      "price"
+    ],
+    "confidence": "ok",
+    "excluded_cnt": 0,
+    "panel": {
+      "headline": "아침의 특별한 크로플",
+      "sub": "갓 구운 크로플 세트, 8,900원에 즐겨보세요!",
+      "weak": 0.3358,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.3358
+      }
+    },
+    "control": {
+      "headline": "아침의 행복, 크로플 세트",
+      "sub": "갓 구운 크로플과 함께하는 소중한 한나절, 8,900원!",
+      "weak": 0.3358,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.3358
+      }
+    },
+    "verdict_panel": "변화 없음",
+    "verdict_control": "변화 없음",
+    "secs": 23.4
+  },
+  {
+    "store": "한나절커피",
+    "area": "역삼역",
+    "category": "커피-음료",
+    "product": "원두 드립백",
+    "price": 12000,
+    "before": {
+      "headline": "주말, 한 잔의 여유",
+      "sub": "한나절커피의 드립백으로 홈카페를 즐겨보세요. 12,000원",
+      "weak": 0.483,
+      "weak_kind": "weekend",
+      "scored": {
+        "price": 0.89,
+        "weekend": 0.483
+      }
+    },
+    "suggestions": [
+      "'가격이 부담스럽다'는 표현 대신 '합리적인 가격으로 제공됩니다'로 수정해보세요.",
+      "'홈카페는 매력적입니다'라는 문구를 강조하여 고객의 관심을 끌어보세요."
+    ],
+    "top_resistance": [
+      "price"
+    ],
+    "confidence": "ok",
+    "excluded_cnt": 0,
+    "panel": {
+      "headline": "주말, 여유로운 한 잔",
+      "sub": "합리적인 가격으로 홈카페의 매력을 느껴보세요. 12,000원",
+      "weak": 0.483,
+      "weak_kind": "weekend",
+      "scored": {
+        "price": 0.89,
+        "weekend": 0.483
+      }
+    },
+    "control": {
+      "headline": "주말, 커피 한 잔의 여유",
+      "sub": "한나절커피 드립백으로 홈카페를 완성하세요. 12,000원",
+      "weak": 0.483,
+      "weak_kind": "weekend",
+      "scored": {
+        "price": 0.89,
+        "weekend": 0.483
+      }
+    },
+    "verdict_panel": "변화 없음",
+    "verdict_control": "변화 없음",
+    "secs": 21.7
+  },
+  {
+    "store": "홍대반상",
+    "area": "홍대입구역 3번",
+    "category": "한식음식점",
+    "product": "김치찌개",
+    "price": 9000,
+    "before": {
+      "headline": "점심엔 김치찌개 한 그릇!",
+      "sub": "푸근한 맛으로 배를 채우세요. 9,000원",
+      "weak": 0.339,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.339
+      }
+    },
+    "suggestions": [
+      "김치찌개 가격이 9,000원이라는 점을 강조하며, '합리적인 가격의 김치찌개'라는 문구로 소비자에게 긍정적인 인식을 줄 수 있습니다.",
+      "점심 시간대에 맞춰 '점심 특가 김치찌개'와 같은 문구를 사용하여 점심 시간대의 매출을 유도할 수 있습니다."
+    ],
+    "top_resistance": [
+      "price"
+    ],
+    "confidence": "ok",
+    "excluded_cnt": 0,
+    "panel": {
+      "headline": "점심 특선 김치찌개!",
+      "sub": "푸근한 한 그릇으로 배를 채우세요. 9,000원",
+      "weak": 0.339,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.339
+      }
+    },
+    "control": {
+      "headline": "따뜻한 김치찌개 한 그릇",
+      "sub": "점심 특선으로 푸근한 한끼를 즐기세요. 9,000원",
+      "weak": 0.339,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.339
+      }
+    },
+    "verdict_panel": "변화 없음",
+    "verdict_control": "변화 없음",
+    "secs": 20.1
+  },
+  {
+    "store": "홍대반상",
+    "area": "홍대입구역 3번",
+    "category": "한식음식점",
+    "product": "제육볶음 정식",
+    "price": 11000,
+    "before": {
+      "headline": "제육볶음 정식, 야식의 정석!",
+      "sub": "11,000원에 맛있는 한 끼를 즐겨보세요.",
+      "weak": 0.3406,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.3406
+      }
+    },
+    "suggestions": [
+      "제육볶음 정식의 가격을 '합리적인 가격'으로 강조하는 문구로 수정해보세요.",
+      "제육볶음 정식이 '가성비 좋은 점심'으로 즐길 수 있다는 점을 강조해보세요."
+    ],
+    "top_resistance": [
+      "price"
+    ],
+    "confidence": "ok",
+    "excluded_cnt": 0,
+    "panel": {
+      "headline": "가성비 좋은 제육볶음!",
+      "sub": "11,000원에 든든한 야식으로 즐겨보세요.",
+      "weak": 0.3406,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.3406
+      }
+    },
+    "control": {
+      "headline": "제육볶음, 야식의 힘!",
+      "sub": "11,000원에 든든한 한 끼를 즐기세요.",
+      "weak": 0.3406,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.3406
+      }
+    },
+    "verdict_panel": "변화 없음",
+    "verdict_control": "변화 없음",
+    "secs": 20.0
+  },
+  {
+    "store": "홍대반상",
+    "area": "홍대입구역 3번",
+    "category": "한식음식점",
+    "product": "계란말이",
+    "price": 6000,
+    "before": {
+      "headline": "술안주로 딱! 계란말이",
+      "sub": "가벼운 한입, 6,000원에 즐겨보세요.",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "suggestions": [
+      "계란말이의 매력을 강조하는 문구를 추가해 보세요.",
+      "가격에 대한 설명을 보강하여 가성비를 강조하는 문구로 수정해 보세요."
+    ],
+    "top_resistance": [
+      "price",
+      "alternative"
+    ],
+    "confidence": "ok",
+    "excluded_cnt": 0,
+    "panel": {
+      "headline": "술안주로 완벽한 계란말이",
+      "sub": "부드러운 계란의 풍미, 6,000원에 즐겨보세요.",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "control": {
+      "headline": "한입에 쏙! 계란말이",
+      "sub": "술안주로 완벽한 조화, 6,000원에 즐기세요.",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "verdict_panel": "천장(잴 수 없음)",
+    "verdict_control": "천장(잴 수 없음)",
+    "secs": 19.7
+  },
+  {
+    "store": "수유통닭",
+    "area": "도봉산입구",
+    "category": "치킨전문점",
+    "product": "후라이드 치킨",
+    "price": 18000,
+    "before": {
+      "headline": "후라이드 치킨 예약하세요!",
+      "sub": "신나는 오후, 수유통닭의 맛을 즐기세요!",
+      "weak": 0.2281,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.2281
+      }
+    },
+    "suggestions": [
+      "후라이드 치킨의 가격을 강조하기보다는 '합리적인 가격의 맛있는 후라이드 치킨'이라는 문구로 바꿔보세요.",
+      "광고 문구에 '오후 2시부터 5시까지 특별 할인'과 같은 프로모션을 추가해보세요."
+    ],
+    "top_resistance": [
+      "price"
+    ],
+    "confidence": "ok",
+    "excluded_cnt": 0,
+    "panel": {
+      "headline": "후라이드 치킨 예약하세요!",
+      "sub": "합리적인 가격 18,000원으로 즐기세요!",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "control": {
+      "headline": "후라이드 치킨 예약 필수!",
+      "sub": "신나는 오후, 수유통닭과 함께하세요!",
+      "weak": 0.2281,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.2281
+      }
+    },
+    "verdict_panel": "회피(timing)",
+    "verdict_control": "변화 없음",
+    "secs": 20.2
+  },
+  {
+    "store": "수유통닭",
+    "area": "도봉산입구",
+    "category": "치킨전문점",
+    "product": "양념치킨 세트",
+    "price": 25000,
+    "before": {
+      "headline": "야식의 정석, 양념치킨!",
+      "sub": "수유통닭의 양념치킨 세트, 25,000원!",
+      "weak": 0.9405,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.9405
+      }
+    },
+    "suggestions": [
+      "양념치킨의 가격을 '합리적인 가격'으로 강조하는 문구로 변경해 보세요.",
+      "광고에 '서울 같은 업종 중 상위 69% 수준'이라는 점을 강조하여 가치를 부각시켜 보세요."
+    ],
+    "top_resistance": [
+      "price"
+    ],
+    "confidence": "ok",
+    "excluded_cnt": 0,
+    "panel": {
+      "headline": "합리적인 가격의 양념치킨!",
+      "sub": "수유통닭의 양념치킨 세트, 25,000원!",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "control": {
+      "headline": "양념의 매력, 한 입에!",
+      "sub": "수유통닭의 양념치킨 세트, 25,000원!",
+      "weak": 1.0,
+      "weak_kind": "price",
+      "scored": {
+        "price": 1.0
+      }
+    },
+    "verdict_panel": "회피(timing)",
+    "verdict_control": "회피(timing)",
+    "secs": 20.6
+  },
+  {
+    "store": "수유통닭",
+    "area": "도봉산입구",
+    "category": "치킨전문점",
+    "product": "순살 반반",
+    "price": 22000,
+    "before": {
+      "headline": "점심엔 순살 반반!",
+      "sub": "22,000원으로 배달의 맛을 즐기세요.",
+      "weak": 0.0294,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.0294
+      }
+    },
+    "suggestions": [
+      "점심 메뉴 가격을 '합리적인 가격'으로 강조하는 문구로 수정해보세요.",
+      "광고에 점심 시간대의 특별 할인이나 프로모션을 추가해보세요."
+    ],
+    "top_resistance": [
+      "price"
+    ],
+    "confidence": "ok",
+    "excluded_cnt": 0,
+    "panel": {
+      "headline": "점심엔 순살 반반!",
+      "sub": "22,000원으로 배달의 맛을 즐기세요.",
+      "weak": 0.0294,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.0294
+      }
+    },
+    "control": {
+      "headline": "점심엔 순살 반반!",
+      "sub": "22,000원으로 배달의 맛을 즐기세요.",
+      "weak": 0.0294,
+      "weak_kind": "timing",
+      "scored": {
+        "price": 1.0,
+        "timing": 0.0294
+      }
+    },
+    "verdict_panel": "변화 없음",
+    "verdict_control": "변화 없음",
+    "secs": 20.4
+  }
+]
