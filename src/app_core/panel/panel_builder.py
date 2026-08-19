@@ -212,7 +212,7 @@ def build_panel(
     features: dict[str, Any],
     narrator: Callable[[list[dict[str, Any]], dict[str, Any]], list[str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """상권 피처 → 페르소나 12개.
+    """상권 피처 → 페르소나 **최대** 12명. 매출이 0 인 연령대는 빠진다.
 
     narrator 를 주면 서사 생성을 위임한다(LLM 배치 1콜). 없으면 사실 나열로 채운다.
     """
@@ -226,6 +226,25 @@ def build_panel(
         for a in sorted(age)
         for g in ("M", "F")
     ]
+    # **매출이 0 인 연령대는 손님이 아니다 — 페르소나를 만들지 않는다.**
+    #
+    # 안 거르면 `Persona.weight` 의 `gt=0.0` 에 걸려 ValidationError 가 난다.
+    # 화면에서는 `_rank_copies` 가 잡는 예외 축(NoTradeAreaError·AggregationError)
+    # 밖이라 빨간 트레이스백이 사장님에게 그대로 뜬다.
+    #
+    # 여태 안 보인 이유는 관통 실행을 **좌표 박아둔 역삼·홍대·수유에서만** 했기
+    # 때문이다. 랜덤 상권으로 돌려보고서야 나왔다 (실측 2026-08-19, 9곳 중 4곳 사망):
+    #
+    #     난우중학교 미용실   20대 매출 0원
+    #     동평화시장 한식     10대 매출 0원
+    #     주소 × 업종 50,016 조합 중 10,448 (20.9%) · 상권 1,428 / 1,649 이 해당
+    #
+    # 하한 가중치를 주는 쪽도 됐지만 **없는 비중을 지어내는 것**이라 안 했다.
+    # 점수는 어느 쪽이든 같다 — 가중치 0 은 가중평균에 기여하지 않는다.
+    # 빠지는 층이 '지나다니지만 안 사는' 정보를 갖는 경우는 `boundary_age` 가
+    # 맡는데, 거기는 이미 `BOUNDARY_MIN_SHARE` 미만을 제외한다. 즉 **여기서
+    # 빠지는 층이 경계 페르소나가 될 일은 없다** — 잃는 정보가 없다.
+    seeds = [s for s in seeds if s["weight"] > 0]
     times = _assign_times([s["weight"] for s in seeds], features["time_share"])
 
     personas: list[dict[str, Any]] = []
