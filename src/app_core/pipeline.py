@@ -8,6 +8,7 @@
   poster  종이 배경 + 정보 블록   — 정보가 주인공. 확산 모델을 쓰지 않아 빠르고 싸다
 """
 
+from dataclasses import dataclass
 from typing import Literal
 
 from PIL import Image
@@ -18,11 +19,35 @@ from app_core.compose import compose_ad
 from app_core.gen_background import generate_background
 from app_core.photo_router import mask_area, remove_crumbs, route_photo
 from app_core.poster import generate_poster
-from app_core.poster_plan import plan_poster
+from app_core.poster_plan import PosterPlan, plan_poster
 from app_core.prompt_builder import build_bg_prompt, build_hero_prompt
 from app_core.schema import AdBrief, CopyCandidate, Store
 
 Style = Literal["simple", "poster"]
+
+
+@dataclass(frozen=True)
+class SimpleMaterials:
+    """감성 피드형 재료 — 문구를 얹기 전까지의 전부."""
+
+    product: Image.Image | None  #: 누끼. keep·통생성이면 None
+    background: Image.Image  #: keep 이면 원본, 아니면 생성 배경
+    staged: bool  #: 상품 이미지를 AI 가 그렸는지 → "연출된 이미지" 표기
+
+
+@dataclass(frozen=True)
+class PosterMaterials:
+    """정보 포스터형 재료 — 기획(LLM)까지 끝난 상태."""
+
+    product: Image.Image | None  #: 누끼 또는 생성된 주인공
+    plan: PosterPlan  #: 포스터 기획 결과
+    shop: str  #: 가게 이름
+    info: str  #: 하단 한 줄 (주소·전화)
+    staged: bool  #: 상품 이미지를 AI 가 그렸는지 → "연출된 이미지" 표기
+
+
+#: 문구를 모르는 재료 상자 — 문구가 바뀌어도 이건 재사용하고 조판만 다시 한다
+AdMaterials = SimpleMaterials | PosterMaterials
 
 
 def _info_line(store: Store) -> str:
@@ -55,7 +80,7 @@ def _background(brief: AdBrief, prompt: str) -> Image.Image:
         return sketch_gen.generate_from_sketch(sketch.copy(), prompt)
 
 
-def _simple_ad(brief: AdBrief, store: Store, copy: CopyCandidate, product: Image.Image | None):
+def _simple_materials(brief: AdBrief, store: Store, product: Image.Image | None) -> SimpleMaterials:
     """제품 누끼가 있으면 빈 무대 배경에 얹고, 없으면 제품이 든 장면을 통째로 그린다.
 
     빈 무대 프롬프트(_BASE)는 누끼를 얹으려고 제품을 일부러 뺀 캔버스다. 그 위에
@@ -78,13 +103,13 @@ def _simple_ad(brief: AdBrief, store: Store, copy: CopyCandidate, product: Image
         prompt = build_bg_prompt(store.industry_label, brief.situation, brief.tone)
 
     prompt = _with_reference(brief, prompt)
-    bg = _background(brief, prompt)
     # product 가 없으면 상품까지 AI 가 그린 것이다 → "연출된 이미지" 표기.
-    # 여기서 정해 넘기는 이유는 compose 가 keep(사장님 사진)과 구분하지 못해서다.
-    return compose_ad(product, copy.headline, copy.sub, background=bg, staged=product is None)
+    return SimpleMaterials(
+        product=product, background=_background(brief, prompt), staged=product is None
+    )
 
 
-def _poster_ad(brief: AdBrief, store: Store, copy: CopyCandidate, product: Image.Image | None):
+def _poster_materials(brief: AdBrief, store: Store, product: Image.Image | None) -> PosterMaterials:
     """포스터에 들어갈 내용(태그라인·특징·이벤트·색)은 기획 부품이 정한다.
 
     사장님에게 특징 3개를 직접 쓰게 하면 서비스가 아니라 양식 작성이 된다.
@@ -109,31 +134,20 @@ def _poster_ad(brief: AdBrief, store: Store, copy: CopyCandidate, product: Image
         extra=brief.extra,
         transcript=brief.raw_utterance,
     )
-    return generate_poster(
-        product,
-        store.name,
-        tagline=plan.tagline,
-        badge=plan.badge,
-        date_line=plan.date_line,
-        features=plan.features,
-        event=plan.event,
-        headline=copy.headline,
-        info=_info_line(store),
-        palette=plan.palette,
-        staged=staged,
+    return PosterMaterials(
+        product=product, plan=plan, shop=store.name, info=_info_line(store), staged=staged
     )
 
 
 _MIME = {".png": "image/png", ".webp": "image/webp"}
 
 
-def generate_ad(
+def prepare_materials(
     brief: AdBrief,
     store: Store,
-    copy: CopyCandidate,
     style: Style = "simple",
-) -> Image.Image:
-    """주문서·가게·문구를 받아 완성 광고 이미지를 돌려준다.
+) -> AdMaterials:
+    """비싼 단계 전부 ─ 사진 분석·배경 생성·포스터 기획. **문구를 모른다.**
 
     사진이 있으면 갈래 판정(photo_router)이 사용법을 정한다 —
       keep      원본을 배경으로 그대로 쓴다 (확산 모델도 안 부른다)
@@ -147,7 +161,8 @@ def generate_ad(
         path = photo_store.path_of(brief.photo_id)
         if path is None:
             raise FileNotFoundError(f"보관함에 {brief.photo_id}번 사진이 없습니다")
-        photo = Image.open(path)
+        with Image.open(path) as f:
+            photo = f.copy()  # 파일과 분리해 담는다 ─ 재료는 화면 세션에 오래 산다
         # 판정은 **청소 전** 누끼로 한다 — 먼저 청소하면 라우터가 보기도 전에 상품이 사라진다
         raw_cut = remove_background(photo)
         if style == "simple":
@@ -158,13 +173,55 @@ def generate_ad(
     if style == "poster":
         # 누끼가 빈손(전경 5% 미만)이면 없는 셈 친다 — 실오라기가 제품 자리에 앉는 것 방지
         product = cut if cut is not None and mask_area(cut) >= 0.05 else None
-        return _poster_ad(brief, store, copy, product)
+        return _poster_materials(brief, store, product)
 
     if route == "keep" and photo is not None:
         # 사진이 이미 광고 배경감 — 확산 모델 없이 원본 위에 문구만 얹는다.
-        # staged 는 False 다: product 인자가 None 이지만 화면에 나오는 것은
+        # 🪤 staged 는 False 다: product 가 None 이지만 화면에 나오는 것은
         # **사장님이 찍은 진짜 사진**이다. 여기에 "연출된 이미지" 를 붙이면 거짓말이 된다.
-        return compose_ad(
-            None, copy.headline, copy.sub, background=photo.convert("RGB"), staged=False
+        return SimpleMaterials(product=None, background=photo.convert("RGB"), staged=False)
+    return _simple_materials(brief, store, cut if route == "cutout" else None)
+
+
+def render_ad(materials: AdMaterials, copy: CopyCandidate) -> Image.Image:
+    """재료에 문구를 얹는다 — **문구가 처음 쓰이는 곳.**
+
+    싼 단계(글자 그리기)만 있다. 문구를 바꾸면 여기만 다시 부르면 되고,
+    비싼 재료(GPU 배경·LLM 기획·비전 판정)는 그대로 재사용된다 (광고완성흐름 §4-1).
+    """
+    if isinstance(materials, PosterMaterials):
+        plan = materials.plan
+        return generate_poster(
+            materials.product,
+            materials.shop,
+            tagline=plan.tagline,
+            badge=plan.badge,
+            date_line=plan.date_line,
+            features=plan.features,
+            event=plan.event,
+            headline=copy.headline,
+            info=materials.info,
+            palette=plan.palette,
+            staged=materials.staged,
         )
-    return _simple_ad(brief, store, copy, cut if route == "cutout" else None)
+    return compose_ad(
+        materials.product,
+        copy.headline,
+        copy.sub,
+        background=materials.background,
+        staged=materials.staged,
+    )
+
+
+def generate_ad(
+    brief: AdBrief,
+    store: Store,
+    copy: CopyCandidate,
+    style: Style = "simple",
+) -> Image.Image:
+    """주문서·가게·문구를 받아 완성 광고 한 장을 돌려준다 — 기존 호출부 호환용.
+
+    안은 재료 준비와 조판 두 단계다. 문구만 바꿀 때는 이걸 다시 부르지 말고
+    prepare_materials 결과를 들고 render_ad 만 다시 부른다.
+    """
+    return render_ad(prepare_materials(brief, store, style), copy)

@@ -42,7 +42,7 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "httpx>=0.27.0",          # FastAPI TestClient 백엔드
-    "ruff>=0.6.0",
+    "ruff==0.16.3",  # pre-commit rev 와 같은 값으로 고정 (.pre-commit-config.yaml)
     "mypy>=1.10.0",
     "types-PyYAML>=6.0.0",    # PyYAML 은 인라인 타입이 없어 스텁 필요
     "nbconvert>=7.0.0",       # 노트북 → 스크립트 변환
