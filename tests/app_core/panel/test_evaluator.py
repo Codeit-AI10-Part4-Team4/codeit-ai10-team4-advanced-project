@@ -1497,3 +1497,36 @@ def test_every_label_has_a_classifier_example() -> None:
     exampled = {line.rsplit("→", 1)[1].strip() for line in body.splitlines() if "→" in line}
     selectable = {lab for lab in get_args(Resistance) if lab != "visual"}
     assert selectable <= exampled, f"예시 없는 라벨: {selectable - exampled}"
+
+
+def test_summary_facts_carry_fit(yeoksam: Panel, shop, brief, copy) -> None:
+    """대조 문장의 적합도(fit)가 요약 콜까지 넘어간다.
+
+    문장만 주면 모델이 방향을 못 잡는다 — 실측(아인님 2026-08-18): 시점
+    제안 7/18 이 전부 광고가 이미 말한 시간대를 *강조*하라고 했다. 매출이
+    몰리는 쪽으로 *옮기라*는 판단은 fit 에만 있었다.
+    """
+    seen: list[str] = []
+
+    class Spy(FakeClient):
+        def complete_json(self, system: str, user: str) -> dict[str, Any]:
+            if system.startswith("손님들의 평가를"):
+                seen.append(user)
+            return super().complete_json(system, user)
+
+    evaluate(yeoksam, shop, brief, copy, client=Spy(_reply_by_demo(yeoksam)), consistency_k=1)
+
+    assert seen, "요약 콜이 안 갔다"
+    facts = seen[0].split("## 손님 반응")[0]
+    assert "적합도" in facts, "fit 이 사실 블록에 없다"
+
+
+def test_classifier_relevance_example_is_the_measured_one() -> None:
+    """relevance 예시는 아인님이 실측한 그 문장이어야 한다.
+
+    내가 지어낸 문장("10대 취향 같아서…")을 넣었다가 교체했다 — 아인님
+    문장은 효과가 측정됐고(alternative 7→0, relevance 1→8) 내 것은 아니다.
+    예시 문장 하나가 분포를 뒤집는 것을 다섯 번 봤으면, 예시는 측정된
+    것만 쓴다.
+    """
+    assert "직장인이라 해당이 없네요" in evaluator.RESISTANCE_SYSTEM
