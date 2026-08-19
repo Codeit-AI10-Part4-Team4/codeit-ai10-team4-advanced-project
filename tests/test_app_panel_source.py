@@ -124,3 +124,77 @@ def test_정상이면_경고를_띄우지_않는다(monkeypatch: pytest.MonkeyPa
     app._panel_source(_result())
     assert not screen.warning
     assert not screen.info
+
+
+# ── 실패했을 때 안내가 남는가 ──────────────────────────────────────
+#
+# 귀한님이 통합 스모크에서 찾은 것(2026-08-19): 카카오 키가 없는 환경에서
+# "동네 손님 12명에게 셋 다 보여주기"를 눌러도 **아무 일도 안 일어났다.**
+# `_rank_copies` 가 안내문을 띄우는데 부르는 쪽이 성공 여부와 상관없이
+# `st.rerun()` 을 돌려 그 자리에서 지워버렸다.
+#
+# `_make_copies` 는 #20 에서 같은 이유로 이미 bool 이었다. 바로 아래 버튼만
+# 안 고쳐져 있었고, 두 줄 위 주석에 "실패했을 때는 그대로 둬야 에러 문구가
+# 남는다"고 적혀 있었는데도 그랬다 — 주석은 규칙을 지켜주지 않는다.
+
+
+class _State(dict):
+    """`st.session_state` 흉내. 속성으로도 키로도 읽고 쓴다."""
+
+    def __getattr__(self, k: str) -> Any:
+        return self[k]
+
+    def __setattr__(self, k: str, v: Any) -> None:
+        self[k] = v
+
+
+def _stub_layout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`spinner`·`expander` 는 with 문에 쓰이므로 컨텍스트 매니저로 바꾼다."""
+    from contextlib import nullcontext
+
+    for name in ("spinner", "expander"):
+        monkeypatch.setattr(app.st, name, lambda *a, **k: nullcontext())
+    monkeypatch.setattr(app.st, "code", lambda *a, **k: None)
+    monkeypatch.setattr(app.st, "session_state", _State())
+
+
+def _args() -> tuple[Any, Any, list[Any]]:
+    from app_core.schema import AdBrief, CopyCandidate, Store, StoreInput
+
+    base = StoreInput(industry="cafe", name="테스트카페", address="서울 강남구 테헤란로 152")
+    return (
+        Store(**base.model_dump(), id=1, user_id=1),
+        AdBrief(goal="copy", product="크로플", price=6000, situation="신메뉴"),
+        [CopyCandidate(headline="점심 후 달달한 크로플", sub="6,000원")],
+    )
+
+
+def test_동네를_못_찾으면_False_를_돌려주고_안내를_남긴다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """False 를 못 돌려주면 부르는 쪽이 rerun 해서 이 안내가 사라진다."""
+    from app_core.panel.features import NoTradeAreaError
+
+    def _raise(*_a: Any, **_k: Any) -> None:
+        raise NoTradeAreaError("KAKAO_REST_KEY 가 없습니다. coord 를 직접 넘기세요.")
+
+    screen = Screen().install(monkeypatch)
+    _stub_layout(monkeypatch)
+    monkeypatch.setattr(app, "rank", _raise)
+
+    assert app._rank_copies(*_args()) is False
+    joined = "\n".join(screen.warning)
+    assert "동네 손님을 불러오지 못했습니다" in joined
+    # 개발자 문장이 사장님 화면 본문에 그대로 뜨면 안 된다 — 접어서 보여준다.
+    assert "KAKAO_REST_KEY" not in joined
+
+
+def test_성공하면_True_를_돌려준다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """성공했을 때만 rerun 해야 방금 만든 순위가 화면에 나온다."""
+    screen = Screen().install(monkeypatch)
+    _stub_layout(monkeypatch)
+    monkeypatch.setattr(app, "rank", lambda *a, **k: ["순위결과"])
+
+    assert app._rank_copies(*_args()) is True
+    assert app.st.session_state["ranked"] == ["순위결과"]
+    assert not screen.warning

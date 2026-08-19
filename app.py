@@ -276,12 +276,19 @@ def _make_copies(store: Store, brief: AdBrief, parent_id: int | None = None) -> 
     return True
 
 
-def _rank_copies(store: Store, brief: AdBrief, copies: list[CopyCandidate]) -> None:
-    """후보 전부를 손님들에게 보여주고 순위를 담는다.
+def _rank_copies(store: Store, brief: AdBrief, copies: list[CopyCandidate]) -> bool:
+    """후보 전부를 손님들에게 보여주고 순위를 담는다. **성공하면 True.**
 
     한 건만 평가하던 것을 셋으로 늘렸다. 콜이 3배지만, 한 건만 물어서 얻은 것은
     "가격이 걸린다"는 한 단어뿐이었고 그건 사장님이 손댈 수 없는 답이다
     (재생성은 가격 슬롯을 안 바꾼다). 셋을 물으면 **어느 걸 쓸지**가 나온다.
+
+    **성공 여부를 돌려주는 이유** — 부르는 쪽이 실패했을 때 `st.rerun()` 을
+    건너뛰어야 안내문이 화면에 남는다. 안 그러면 사장님 눈에는 버튼을 눌러도
+    아무 일도 안 일어나는 것으로 보인다 (귀한님이 통합 스모크에서 발견,
+    2026-08-19). `_make_copies` 는 #20 에서 같은 이유로 이미 bool 이었는데
+    바로 아래 이 버튼만 안 고쳐져 있었다 — 규칙을 주석으로 적어두는 것만으로는
+    안 지켜진다.
     """
     try:
         with st.spinner("동네 손님 12명에게 후보를 보여주는 중... (1분쯤 걸립니다)"):
@@ -289,9 +296,17 @@ def _rank_copies(store: Store, brief: AdBrief, copies: list[CopyCandidate]) -> N
                 store, brief, copies, ad_id=str(st.session_state.get("ad_id", ""))
             )
     except NoTradeAreaError as exc:
-        st.warning(str(exc))
+        # 원문을 그대로 띄우면 사장님이 "coord 를 직접 넘기세요" 같은 개발자
+        # 문장을 읽게 된다(카카오 키가 없을 때 실제로 그 문장이 온다).
+        # 사장님이 할 수 있는 말만 화면에 두고 원문은 접어서 남긴다.
+        st.warning("이 주소로는 동네 손님을 불러오지 못했습니다.", icon="📍")
+        with st.expander("왜 안 됐는지 (개발용)"):
+            st.code(str(exc))
+        return False
     except AggregationError as exc:
         st.error(f"손님 반응을 모으지 못했습니다. 다시 눌러주세요. ({exc})")
+        return False
+    return True
 
 
 def _panel_source(result: EvaluationResult) -> None:
@@ -428,8 +443,15 @@ def copy_view(store: Store, draft: AdBriefDraft) -> None:
         if st.button("문구 만들기", type="primary") and _make_copies(store, draft.to_brief()):
             st.rerun()
 
-    if copies and not ranked and st.button("🧑‍🤝‍🧑 동네 손님 12명에게 셋 다 보여주기"):
-        _rank_copies(store, st.session_state.brief, copies)
+    # 위 "문구 만들기"와 같은 규칙이다 — **성공했을 때만** rerun 한다.
+    # 무조건 돌리면 `_rank_copies` 가 띄운 안내문이 그 자리에서 지워져,
+    # 사장님 눈에는 버튼을 눌러도 아무 일도 안 일어난 것처럼 보인다.
+    if (
+        copies
+        and not ranked
+        and st.button("🧑‍🤝‍🧑 동네 손님 12명에게 셋 다 보여주기")
+        and _rank_copies(store, st.session_state.brief, copies)
+    ):
         st.rerun()
 
     if ranked:
