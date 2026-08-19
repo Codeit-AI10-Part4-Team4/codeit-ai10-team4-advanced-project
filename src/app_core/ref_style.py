@@ -38,15 +38,18 @@ SYSTEM_PROMPT = """You look at a reference advertisement image and write a short
 English phrase describing **only its look** — for a text-to-image model.
 
 Rules
-- At most 12 words. Output the phrase only, no quotes, no explanation.
+- At most 12 words, no quotes, no explanation.
 - Describe **lighting, colors, mood, and background/surface** only.
 - **Never mention the product, food, object, person, brand, or any text**
   that appears in the image. The user is advertising something else entirely;
   naming what you see would put someone else's product into their ad.
-- If you cannot tell, output an empty string.
+- If you cannot tell, use an empty string.
 
-Good: "warm golden light, rustic wooden surface, soft shadows, cozy mood"
-Bad:  "a cup of coffee on a wooden table"   ← names the product
+Answer in JSON only, in this exact shape:
+
+{ "phrase": "warm golden light, rustic wooden surface, soft shadows, cozy mood" }
+
+Bad phrase: "a cup of coffee on a wooden table"   ← names the product
 """
 
 
