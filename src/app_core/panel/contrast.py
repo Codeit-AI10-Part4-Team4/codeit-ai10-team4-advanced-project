@@ -96,6 +96,18 @@ def price_note(features: TradeAreaFeatures, brief: AdBrief) -> Note | None:
     ⚠️ 둘은 같은 단위가 아니다. 객단가는 **결제 1건**의 평균이라 여러 개를
     산 경우가 섞여 있고, 광고 가격은 **품목 하나**다. 그래서 "비싸다/싸다"로
     말하지 않고 두 숫자를 그대로 보여준다. 문장에도 그 차이를 적는다.
+
+    ⚠️ **분위를 말할 때 무엇의 순위인지 반드시 적는다.** 전에는
+    `"서울 같은 업종 중 상위 43% 수준입니다"` 였는데, 주어도 없고 무엇의
+    순위인지도 없었다. 모델이 그 빈칸을 **품질**로 채웠다 (실측 2026-08-19,
+    A/B 재측정 중 제안에 그대로 나왔다):
+
+        "서울 한식업종 상위 43%의 품질을 자랑하는 제육볶음 정식"
+
+    가격 분위가 품질 주장으로 둔갑한 것이고, 사장님이 말한 적 없는 사실이라
+    #23 이 금지한 그것이다. `SUMMARY_SYSTEM` 에 금지 지시가 이미 있는데도
+    뚫렸다 — 수호님 `prompt_lint.py` 가 적어둔 대로 **모델은 금지를 안 읽는다.**
+    그래서 금지를 세게 쓰는 대신 **문장에서 빈칸을 없앤다.**
     """
     if not brief.show_price:
         return None
@@ -104,8 +116,9 @@ def price_note(features: TradeAreaFeatures, brief: AdBrief) -> Note | None:
         kind="price",
         text=(
             f"광고에 적은 가격은 {brief.price:,}원입니다. "
-            f"이 동네 {features.category_nm} 결제 1건의 평균은 {features.avg_ticket:,}원이고, "
-            f"서울 같은 업종 중 상위 {100 - pct}% 수준입니다. "
+            f"이 동네 {features.category_nm} 결제 1건의 평균은 {features.avg_ticket:,}원입니다. "
+            f"그 동네 평균값은 서울 같은 업종 상권들 중 비싼 쪽으로 상위 {100 - pct}% 입니다 "
+            "— 가격 순위이지 품질 순위가 아닙니다. "
             "(결제 1건에는 여러 개를 산 경우가 섞여 있어 품목 가격과 직접 비교되지는 않습니다)"
         ),
         evidence=[
