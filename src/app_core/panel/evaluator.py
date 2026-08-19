@@ -733,6 +733,11 @@ def _fallback_suggestions(result: EvaluationResult) -> list[str]:
     재생성 입력인 `schema.Feedback.notes` 가 `min_length=1` 이라(건오님)
     빈 리스트를 넘기면 ValidationError 로 다시 만들기가 통째로 죽는다.
     LLM 을 쓰지 않고 집계된 점수에서만 뽑는다.
+
+    ⚠️ **인원수를 박아 쓰지 않는다.** 패널은 12명이 아닐 수 있다 — 매출이 0 인
+    연령대는 `build_panel` 이 빼고(아인님 실측 2026-08-19: 주소 × 업종 50,016
+    조합 중 20.9% 가 해당), 근거를 못 댄 응답은 집계에서 빠진다. 이 문장은
+    사장님 화면과 재생성 입력으로 그대로 나가므로 틀린 숫자를 적으면 안 된다.
     """
     if not result.scores:
         return [_GENERIC_NOTE]
@@ -740,7 +745,7 @@ def _fallback_suggestions(result: EvaluationResult) -> list[str]:
     note = _METRIC_NOTE.get(metric)
     if note is None:
         return [_GENERIC_NOTE]
-    return [f"{note} (손님 12명 가중평균 {score:.0f}점)"]
+    return [f"{note} (손님 {len(result.persona_comments)}명 가중평균 {score:.0f}점)"]
 
 
 def evaluate(

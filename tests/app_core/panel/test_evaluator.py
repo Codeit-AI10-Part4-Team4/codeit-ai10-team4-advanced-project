@@ -1123,6 +1123,47 @@ def test_fallback_note_names_the_weakest_metric() -> None:
     assert "40점" in note
 
 
+def test_fallback_note_never_hardcodes_twelve() -> None:
+    """패널은 12명이 아닐 수 있다 — 이 문장이 사장님 화면으로 나간다.
+
+    매출이 0 인 연령대는 `build_panel` 이 뺀다(아인님 실측 2026-08-19:
+    주소 × 업종 50,016 조합 중 20.9%). 근거를 못 댄 응답도 집계에서 빠진다.
+    아인님이 `narrator.py` 의 "손님 12명" 을 고치신 것과 같은 자리인데,
+    내 것은 재생성 입력(`Feedback.notes`)으로도 그대로 흘러간다.
+    """
+    from app_core.panel.schemas import PersonaComment
+
+    def _result(n: int) -> EvaluationResult:
+        return EvaluationResult(
+            ad_id="ad-001",
+            scores={"attention": 71.0, "message": 40.0, "intent": 63.0},
+            confidence="ok",
+            max_metric_std=0.0,
+            top_resistance=[],
+            persona_comments=[
+                PersonaComment(
+                    persona_id=f"p{i:02d}",
+                    demo="30대 여성",
+                    weight=1 / n,
+                    is_boundary=False,
+                    resistance="none",
+                    comment="한마디",
+                )
+                for i in range(n)
+            ],
+            area_nm="역삼역",
+            quarter="20261",
+            is_fallback=False,
+            demo_coverage=0.714,
+        )
+
+    (ten,) = _fallback_suggestions(_result(10))
+    assert "10명" in ten and "12명" not in ten
+
+    (twelve,) = _fallback_suggestions(_result(12))
+    assert "12명" in twelve
+
+
 def test_summary_sees_more_than_price(yeoksam: Panel, shop, brief, copy) -> None:
     """요약 콜이 볼 수 있는 사실이 가격 두 줄뿐이었다 (아인님 실측 2026-08-13).
 
