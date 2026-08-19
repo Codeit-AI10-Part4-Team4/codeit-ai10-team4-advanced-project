@@ -273,6 +273,12 @@ def test_안_찼는데_승격하려면_거부한다() -> None:
         AdBriefDraft(goal="image").to_brief()
 
 
+def test_이미지도_말한_가격은_그대로_간다() -> None:
+    """안 묻는 게 아니라 한 번 묻는 것이다 — 사장님이 답하면 그대로 쓴다."""
+    brief = AdBriefDraft(goal="image", product="크로플", price=4500).to_brief()
+    assert brief.price == 4500 and brief.show_price is True
+
+
 # ── 원문 보관 ────────────────────────────────────────────────
 
 
