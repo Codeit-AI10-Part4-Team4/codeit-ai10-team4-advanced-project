@@ -304,9 +304,46 @@ def test_prompt_states_allowed_values_as_prose() -> None:
 
 
 def test_json_example_uses_realistic_values() -> None:
-    """`"attention": 0` 같은 자리표시자는 모델을 0점으로 끌어당긴다."""
+    """숫자는 실제 값으로, 글은 자리표시로 — 둘을 다르게 다룬다.
+
+    `"attention": 0` 같은 자리표시자는 모델을 0점으로 끌어당긴다. 반대로
+    실제 값을 적어 두면 그 값 근처로 몰린다 — 예시는 답을 묶지만 **재현성도
+    준다**(아인님 실측 2026-08-14: 예시를 통째로 빼면 변별력이 +5.9/-4.4 로
+    부호까지 바뀐다). 그래서 숫자는 남긴다.
+
+    글은 다르다. 예시의 `comment` 가 가격 이야기라 답도 가격으로 쏠렸다
+    (아인님 실측 2026-08-17: 값 하나 바꾸자 4케이스 중 3개가 뒤집혔다).
+    글은 형태만 보여주고 내용은 비운다.
+
+    `resistance` 는 글이 아니라 **enum** 이다 — 자리표시를 넣으면 그걸 베껴
+    Literal 검증에서 탈락한다(세로줄 사고). 그래서 실제 값을 유지한다.
+    세 부류의 규칙이 다르다: 숫자는 실제 값, enum 은 실제 값, 글은 자리표시.
+    """
     assert '"attention": 0,' not in evaluator.SYSTEM
+    assert '"attention": 62,' in evaluator.SYSTEM  # 숫자는 실제 값
+    assert '"resistance": "price"' in evaluator.SYSTEM  # enum 은 실제 값
     assert "값은 베끼지 마라" in evaluator.SYSTEM
+
+
+def test_persona_example_names_no_resistance_label() -> None:
+    """예시가 라벨 하나를 지목하면 그게 답이 된다.
+
+    `resistance_detail` · `comment` 도 마찬가지다 — 셋 다 가격 이야기였다.
+    분류 콜이 최종 라벨을 정하지만 **오염이 코멘트를 타고 넘어간다**
+    (아인님 지적: 뜻 없는 문구에도 message 가 0명이었다).
+    """
+    example = evaluator.SYSTEM.split("아래 JSON 형식으로만 답해라.")[1]
+
+    # `resistance` 는 Literal 이라 자리표시자를 그대로 베끼면 스키마에서
+    # 탈락한다 — 세로줄 버그(2026-08-07, 23콜 중 21콜 사망)와 같은 자리다.
+    # 그래서 라벨은 실제 값을 남기고, **글만** 비운다.
+    assert '"resistance": "price"' in example
+
+    for field in ("resistance_detail", "comment"):
+        line = next(ln for ln in example.splitlines() if field in ln)
+        assert "<" in line and ">" in line, f"{field} 이 자리표시가 아니다"
+        assert "원" not in line, f"{field} 에 금액이 남아 있다"
+        assert "가격" not in line, f"{field} 이 가격을 지목한다"
 
 
 def test_retry_carries_a_correction_hint(yeoksam: Panel, shop, brief, copy) -> None:
@@ -801,6 +838,19 @@ def test_summary_prompt_has_no_fabricated_example() -> None:
     # 8,900원 때와 같은 부류다 — 예시는 규칙이 아니라 본보기로 읽힌다.
     assert "세트 구성으로 묶어" not in evaluator.SUMMARY_SYSTEM
     assert "좋은 예" not in evaluator.SUMMARY_SYSTEM
+
+
+def test_summary_cannot_turn_a_number_into_a_claim() -> None:
+    """제안이 가격 분위를 품질 주장으로 옮겼다 (아인님 실측 2026-08-17).
+
+        avg_ticket_pct 0.674  →  "서울 상위 33%의 품질을 자랑하는 크로플"
+
+    숫자는 사실 블록에 있으니 `_quantities` 가드는 통과한다. 가드는 숫자가
+    지어내진 것인지만 보고 **뜻이 바뀌었는지는 못 본다.** 그래서 규칙으로
+    범위를 좁힌다 — 제안은 문구를 어떻게 쓸지에 대한 것이다.
+    """
+    assert "사장님만 할 수 있다" in evaluator.SUMMARY_SYSTEM
+    assert "품질" in evaluator.SUMMARY_SYSTEM
     assert "쓸 수 있음" not in evaluator.SUMMARY_SYSTEM
 
 
@@ -1428,3 +1478,55 @@ def test_classifier_rule_is_not_added_when_price_exists(yeoksam: Panel, shop, br
     evaluate(yeoksam, shop, brief, copy, client=Spy(_reply_by_demo(yeoksam)), consistency_k=1)
 
     assert seen and "가격이 적혀 있지 않다" not in seen[0]
+
+
+def test_every_label_has_a_classifier_example() -> None:
+    """예시가 없는 라벨은 안 나온다 — 예시 목록이 곧 답의 분포다.
+
+    2026-08-18 아인님 실측: `relevance` 만 예시가 없었고, 나와야 할 자리
+    (10대 타깃 광고 · 역삼 직장인 93.6%)에서 0건이었다. 예시 한 줄을 넣자
+    `alternative 7→0` · `relevance 1→8` 로 뒤집혔다.
+
+    같은 병을 네 번째 만났다 — 세로줄(8/07) · 8,900원(8/11) · 제안 반복(8/13)
+    은 "예시가 있어서" 였고 이번은 "없어서" 다. 기전은 하나다.
+    라벨을 늘리면 예시도 같이 늘려야 한다. 그래서 코드에서 유도해 검사한다.
+    """
+    from app_core.panel.schemas import Resistance
+
+    body = evaluator.RESISTANCE_SYSTEM
+    exampled = {line.rsplit("→", 1)[1].strip() for line in body.splitlines() if "→" in line}
+    selectable = {lab for lab in get_args(Resistance) if lab != "visual"}
+    assert selectable <= exampled, f"예시 없는 라벨: {selectable - exampled}"
+
+
+def test_summary_facts_carry_fit(yeoksam: Panel, shop, brief, copy) -> None:
+    """대조 문장의 적합도(fit)가 요약 콜까지 넘어간다.
+
+    문장만 주면 모델이 방향을 못 잡는다 — 실측(아인님 2026-08-18): 시점
+    제안 7/18 이 전부 광고가 이미 말한 시간대를 *강조*하라고 했다. 매출이
+    몰리는 쪽으로 *옮기라*는 판단은 fit 에만 있었다.
+    """
+    seen: list[str] = []
+
+    class Spy(FakeClient):
+        def complete_json(self, system: str, user: str) -> dict[str, Any]:
+            if system.startswith("손님들의 평가를"):
+                seen.append(user)
+            return super().complete_json(system, user)
+
+    evaluate(yeoksam, shop, brief, copy, client=Spy(_reply_by_demo(yeoksam)), consistency_k=1)
+
+    assert seen, "요약 콜이 안 갔다"
+    facts = seen[0].split("## 손님 반응")[0]
+    assert "적합도" in facts, "fit 이 사실 블록에 없다"
+
+
+def test_classifier_relevance_example_is_the_measured_one() -> None:
+    """relevance 예시는 아인님이 실측한 그 문장이어야 한다.
+
+    내가 지어낸 문장("10대 취향 같아서…")을 넣었다가 교체했다 — 아인님
+    문장은 효과가 측정됐고(alternative 7→0, relevance 1→8) 내 것은 아니다.
+    예시 문장 하나가 분포를 뒤집는 것을 다섯 번 봤으면, 예시는 측정된
+    것만 쓴다.
+    """
+    assert "직장인이라 해당이 없네요" in evaluator.RESISTANCE_SYSTEM
