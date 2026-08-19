@@ -441,3 +441,99 @@ def test_사진과_레퍼런스와_스케치를_다_올려도_제품이_하나�
 
     assert seen["prompt"] == "base prompt, warm light"
     assert seen["누끼"] is True
+
+
+# ── 재료/조판 분리 (PR-A) ──────────────────────────────────────
+#
+# 계약: 문구는 조판(render_ad)에서만 쓰인다. 문구를 바꿀 때 비싼 단계
+# (배경 생성·포스터 기획)가 다시 돌면 분리는 실패다 (광고완성흐름 §4-1).
+
+
+def test_문구를_바꿔도_재료_생성은_다시_돌지_않는다(monkeypatch):
+    """재료 한 번 · 조판 여러 번 — 문구 수정이 비싼 단계를 다시 부르면 안 된다."""
+    monkeypatch.setattr(fonts, "load", _fake_font)
+    monkeypatch.setattr(pipeline, "build_hero_prompt", lambda *a, **k: "prompt")
+    calls = {"bg": 0}
+
+    def _bg(prompt):
+        calls["bg"] += 1
+        return Image.new("RGB", (1080, 1080), (10, 20, 30))
+
+    monkeypatch.setattr(pipeline, "generate_background", _bg)
+    materials = pipeline.prepare_materials(_brief(), _store(), "simple")
+    pipeline.render_ad(materials, CopyCandidate(headline="첫 문구"))
+    pipeline.render_ad(materials, CopyCandidate(headline="다른 문구"))
+    assert calls["bg"] == 1
+
+
+def test_바뀐_문구가_조판에_그대로_전달된다(monkeypatch):
+    """픽셀 비교가 아니라 인자로 확인한다 — compose 가 받은 headline 이 증거다."""
+    monkeypatch.setattr(pipeline, "build_hero_prompt", lambda *a, **k: "prompt")
+    monkeypatch.setattr(
+        pipeline, "generate_background", lambda prompt: Image.new("RGB", (1080, 1080))
+    )
+    seen: list[str] = []
+
+    def _compose(product, headline, sub="", size=(1080, 1080), background=None):
+        seen.append(headline)
+        return Image.new("RGB", size)
+
+    monkeypatch.setattr(pipeline, "compose_ad", _compose)
+    materials = pipeline.prepare_materials(_brief(), _store(), "simple")
+    pipeline.render_ad(materials, CopyCandidate(headline="첫 문구"))
+    pipeline.render_ad(materials, CopyCandidate(headline="다른 문구"))
+    assert seen == ["첫 문구", "다른 문구"]
+
+
+def test_문구만_바꾸면_포스터_기획은_재사용된다(monkeypatch):
+    """기획(LLM)은 문구를 모른다 — 문구 수정에 기획이 또 돌면 돈이 또 나간다."""
+    monkeypatch.setattr(pipeline, "build_hero_prompt", lambda *a, **k: "hero")
+    monkeypatch.setattr(
+        pipeline, "generate_background", lambda prompt: Image.new("RGB", (512, 512))
+    )
+    calls = {"plan": 0}
+
+    def _plan(**kwargs):
+        calls["plan"] += 1
+        return PosterPlan(
+            tagline="t", badge="", date_line="", features=[], event="", palette="fresh_mint"
+        )
+
+    monkeypatch.setattr(pipeline, "plan_poster", _plan)
+    heads: list[str] = []
+
+    def _poster(product, shop, **kwargs):
+        heads.append(kwargs["headline"])
+        return Image.new("RGB", (1080, 1080))
+
+    monkeypatch.setattr(pipeline, "generate_poster", _poster)
+    materials = pipeline.prepare_materials(_brief(), _store(), "poster")
+    pipeline.render_ad(materials, CopyCandidate(headline="첫 문구"))
+    pipeline.render_ad(materials, CopyCandidate(headline="다른 문구"))
+    assert calls["plan"] == 1
+    assert heads == ["첫 문구", "다른 문구"]
+
+
+def test_바뀐_주문서로_재료를_다시_만들면_기획에_전달된다(monkeypatch):
+    """변경 감지·재호출 결정은 화면(PR-B) 몫이지만, 다시 불렀을 때 새 값이 기획에 가는 건 여기 계약이다."""
+    monkeypatch.setattr(pipeline, "build_hero_prompt", lambda *a, **k: "hero")
+    monkeypatch.setattr(
+        pipeline, "generate_background", lambda prompt: Image.new("RGB", (512, 512))
+    )
+    seen: list[str] = []
+
+    def _plan(**kwargs):
+        seen.append(kwargs["tone"])
+        return PosterPlan(
+            tagline="t", badge="", date_line="", features=[], event="", palette="fresh_mint"
+        )
+
+    monkeypatch.setattr(pipeline, "plan_poster", _plan)
+    monkeypatch.setattr(pipeline, "generate_poster", lambda *a, **k: Image.new("RGB", (1080, 1080)))
+    pipeline.prepare_materials(
+        AdBrief(goal="image", product="크로플", price=0, tone="발랄"), _store(), "poster"
+    )
+    pipeline.prepare_materials(
+        AdBrief(goal="image", product="크로플", price=0, tone="차분"), _store(), "poster"
+    )
+    assert seen == ["발랄", "차분"]
