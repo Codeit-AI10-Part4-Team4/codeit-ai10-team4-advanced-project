@@ -65,6 +65,8 @@ _SYSTEM = """너는 동네 가게 광고 포스터를 기획한다.
 형식 규칙
 - 특징은 "제목|설명", 제목 12자·설명 18자 이내. 제목과 설명이 같은 말이면 안 된다
 - palette 는 다음 중 하나: retro_green, warm_bakery, fresh_mint, modern_dark, soft_pink
+- **palette 는 빈칸 금지** ─ "근거가 없으면 빈칸" 규칙은 palette 에 적용되지 않는다.
+  palette 와 tagline 은 창작하는 칸이다. 가게 분위기에 맞는 것을 반드시 하나 고른다
 - JSON 만 출력한다. 근거가 없는 칸은 아래 예시처럼 비워서 낸다.
 
 {"tagline": "...", "badge": "", "date_line": "",
