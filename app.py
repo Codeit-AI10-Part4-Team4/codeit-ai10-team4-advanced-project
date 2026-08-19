@@ -291,7 +291,7 @@ def _rank_copies(store: Store, brief: AdBrief, copies: list[CopyCandidate]) -> b
     안 지켜진다.
     """
     try:
-        with st.spinner("동네 손님 12명에게 후보를 보여주는 중... (1분쯤 걸립니다)"):
+        with st.spinner("동네 손님들에게 후보를 보여주는 중... (1분쯤 걸립니다)"):
             st.session_state.ranked = rank(
                 store, brief, copies, ad_id=str(st.session_state.get("ad_id", ""))
             )
@@ -318,7 +318,9 @@ def _panel_source(result: EvaluationResult) -> None:
     띄운다"** 고 적어둔 그 배지가 어디에도 없었다 (06 §6 도 같은 요구).
 
     "동네 손님 12명" 이라고 말하려면 **어느 동네의 언제 데이터인지**, 그리고
-    **12명이 정말 12명인지** 를 같이 말해야 한다. 업종 폴백이 특히 그렇다 —
+    **정말 그 인원인지** 를 같이 말해야 한다. 인원은 12명 고정이 아니다 —
+    매출이 0 인 연령대는 `build_panel` 이 빼므로 10명일 수 있다. 그래서 버튼·
+    스피너에서 숫자를 뺐고 여기서 `total` 로 실제 수를 말한다. 업종 폴백도 그렇다 —
     객단가가 통째로 바뀌는데(실측 2026-08-17: 관악 분식이 업종 9,546원대가
     아니라 동네 전 업종 평균 40,141원) 화면에는 아무 표시가 없었다.
     """
@@ -449,7 +451,7 @@ def copy_view(store: Store, draft: AdBriefDraft) -> None:
     if (
         copies
         and not ranked
-        and st.button("🧑‍🤝‍🧑 동네 손님 12명에게 셋 다 보여주기")
+        and st.button("🧑‍🤝‍🧑 동네 손님들에게 셋 다 보여주기")
         and _rank_copies(store, st.session_state.brief, copies)
     ):
         st.rerun()
