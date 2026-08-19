@@ -141,3 +141,11 @@ def test_프롬프트에_지어내기_금지_계약이_있다():
     assert "말하지 않은 것은 쓰지 않는다" in s
     assert "추론하지 마라" in s
     assert "사실과 다른 광고" in s
+
+
+def test_프롬프트는_팔레트를_반드시_고르게_한다():
+    """실측(2026-08-19 스모크): "근거 없으면 빈칸" 규칙을 모델이 palette 에도
+    적용해 빈 문자열을 보냈고, 검증기가 포스터 생성 전체를 막았다.
+    이 문구가 프롬프트에서 빠지면 같은 사고가 재발한다."""
+    assert "palette 는 빈칸 금지" in poster_plan._SYSTEM
+    assert "반드시 하나 고른다" in poster_plan._SYSTEM
