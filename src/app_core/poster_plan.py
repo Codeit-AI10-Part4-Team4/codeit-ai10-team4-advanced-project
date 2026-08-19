@@ -70,7 +70,7 @@ _SYSTEM = """너는 동네 가게 광고 포스터를 기획한다.
 - JSON 만 출력한다. 근거가 없는 칸은 아래 예시처럼 비워서 낸다.
 
 {"tagline": "...", "badge": "", "date_line": "",
- "features": [], "event": "", "palette": "..."}"""
+ "features": [], "event": "", "palette": "warm_bakery"}"""
 
 
 def plan_poster(
