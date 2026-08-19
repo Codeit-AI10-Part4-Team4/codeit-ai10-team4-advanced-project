@@ -32,7 +32,7 @@ class SimpleMaterials:
 
     product: Image.Image | None  #: 누끼. keep·통생성이면 None
     background: Image.Image  #: keep 이면 원본, 아니면 생성 배경
-    staged: bool  #: 상품 이미지를 AI 가 그렸는지 → "연출된 이미지" 표기
+    staged: bool = False  #: 상품 이미지를 AI 가 그렸는지 → "연출된 이미지" 표기
 
 
 @dataclass(frozen=True)
@@ -43,7 +43,7 @@ class PosterMaterials:
     plan: PosterPlan  #: 포스터 기획 결과
     shop: str  #: 가게 이름
     info: str  #: 하단 한 줄 (주소·전화)
-    staged: bool  #: 상품 이미지를 AI 가 그렸는지 → "연출된 이미지" 표기
+    staged: bool = False  #: 상품 이미지를 AI 가 그렸는지 → "연출된 이미지" 표기
 
 
 #: 문구를 모르는 재료 상자 — 문구가 바뀌어도 이건 재사용하고 조판만 다시 한다
