@@ -14,7 +14,14 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 from pathlib import Path
+
+# ⚠️ import 보다 먼저 꺼야 한다. 평가도 chat.respond() 를 부르므로 그대로 두면
+# 골든셋 80문장이 매 실행마다 턴 로그에 쌓인다. 그러면 나중에 그 로그에서
+# 실제 발화를 건지려 할 때 **내가 만든 골든셋이 "실제 발화"로 되돌아온다.**
+# 자기가 낸 답을 자기가 채점하는 것과 같은 함정이다.
+os.environ["ADS_TURNLOG_ENABLED"] = "0"
 
 from app_core import chat
 from app_core.schema import AdBriefDraft, Store
