@@ -1530,3 +1530,54 @@ def test_classifier_relevance_example_is_the_measured_one() -> None:
     것만 쓴다.
     """
     assert "직장인이라 해당이 없네요" in evaluator.RESISTANCE_SYSTEM
+
+
+# --- 근거 없는 상품 주장 (2026-08-19 아인님 실측, 두 번 샜다) ------------------
+
+
+def test_price_percentile_cannot_become_a_quality_claim(yeoksam: Panel, shop, brief, copy) -> None:
+    """가격 분위를 상품 자랑으로 옮겨 붙인 제안은 버린다.
+
+    실측 두 건 — 숫자는 사실 블록에 있으니 `_quantities` 가드를 통과한다.
+    바뀐 것은 **뜻**이고, 그건 그 가드가 못 본다.
+
+        "서울 한식업종 상위 43%의 품질을 자랑하는 제육볶음 정식"
+        "광고 문구에 '서울 상위 2%'의 품질을 강조하여..."
+
+    `avg_ticket_pct` 는 그 동네 **가격**이 서울에서 몇 번째인가다. 상품
+    품질과 무관하고, 사장님이 말한 적 없으니 광고로 나가면 허위다.
+    """
+    client = _suggest(
+        _reply_by_demo(yeoksam),
+        ["서울 상위 33%의 품질을 자랑하는 크로플로 문구를 바꿔보세요"],
+    )
+    result = evaluate(yeoksam, shop, brief, copy, client=client, consistency_k=1)
+
+    assert not any("품질" in s for s in result.suggestions)
+
+
+def test_owner_own_words_are_allowed(yeoksam: Panel, shop, copy) -> None:
+    """사장님이 직접 말한 자랑은 통과한다 — 그건 사장님의 주장이다."""
+    brief = AdBrief(goal="copy", product="크로플", price=6000, extra="최고급 버터만 씁니다")
+    client = _suggest(
+        _reply_by_demo(yeoksam),
+        ["사장님이 말씀하신 최고급 버터를 문구 앞에 드러내 보세요"],
+    )
+    result = evaluate(yeoksam, shop, brief, copy, client=client, consistency_k=1)
+
+    assert any("최고급" in s for s in result.suggestions)
+
+
+def test_claim_guard_is_narrow(yeoksam: Panel, shop, brief, copy) -> None:
+    """멀쩡한 제안을 버리면 안 된다 — 놓치는 쪽으로 기울여 뒀다."""
+    ok = "점심 시간대를 문구 앞에 드러내 보세요"
+    client = _suggest(_reply_by_demo(yeoksam), [ok])
+    result = evaluate(yeoksam, shop, brief, copy, client=client, consistency_k=1)
+
+    assert ok in result.suggestions
+
+
+def test_claim_words_cover_the_measured_cases() -> None:
+    """실측에 나온 낱말이 목록에 있어야 한다. 늘릴 때는 실측으로."""
+    for word in ("품질", "자랑하는", "손꼽히는"):
+        assert word in evaluator._CLAIM_WORDS
