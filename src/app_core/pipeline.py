@@ -32,6 +32,7 @@ class SimpleMaterials:
 
     product: Image.Image | None  #: 누끼. keep·통생성이면 None
     background: Image.Image  #: keep 이면 원본, 아니면 생성 배경
+    staged: bool = False  #: 상품 이미지를 AI 가 그렸는지 → "연출된 이미지" 표기
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,7 @@ class PosterMaterials:
     plan: PosterPlan  #: 포스터 기획 결과
     shop: str  #: 가게 이름
     info: str  #: 하단 한 줄 (주소·전화)
+    staged: bool = False  #: 상품 이미지를 AI 가 그렸는지 → "연출된 이미지" 표기
 
 
 #: 문구를 모르는 재료 상자 — 문구가 바뀌어도 이건 재사용하고 조판만 다시 한다
@@ -101,7 +103,10 @@ def _simple_materials(brief: AdBrief, store: Store, product: Image.Image | None)
         prompt = build_bg_prompt(store.industry_label, brief.situation, brief.tone)
 
     prompt = _with_reference(brief, prompt)
-    return SimpleMaterials(product=product, background=_background(brief, prompt))
+    # product 가 없으면 상품까지 AI 가 그린 것이다 → "연출된 이미지" 표기.
+    return SimpleMaterials(
+        product=product, background=_background(brief, prompt), staged=product is None
+    )
 
 
 def _poster_materials(brief: AdBrief, store: Store, product: Image.Image | None) -> PosterMaterials:
@@ -109,6 +114,10 @@ def _poster_materials(brief: AdBrief, store: Store, product: Image.Image | None)
 
     사장님에게 특징 3개를 직접 쓰게 하면 서비스가 아니라 양식 작성이 된다.
     """
+    # ⚠️ product 는 아래에서 덮어써지므로 **지금** 판단해야 한다.
+    # 덮어쓴 뒤에 보면 항상 사진이 있는 것처럼 보여 표기가 영영 안 붙는다.
+    staged = product is None
+
     if product is None:
         # 사진이 없으면 주인공 이미지를 생성해 그 자리를 채운다 (사진 카드처럼 얹힌다)
         hero_prompt = build_hero_prompt(store.industry_label, brief.product, brief.tone)
@@ -125,7 +134,9 @@ def _poster_materials(brief: AdBrief, store: Store, product: Image.Image | None)
         extra=brief.extra,
         transcript=brief.raw_utterance,
     )
-    return PosterMaterials(product=product, plan=plan, shop=store.name, info=_info_line(store))
+    return PosterMaterials(
+        product=product, plan=plan, shop=store.name, info=_info_line(store), staged=staged
+    )
 
 
 _MIME = {".png": "image/png", ".webp": "image/webp"}
@@ -165,8 +176,10 @@ def prepare_materials(
         return _poster_materials(brief, store, product)
 
     if route == "keep" and photo is not None:
-        # 사진이 이미 광고 배경감 — 확산 모델 없이 원본 위에 문구만 얹는다
-        return SimpleMaterials(product=None, background=photo.convert("RGB"))
+        # 사진이 이미 광고 배경감 — 확산 모델 없이 원본 위에 문구만 얹는다.
+        # 🪤 staged 는 False 다: product 가 None 이지만 화면에 나오는 것은
+        # **사장님이 찍은 진짜 사진**이다. 여기에 "연출된 이미지" 를 붙이면 거짓말이 된다.
+        return SimpleMaterials(product=None, background=photo.convert("RGB"), staged=False)
     return _simple_materials(brief, store, cut if route == "cutout" else None)
 
 
@@ -189,8 +202,15 @@ def render_ad(materials: AdMaterials, copy: CopyCandidate) -> Image.Image:
             headline=copy.headline,
             info=materials.info,
             palette=plan.palette,
+            staged=materials.staged,
         )
-    return compose_ad(materials.product, copy.headline, copy.sub, background=materials.background)
+    return compose_ad(
+        materials.product,
+        copy.headline,
+        copy.sub,
+        background=materials.background,
+        staged=materials.staged,
+    )
 
 
 def generate_ad(

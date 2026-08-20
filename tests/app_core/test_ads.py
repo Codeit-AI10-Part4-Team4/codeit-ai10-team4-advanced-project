@@ -40,12 +40,44 @@ def test_다른_가게_이력은_안_섞인다(user_id: int, store: Store) -> No
 
 def test_문구도_함께_저장한다(store: Store) -> None:
     ad_id = ads.save(store.id, brief(), [CopyCandidate(headline="겨울 크로플", sub="4,500원")])
-    assert ads.choose_copy(store.id, ad_id, "겨울 크로플") is True
+    saved = ads.copies_of(store.id, ad_id)
+    assert saved[0].id is not None  # 저장된 뒤에는 id가 붙어 있어야 한다
+    assert ads.choose_copy(store.id, ad_id, saved[0].id) is True
 
 
 def test_없는_문구를_고르면_False(store: Store) -> None:
     ad_id = ads.save(store.id, brief(), [CopyCandidate(headline="겨울 크로플")])
-    assert ads.choose_copy(store.id, ad_id, "없는 문구") is False
+    assert ads.choose_copy(store.id, ad_id, 99_999) is False  # 그 광고에 없는 id
+
+
+def test_없는_id_로_실패해도_기존_선택은_유지된다(store: Store) -> None:
+    ad_id = ads.save(store.id, brief(), [CopyCandidate(headline="겨울 크로플")])
+    copy_id = ads.copies_of(store.id, ad_id)[0].id
+    assert copy_id is not None
+    assert ads.choose_copy(store.id, ad_id, copy_id) is True
+    assert ads.choose_copy(store.id, ad_id, 99_999) is False
+    with db.session() as s:
+        rows = s.scalars(select(db.CopyRow).where(db.CopyRow.ad_id == ad_id)).all()
+    assert [r.id for r in rows if r.chosen == 1] == [copy_id]  # 실패가 선택을 안 지웠다
+
+
+def test_제목이_같아도_고른_한_건만_선택된다(store: Store) -> None:
+    """headline 문자열 비교였다면 둘 다 선택됐을 상황 — id 라서 한 건만 (docs/08 §2-2)."""
+    ad_id = ads.save(
+        store.id,
+        brief(),
+        [
+            CopyCandidate(headline="겨울 크로플", sub="따끈한 한 입"),
+            CopyCandidate(headline="겨울 크로플", sub="4,500원"),
+        ],
+    )
+    _, second = ads.copies_of(store.id, ad_id)
+    assert second.id is not None
+    assert ads.choose_copy(store.id, ad_id, second.id) is True
+    with db.session() as s:
+        rows = s.scalars(select(db.CopyRow).where(db.CopyRow.ad_id == ad_id)).all()
+    chosen = [r.id for r in rows if r.chosen == 1]
+    assert chosen == [second.id]  # 제목이 같은 첫 번째는 선택되지 않았다
 
 
 def test_이미지는_경로만_남긴다(store: Store) -> None:
@@ -96,7 +128,9 @@ def test_만든_문구를_다시_꺼낼_수_있다(store: Store) -> None:
     """다시 만들 때 '이것과 다르게'로 넣으려면 꺼낼 수 있어야 한다."""
     made = [CopyCandidate(headline="겨울 크로플", sub="4,500원"), CopyCandidate(headline="따끈")]
     ad_id = ads.save(store.id, brief(), made)
-    assert ads.copies_of(store.id, ad_id) == made
+    got = ads.copies_of(store.id, ad_id)
+    assert [(c.headline, c.sub) for c in got] == [(c.headline, c.sub) for c in made]
+    assert all(c.id is not None for c in got)  # 꺼낸 것에는 id가 붙어 있다
 
 
 def test_문구가_없으면_빈_목록(store: Store) -> None:
@@ -169,13 +203,17 @@ def test_없는_광고와_남의_광고는_같은_답을_준다(user_id: int, st
 
 def test_남의_광고_문구는_못_고른다(user_id: int, store: Store) -> None:
     ad_id = ads.save(store.id, brief(), [CopyCandidate(headline="겨울 크로플")])
-    assert ads.choose_copy(other_store(user_id).id, ad_id, "겨울 크로플") is False
+    copy_id = ads.copies_of(store.id, ad_id)[0].id
+    assert copy_id is not None
+    assert ads.choose_copy(other_store(user_id).id, ad_id, copy_id) is False
 
 
 def test_막힌_선택은_흔적을_안_남긴다(user_id: int, store: Store) -> None:
     """False 만 돌려주고 실제로는 바꿔놨으면 막은 게 아니다."""
     ad_id = ads.save(store.id, brief(), [CopyCandidate(headline="겨울 크로플")])
-    ads.choose_copy(other_store(user_id).id, ad_id, "겨울 크로플")
+    copy_id = ads.copies_of(store.id, ad_id)[0].id
+    assert copy_id is not None
+    ads.choose_copy(other_store(user_id).id, ad_id, copy_id)
     with db.session() as s:
         rows = s.scalars(select(db.CopyRow).where(db.CopyRow.ad_id == ad_id)).all()
         assert all(r.chosen == 0 for r in rows)

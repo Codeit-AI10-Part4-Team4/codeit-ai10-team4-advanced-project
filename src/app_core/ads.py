@@ -95,23 +95,25 @@ def copies_of(store_id: int, ad_id: int) -> list[CopyCandidate]:
         rows = s.scalars(
             select(db.CopyRow).where(db.CopyRow.ad_id == ad_id).order_by(db.CopyRow.id)
         ).all()
-        return [CopyCandidate(headline=r.headline, sub=r.sub) for r in rows]
+        return [CopyCandidate(id=r.id, headline=r.headline, sub=r.sub) for r in rows]
 
 
-def choose_copy(store_id: int, ad_id: int, headline: str) -> bool:
+def choose_copy(store_id: int, ad_id: int, copy_id: int) -> bool:
     """사장님이 고른 문구를 표시한다. 어떤 문구가 선택받는지 보려고 남긴다.
 
-    남의 광고면 아무것도 안 바꾸고 False.
+    headline 문자열이 아니라 CopyRow.id 로 짚는다 — 제목이 같고 부제만 다른 후보가
+    나오면 문자열로는 둘 다 선택돼 버린다 (docs/08 §2-2).
+    남의 광고면 아무것도 안 바꾸고 False. 그 광고에 없는 id 여도 False.
     """
     with db.session() as s:
         if _owned(s, store_id, ad_id) is None:
             return False
         rows = s.scalars(select(db.CopyRow).where(db.CopyRow.ad_id == ad_id)).all()
-        found = False
+        if all(row.id != copy_id for row in rows):
+            return False  # 없는 id ─ 기존 선택을 지우지 않는다. 실패가 상태를 바꾸면 화면과 DB가 어긋난다
         for row in rows:
-            row.chosen = 1 if row.headline == headline else 0
-            found = found or row.chosen == 1
-        return found
+            row.chosen = 1 if row.id == copy_id else 0
+        return True
 
 
 def add_image(store_id: int, ad_id: int, path: str) -> bool:
