@@ -9,6 +9,7 @@ import pytest
 
 from app_core.panel import evaluator
 from app_core.panel.aggregate import AggregationError
+from app_core.panel.contrast import price_visible
 from app_core.panel.evaluator import (
     FOLLOW_UP_CALLS,
     MAX_EVAL_CALLS,
@@ -410,7 +411,9 @@ def test_contrast_notes_are_carried(yeoksam: Panel, shop, brief, copy) -> None:
     화면이 `contrast()` 를 따로 부르며 features 를 다시 들고 다녀야 한다.
     """
     client = FakeClient(_reply_by_demo(yeoksam))
-    result = evaluate(yeoksam, shop, brief, copy, client=client)
+    # 금액이 실려야 가격 대조가 붙는다 (2026-08-20 `price_visible`)
+    priced = CopyCandidate(headline=f"크로플 {brief.price:,}원", sub=copy.sub)
+    result = evaluate(yeoksam, shop, brief, priced, client=client)
 
     kinds = {n.kind for n in result.contrast_notes}
     assert "composition" in kinds  # 동네 구성은 항상 들어간다
@@ -779,10 +782,16 @@ def test_invented_amount_is_dropped(yeoksam: Panel, shop, copy) -> None:
 
 
 def test_real_price_may_be_quoted(yeoksam: Panel, shop, copy) -> None:
-    """게이트가 과하면 쓸 만한 제안까지 사라진다 — 실제 가격은 인용 가능해야 한다."""
+    """게이트가 과하면 쓸 만한 제안까지 사라진다 — 실제 가격은 인용 가능해야 한다.
+
+    ⚠️ **문구에 금액이 실려 있어야 한다.** 2026-08-20 부터 "가격이 있는 광고"는
+    사장님이 입력했는지가 아니라 **광고에 보이는지**로 정한다 (`contrast.price_visible`).
+    입력만 하고 문구에 안 실리면 손님은 그 값을 모르므로 가격 축을 닫는다.
+    """
     brief = AdBrief(goal="copy", product="크로플", price=6000)
+    priced = CopyCandidate(headline="크로플 6,000원", sub=copy.sub)
     client = _suggest(_reply_by_demo(yeoksam), ["6,000원이라는 점을 헤드라인에 넣어보세요"])
-    result = evaluate(yeoksam, shop, brief, copy, client=client, consistency_k=1)
+    result = evaluate(yeoksam, shop, brief, priced, client=client, consistency_k=1)
     assert result.suggestions == ["6,000원이라는 점을 헤드라인에 넣어보세요"]
 
 
@@ -798,8 +807,9 @@ def test_avg_ticket_may_be_quoted(yeoksam: Panel, shop, copy) -> None:
 def test_summary_prompt_carries_the_real_price(yeoksam: Panel, shop, copy) -> None:
     """지어낼 이유를 없애는 것이 1차 방어다 — 게이트는 2차다."""
     brief = AdBrief(goal="copy", product="크로플", price=6000)
+    priced = CopyCandidate(headline="크로플 6,000원", sub=copy.sub)
     client = _suggest(_reply_by_demo(yeoksam), [])
-    evaluate(yeoksam, shop, brief, copy, client=client, consistency_k=1)
+    evaluate(yeoksam, shop, brief, priced, client=client, consistency_k=1)
 
     assert "6,000원" in client.summary_prompt
     assert f"{yeoksam.features.avg_ticket:,}원" in client.summary_prompt
@@ -1466,7 +1476,12 @@ def test_classifier_cannot_pick_price_without_a_price(yeoksam: Panel, shop, copy
 
 
 def test_classifier_rule_is_not_added_when_price_exists(yeoksam: Panel, shop, brief, copy) -> None:
-    """가격이 있는 광고에는 그 규칙을 붙이지 않는다 — 붙이면 price 를 못 고른다."""
+    """가격이 있는 광고에는 그 규칙을 붙이지 않는다 — 붙이면 price 를 못 고른다.
+
+    ⚠️ **문구에 금액이 실려 있어야 한다.** 2026-08-20 부터 "가격이 있는 광고"는
+    사장님이 입력했는지가 아니라 **광고에 보이는지**로 정한다 (`contrast.price_visible`).
+    입력만 하고 문구에 안 실리면 손님은 그 값을 모르므로 가격 축을 닫는다.
+    """
     seen: list[str] = []
 
     class Spy(FakeClient):
@@ -1475,9 +1490,54 @@ def test_classifier_rule_is_not_added_when_price_exists(yeoksam: Panel, shop, br
                 seen.append(system)
             return super().complete_json(system, user)
 
-    evaluate(yeoksam, shop, brief, copy, client=Spy(_reply_by_demo(yeoksam)), consistency_k=1)
+    priced = CopyCandidate(headline=f"크로플 {brief.price:,}원", sub=copy.sub)
+    evaluate(yeoksam, shop, brief, priced, client=Spy(_reply_by_demo(yeoksam)), consistency_k=1)
 
     assert seen and "가격이 적혀 있지 않다" not in seen[0]
+
+
+def test_가격이_문구에_없으면_여섯_자리가_모두_닫힌다(yeoksam: Panel, shop, brief, copy) -> None:
+    """가격 축을 읽는 자리가 여섯이다. **하나만 빠뜨려도 어긋난다.**
+
+    손님에게는 가격을 안 보여주는데 분류는 price 를 고를 수 있는 상태가 되면
+    2026-08-20 에 잡은 문제가 그대로 남는다. 그래서 여섯 자리가 같은 판정
+    (`contrast.price_visible`)을 보는지 한 번에 확인한다.
+
+    `brief` 는 가격 9,500원이고 `copy` 에는 금액이 없다 — 지금 생성되는 문구
+    대부분이 이 상태다 (실측 2026-08-12: 문구 27개 중 3건이 금액 누락).
+    """
+    seen: dict[str, str] = {}
+
+    class Spy(FakeClient):
+        def complete_json(self, system: str, user: str) -> dict[str, Any]:
+            if system.startswith("손님이 남긴 한 줄을"):
+                seen["classify"] = system
+            elif system.startswith("손님들의 평가를"):
+                seen["summary"] = user
+            else:
+                seen.setdefault("persona", user)
+            return super().complete_json(system, user)
+
+    result = evaluate(
+        yeoksam, shop, brief, copy, client=Spy(_reply_by_demo(yeoksam)), consistency_k=1
+    )
+
+    # ① 손님 프롬프트의 가격 줄 · ② 손님에게 보여주는 숫자 목록
+    assert "- 가격: 광고에 없음" in seen["persona"]
+    assert "avg_ticket" not in seen["persona"]
+    # ③ 근거 경로 — 객단가를 인용할 수 없다
+    assert "avg_ticket" not in str(
+        offered_paths(
+            yeoksam.features, yeoksam.personas[0], copy, show_price=price_visible(brief, copy)
+        )
+    )
+    # ④ 분류 콜에 "가격이 적혀 있지 않다" 가 붙는다
+    assert "가격이 적혀 있지 않다" in seen["classify"]
+    # ⑤ 요약 콜의 사실 블록
+    assert "광고에 가격이 없다" in seen["summary"]
+    assert f"{brief.price:,}원" not in seen["summary"]
+    # ⑥ 되묻기가 걸린 뒤에도 평가는 끝난다
+    assert result.scores
 
 
 def test_every_label_has_a_classifier_example() -> None:

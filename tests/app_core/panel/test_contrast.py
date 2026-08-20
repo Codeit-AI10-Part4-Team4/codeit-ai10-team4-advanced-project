@@ -66,11 +66,14 @@ def test_근거가_전부_실제값과_일치한다() -> None:
 
 
 def test_가격을_안_적으면_가격_대조가_없다() -> None:
-    assert price_note(_features(), AdBrief(goal="copy", product="크로플", price=0)) is None
+    zero = AdBrief(goal="copy", product="크로플", price=0)
+    assert price_note(_features(), zero, CopyCandidate(headline="크로플 6,000원")) is None
+    # 가격을 정했어도 문구에 안 실리면 견줄 것이 없다 (2026-08-20)
+    assert price_note(_features(), BRIEF, CopyCandidate(headline="갓 구운 크로플")) is None
 
 
 def test_객단가와_광고가격을_나란히_보여준다() -> None:
-    note = price_note(_features(), BRIEF)
+    note = price_note(_features(), BRIEF, CopyCandidate(headline="크로플 6,000원"))
     assert note is not None
     assert "6,000원" in note.text  # 광고가 적은 값
     assert "9,546원" in note.text  # 동네 실측값
@@ -175,7 +178,8 @@ def test_시점_단어를_알아챈다(word: str) -> None:
 
 def test_적합도는_해당되는_항목에만_붙는다() -> None:
     f = _features()
-    plain = CopyCandidate(headline="갓 구운 크로플")  # 시점·주말 언급 없음
+    # 금액은 실려 있어야 가격 대조가 붙는다 (2026-08-20 `price_visible`)
+    plain = CopyCandidate(headline="크로플 6,000원")  # 시점·주말 언급 없음
     kinds = {n.kind: n.fit for n in contrast(f, BRIEF, plain)}
     assert kinds["price"] is not None
     assert "timing" not in kinds and "weekend" not in kinds
@@ -187,7 +191,8 @@ def test_비싼_쪽만_감점한다() -> None:
     f = _features()  # avg_ticket 9546
 
     def fit(price: int) -> float | None:
-        note = price_note(f, AdBrief(goal="copy", product="크로플", price=price))
+        brief = AdBrief(goal="copy", product="크로플", price=price)
+        note = price_note(f, brief, CopyCandidate(headline=f"크로플 {price:,}원"))
         return note.fit if note else None
 
     assert fit(2000) == 1.0
@@ -351,10 +356,10 @@ def test_잘_맞는_광고에는_경고를_띄우지_않는다() -> None:
     """
     from app_core.panel.contrast import WEAK_FIT
 
-    cheap = weakest(contrast(_features(), BRIEF, CopyCandidate(headline="갓 구운 크로플")))
+    cheap = weakest(contrast(_features(), BRIEF, CopyCandidate(headline="크로플 6,000원")))
     assert cheap is not None and cheap.fit == 1.0
     assert cheap.fit >= WEAK_FIT  # → 화면이 강조하지 않는다
 
-    off = weakest(contrast(_features(), BRIEF, CopyCandidate(headline="새벽 감성 크로플")))
+    off = weakest(contrast(_features(), BRIEF, CopyCandidate(headline="새벽 감성 크로플 6,000원")))
     assert off is not None and off.fit is not None
     assert off.fit < WEAK_FIT  # → 강조한다
