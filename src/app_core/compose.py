@@ -45,6 +45,44 @@ _DARK = (26, 26, 26)  #: 밝은 배경 위 글자
 _LIGHT = (250, 250, 250)  #: 어두운 배경 위 글자
 _log = logging.getLogger(__name__)
 
+# ── 연출 표기 (README §생성 모드 · docs/01 §생성 모드) ────────────
+# 제품 사진 없이 만든 광고는 **상품 이미지를 AI 가 그린 것**이라 사장님의 실제
+# 상품이 아니다. 표기가 없으면 사장님이 그 그림을 자기 상품 사진인 양 올리게 된다.
+#
+# **화면 캡션이 아니라 이미지에 새긴다.** 사장님은 이 PNG 를 받아 인스타에 올리는데
+# Streamlit 캡션은 거기까지 따라가지 않는다. 표기가 붙어 있어야 할 곳은 이미지다.
+STAGED_NOTICE = "연출된 이미지"
+_NOTICE_SIZE = 0.024  #: 캔버스 폭 비율 (1080 → 25px)
+_NOTICE_MARGIN = 0.025
+_NOTICE_PAD = 0.013
+_NOTICE_BG = (0, 0, 0, 130)
+_NOTICE_FG = (255, 255, 255, 235)
+
+
+def draw_staged_notice(canvas: Image.Image, corner: Zone = "bottom") -> None:
+    """ "연출된 이미지" 를 이미지 구석에 새긴다. `corner` 는 글자 영역의 **반대쪽**.
+
+    왼쪽에 붙이는 이유: 두 조판 모두 가운데(문구·정보 줄)와 오른쪽(제품·배지)을
+    쓴다. 왼쪽 구석이 양쪽 다 가장 한산하다.
+
+    어떤 배경에도 읽히도록 반투명 판을 깔고 흰 글자를 얹는다. 무엇과 겹치더라도
+    읽히는 쪽이 맞다 — **안 보이는 표기는 표기가 아니다.**
+    """
+    w, h = canvas.size
+    font = fonts.load("body_light", max(12, int(w * _NOTICE_SIZE)))
+    pad, margin = int(w * _NOTICE_PAD), int(w * _NOTICE_MARGIN)
+
+    draw = ImageDraw.Draw(canvas, "RGBA")
+    text_w = int(draw.textlength(STAGED_NOTICE, font=font))
+    text_h = sum(font.getmetrics())
+
+    x0 = margin
+    y0 = margin if corner == "top" else h - margin - text_h - pad * 2
+    box = (x0, y0, x0 + text_w + pad * 2, y0 + text_h + pad * 2)
+
+    draw.rounded_rectangle(box, radius=int(pad * 1.5), fill=_NOTICE_BG)
+    draw.text((x0 + pad, y0 + pad), STAGED_NOTICE, font=font, fill=_NOTICE_FG)
+
 
 def make_gradient_background(
     size: tuple[int, int] = (1080, 1080),
@@ -234,6 +272,7 @@ def compose_ad(
     sub: str = "",
     size: tuple[int, int] = (1080, 1080),
     background: Image.Image | None = None,
+    staged: bool = False,
 ) -> Image.Image:
     """배경 위에 문구(와 제품)를 레퍼런스 규칙대로 얹어 광고 이미지를 만든다.
 
@@ -241,6 +280,10 @@ def compose_ad(
     background 를 주면 크기를 맞춰 쓰고, 없으면 그라데이션(임시)을 깐다.
     product 가 있으면(cutout) 글자는 상단, 제품은 그 아래 상자에. 없으면 글자만 —
     상단·하단 중 덜 복잡한 쪽에.
+
+    `staged` 는 **상품 이미지를 AI 가 그렸는지**다. 부르는 쪽(pipeline)이 정해서 준다 —
+    위 입력 계약대로 compose 는 keep(사장님 사진)과 hero/generate(AI 그림)를 구분하지
+    못한다. `product is None` 으로 짐작하면 keep 갈래의 **진짜 사진에 연출 딱지**가 붙는다.
     """
     bg = (background.resize(size) if background else make_gradient_background(size)).convert("RGB")
     canvas = bg.convert("RGBA")
@@ -249,5 +292,8 @@ def compose_ad(
     text_bottom = _draw_text(canvas, bg, zone, headline, sub)
     if product is not None:
         _place_product(canvas, product, text_bottom)
+    if staged:
+        # 글자 영역 반대쪽 — 문구를 가리지 않는다
+        draw_staged_notice(canvas, "bottom" if zone == "top" else "top")
 
     return canvas.convert("RGB")
