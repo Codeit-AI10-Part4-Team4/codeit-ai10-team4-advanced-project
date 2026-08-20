@@ -58,7 +58,7 @@ def test_문구를_고르기_전에는_이미지를_만들지_않는다(monkeypa
     from app_core import pipeline
 
     calls: list[Any] = []
-    monkeypatch.setattr(pipeline, "generate_ad", lambda *a, **kw: calls.append(a))
+    monkeypatch.setattr(pipeline, "prepare_materials", lambda *a, **kw: calls.append(a))
     infos = _install(monkeypatch, FakeState())
 
     assert app._make_images(_store(), _brief()) is False
@@ -69,19 +69,39 @@ def test_문구를_고르기_전에는_이미지를_만들지_않는다(monkeypa
 def test_고른_문구가_이미지_생성에_그대로_전달된다(monkeypatch: pytest.MonkeyPatch) -> None:
     from app_core import pipeline
 
-    received: list[CopyCandidate] = []
+    received: list[tuple[Any, int | None]] = []
+    monkeypatch.setattr(
+        pipeline, "prepare_materials", lambda brief, store, style="simple": f"MAT-{style}"
+    )
 
-    def _fake_generate(
-        brief: AdBrief, store: Store, copy: CopyCandidate, style: str = "simple"
-    ) -> Image.Image:
-        received.append(copy)
+    def _fake_render(materials: Any, copy: CopyCandidate) -> Image.Image:
+        received.append((materials, copy.id))
         return Image.new("RGB", (8, 8))
 
-    monkeypatch.setattr(pipeline, "generate_ad", _fake_generate)
+    monkeypatch.setattr(pipeline, "render_ad", _fake_render)
     picked = CopyCandidate(id=7, headline="여름의 청량함", sub="6,000원")
     state = FakeState(picked=picked)
     _install(monkeypatch, state)
 
     assert app._make_images(_store(), _brief()) is True
-    assert [c.id for c in received] == [7, 7]  # 감성형·포스터형 모두 고른 문구로
+    assert received == [("MAT-simple", 7), ("MAT-poster", 7)]  # 두 형태 모두 고른 문구로
     assert set(state["images"]) == {"simple", "poster"}
+
+
+def test_문구만_바꾸면_재료를_다시_만들지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """B2 의 존재 이유 — 재료가 있고 주문서가 같으면 비싼 단계는 0회다 (docs/08 §4-1)."""
+    from app_core import pipeline
+
+    prepare_calls: list[Any] = []
+    monkeypatch.setattr(pipeline, "prepare_materials", lambda *a, **kw: prepare_calls.append(a))
+    monkeypatch.setattr(pipeline, "render_ad", lambda m, c: Image.new("RGB", (8, 8)))
+    state = FakeState(
+        picked=CopyCandidate(id=1, headline="다른 문구"),
+        materials={"simple": "MAT", "poster": "MAT"},
+        materials_brief=_brief(),
+        mat_errors={},
+    )
+    _install(monkeypatch, state)
+
+    assert app._make_images(_store(), _brief()) is True
+    assert prepare_calls == []  # 재료 재사용 — 배경 생성·기획이 다시 돌지 않았다

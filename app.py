@@ -8,9 +8,12 @@
 
 from __future__ import annotations
 
+import io
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, NamedTuple
 
 import streamlit as st
+from PIL import Image
 from pydantic import ValidationError
 
 from app_core import (
@@ -22,6 +25,7 @@ from app_core import (
     llm,
     photo_store,
     registry,
+    result_store,
     stores,
     vision,
 )
@@ -87,6 +91,10 @@ def _reset_chat() -> None:
     st.session_state.pop("ranked", None)
     st.session_state.pop("picked", None)
     st.session_state.pop("images", None)
+    st.session_state.pop("materials", None)
+    st.session_state.pop("materials_brief", None)
+    st.session_state.pop("mat_errors", None)
+    st.session_state.pop("saved", None)
     for slot in PHOTO_SLOTS:
         _clear_uploader(slot.field)
 
@@ -500,37 +508,106 @@ def copy_view(store: Store, draft: AdBriefDraft) -> None:
 # ── 광고 이미지 ────────────────────────────────────────────
 
 
-def _make_images(store: Store, brief: AdBrief) -> bool:
-    """사장님이 고른 문구(picked)로 이미지 두 형태를 만들어 화면 상태에 담는다."""
+def _prepare_materials(store: Store, brief: AdBrief) -> bool:
+    """비싼 재료(사진 분석·배경 생성·포스터 기획)를 형태별로 준비해 세션에 담는다.
+
+    한 형태가 실패해도 다른 형태는 진행한다 — 실패는 mat_errors 로 남겨 화면이
+    형태별로 안내한다 (docs/08 §7-1). 성공한 쪽을 남의 실패로 날리지 않는다.
+    """
     # 확산 모델 의존이라 지연 import ─ 문구만 쓰는 환경에서도 앱이 뜨게 한다
     from app_core import pipeline
 
-    # 문구는 여기서 만들지 않는다 ─ 사장님이 고른 것(picked)만 쓴다.
-    # 고르기 전에는 이미지를 만들지 않는 게 계약이다 (docs/08 §3-2 규칙 5·6)
-    picked: CopyCandidate | None = st.session_state.get("picked")
-    if picked is None:
-        st.info("먼저 문구를 하나 골라주세요 ─ 위 후보에서 '이걸로 할게요'를 누르면 됩니다.")
-        return False
-
-    # 부품들이 사장님께 보여줄 문장을 이미 써뒀다 — "보관함에 3번 사진이 없습니다",
-    # "한글 글꼴을 찾지 못했습니다", "모르는 팔레트입니다". 안 받으면 그 문장 대신
-    # 화면에 트레이스백이 뜬다. GPU 가 없는 환경도 여기로 떨어진다.
-    images = {}
+    materials: dict[str, pipeline.AdMaterials] = {}
+    errors: dict[str, str] = {}
     for style, label in STYLES:
         try:
-            with st.spinner(f"{label} 만드는 중... (20~30초)"):
-                images[style] = pipeline.generate_ad(brief, store, picked, style=style)
+            with st.spinner(f"{label} 재료 준비 중... (20~30초)"):
+                materials[style] = pipeline.prepare_materials(brief, store, style)
         except (OSError, ValueError, RuntimeError, ImportError) as e:
-            st.error(f"{label}을(를) 만들지 못했습니다. {e}")
-            if llm.profile() == "stub":
-                st.caption(
-                    "⚠️ MODEL_PROFILE 이 stub 이라 기획 단계에서 멈춥니다 — .env 를 확인하세요."
-                )
-            return False
+            errors[style] = str(e)
+    st.session_state.materials = materials
+    st.session_state.mat_errors = errors
+    st.session_state.materials_brief = brief
+    if not materials and llm.profile() == "stub":
+        st.caption("⚠️ MODEL_PROFILE 이 stub 이라 기획 단계에서 멈춥니다 — .env 를 확인하세요.")
+    return bool(materials)
 
+
+def _render_images(picked: CopyCandidate) -> None:
+    """준비된 재료에 고른 문구를 얹는다 — 싼 단계라 문구를 바꿔도 여기만 다시 돈다."""
+    from app_core import pipeline
+
+    images = {}
+    for style, _label in STYLES:
+        materials = st.session_state.materials.get(style)
+        if materials is None:
+            continue  # 재료 단계에서 실패한 형태 — mat_errors 가 화면에서 안내한다
+        try:
+            images[style] = pipeline.render_ad(materials, picked)
+        except (OSError, ValueError, RuntimeError) as e:
+            st.session_state.mat_errors[style] = str(e)
     st.session_state.images = images
+    # 새로 조판했으니 이전 저장 표시는 더 이상 이 이미지의 것이 아니다
+    st.session_state.pop("saved", None)
+
+
+def _make_images(store: Store, brief: AdBrief) -> bool:
+    """사장님이 고른 문구(picked)로 이미지 두 형태를 만들어 화면 상태에 담는다.
+
+    재료 준비(비쌈)와 조판(쌈)이 나뉘어 있어(#37), 같은 주문서면 재료를 재사용하고
+    조판만 다시 한다 — 문구를 바꿔 다시 눌러도 20~30초를 다시 기다리지 않는다.
+    """
+    picked: CopyCandidate | None = st.session_state.get("picked")
+    if picked is None:
+        st.info("먼저 문구를 하나 골라주세요 — 위 후보에서 '이걸로 할게요'를 누르면 됩니다.")
+        return False
+
+    stale = st.session_state.get("materials_brief") != brief
+    if (stale or not st.session_state.get("materials")) and not _prepare_materials(store, brief):
+        return False
+    _render_images(picked)
     st.session_state.brief = brief
-    return True
+    return bool(st.session_state.images)
+
+
+def _save_and_download(
+    store: Store, product: str, style: str, label: str, img: Image.Image
+) -> None:
+    """완성 광고를 남기는 두 길 — 서버 저장(DB 기록)과 즉시 다운로드는 서로 독립이다.
+
+    저장이 실패해도 다운로드는 살아 있어야 한다 (docs/08 §7) — 1분 걸려 만든
+    이미지를 저장 실패로 날리지 않는다. 저장 성공은 버튼을 "저장됨"으로 바꿔
+    중복 저장을 막는다.
+    """
+    saved: dict[str, str] = st.session_state.setdefault("saved", {})
+    col_save, col_dl = st.columns(2)
+    if style in saved:
+        col_save.button("저장됨 ✓", key=f"save_{style}", disabled=True)
+    elif col_save.button("저장", key=f"save_{style}"):
+        ad_id = st.session_state.get("ad_id")
+        if ad_id is None:
+            st.error("광고 번호가 없어 저장할 수 없습니다. 문구를 다시 만들어주세요.")
+        else:
+            try:
+                path = result_store.save_result(img)
+                recorded = ads.add_image(store.id, ad_id, path)
+            except OSError as e:
+                st.error(f"저장에 실패했습니다 ({e}). 다운로드는 가능합니다.")
+            else:
+                if recorded:
+                    saved[style] = path
+                    st.rerun()
+                else:
+                    st.error("저장 기록에 실패했습니다. 다운로드는 가능합니다.")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    col_dl.download_button(
+        "다운로드",
+        data=buf.getvalue(),
+        file_name=f"{store.name}_{product}_{label}_{datetime.now(UTC):%Y%m%d}.png",
+        mime="image/png",
+        key=f"dl_{style}",
+    )
 
 
 def image_view(store: Store, draft: AdBriefDraft) -> None:
@@ -542,22 +619,50 @@ def image_view(store: Store, draft: AdBriefDraft) -> None:
     copy_view(store, draft)
     if st.session_state.get("picked") is None:
         return  # 고르기 전엔 이미지 버튼도 안 보인다 ─ 누르고 안내받는 것보다 낫다
+    picked: CopyCandidate = st.session_state.picked
+    # 문구만 바꾼 경우 — 재료가 있으면 조판만 자동으로 다시 한다 (1~2초).
+    # 다른 문구의 "이걸로 할게요"를 누르는 순간 이미지가 그 문구로 바뀐다.
+    same_brief = st.session_state.get("materials_brief") == draft.to_brief()
+    if same_brief and st.session_state.get("materials") and not st.session_state.get("images"):
+        _render_images(picked)
+
     if st.button("광고 이미지 만들기", type="primary"):
         _make_images(store, draft.to_brief())
 
     images = st.session_state.get("images") or {}
-    if not images:
+    errors = st.session_state.get("mat_errors") or {}
+    if not images and not errors:
         return
     for col, (style, label) in zip(st.columns(2), STYLES, strict=True):
         with col, st.container(border=True):
             st.markdown(f"**{label}**")
-            st.image(images[style], use_container_width=True)
+            img = images.get(style)
+            if img is None:
+                # 한 형태의 실패가 다른 형태를 지우지 않는다 (docs/08 §7-1)
+                st.error(f"{label}을(를) 만들지 못했습니다. {errors.get(style, '')}")
+                continue
+            st.image(img, use_container_width=True)
+            _save_and_download(store, draft.product or "광고", style, label, img)
+
+    if images and st.button("사진만 다시 만들기"):
+        # 문구는 그대로 두고 재료(배경·상품)만 새로 뽑는다 — 생성은 매번 다르게 나온다
+        if _prepare_materials(store, draft.to_brief()):
+            _render_images(picked)
+            st.rerun()
+        else:
+            st.error("새 사진을 만들지 못했습니다. 이전 결과를 유지합니다.")
+    st.caption(
+        "문구를 바꾸려면 위 후보에서 다른 것을 고르세요 — 사진은 그대로 두고 글자만 다시 얹습니다."
+    )
 
 
 def chat_view(store: Store) -> None:
     st.title(f"{store.name} 사장님, 어떤 광고를 만들까요?")
 
-    draft: AdBriefDraft = st.session_state.setdefault("draft", AdBriefDraft())
+    # 갈래 선택을 없앴다 ─ 문구 → 이미지가 한 흐름이 되어(#44) 입구도 하나다 (건오님 합의 8/20)
+    # 문구만 필요한 사장님은 문구를 고른 뒤 이미지 버튼을 안 누르면 된다.
+    # goal 필드와 ads.goal 컬럼은 그대로 둔다 ─ NLU·DB 계약 정리는 별건.
+    draft: AdBriefDraft = st.session_state.setdefault("draft", AdBriefDraft(goal="image"))
     history: list[tuple[str, str]] = st.session_state.setdefault("history", [])
 
     if draft.goal is None:
