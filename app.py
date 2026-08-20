@@ -54,7 +54,14 @@ class PhotoSlot(NamedTuple):
 
 #: 사진 칸 셋. 용도가 달라서 받는 쪽이 하는 일이 다르다 (schema.AdBrief 참고).
 PHOTO_SLOTS = (
-    PhotoSlot("photo_id", "제품 사진", "이 상품을 그대로 살립니다", read=True),
+    # 찍는 법을 안내한다 — 여러 물건이 흩어진 사진은 누끼에서 상품이 지워지거나
+    # 조각으로 딸려온다(#22). 사장님이 찍기 전에 아는 것이 사후 보정보다 낫다.
+    PhotoSlot(
+        "photo_id",
+        "제품 사진",
+        "광고할 제품이 잘 보이도록 가능하면 광고할 제품 위주로 찍어주세요",
+        read=True,
+    ),
     PhotoSlot("ref_id", "레퍼런스", "이런 분위기로 만들어주세요", read=False),
     PhotoSlot("sketch_id", "스케치", "이런 배치·구도로 만들어주세요", read=False),
 )
