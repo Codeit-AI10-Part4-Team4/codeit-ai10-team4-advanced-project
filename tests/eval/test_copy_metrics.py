@@ -22,6 +22,29 @@ def test_만원_천원_단위를_환산한다() -> None:
     assert amounts("5천원") == {5_000}
 
 
+def test_만과_천이_겹치면_더해서_읽는다() -> None:
+    """`"1만 5천원"` 은 15,000 이다.
+
+    전에는 정규식이 앞의 `1만` 을 통째로 놓쳐 `{5000}` 만 냈다. 주문서 가격이
+    5,000원이면 문구에 `"1만 5천원"` 이 적혀도 위반 없이 통과했다 — 결정적
+    지표라고 해놓고 틀린 금액을 지나쳤다.
+    """
+    assert amounts("1만 5천원") == {15_000}
+    assert amounts("1만5천원") == {15_000}
+
+
+def test_세_자리가_겹쳐도_하나로_읽는다() -> None:
+    assert amounts("2만 3천 500원") == {23_500}
+
+
+def test_겹친_금액이_주문서와_다르면_잡힌다() -> None:
+    """쪼개서 읽으면 5,000 이 주문서와 맞아떨어져 위반을 놓친다."""
+    assert price_violations("1만 5천원", show_price=True, price=5_000) == [
+        "주문서는 5,000원인데 문구엔 15,000원"
+    ]
+    assert price_violations("1만 5천원", show_price=True, price=15_000) == []
+
+
 def test_금액이_없으면_빈_집합() -> None:
     assert amounts("오늘만 특별하게") == set()
 

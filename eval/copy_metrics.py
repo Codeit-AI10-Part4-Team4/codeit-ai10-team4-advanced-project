@@ -37,10 +37,21 @@ from __future__ import annotations
 
 import re
 
-#: 금액. `4,500원` · `1만원` · `5천원` 을 잡는다.
-#: ⚠️ `"1만 5천원"` 은 10,000 과 5,000 두 개로 읽힌다. 계기판이라 그대로 둔다 —
-#:    어차피 "주문서에 없는 금액이 문구에 있다"는 신호는 똑같이 뜬다.
-_AMOUNT = re.compile(r"(\d[\d,]*)\s*(만\s*원|천\s*원|원)")
+#: 금액. `4,500원` · `1만원` · `5천원` · `1만 5천원` · `2만 3천 500원` 을 잡는다.
+#:
+#: 만·천·나머지를 **한 덩어리로** 읽는다. 전에는 `(\d[\d,]*)\s*(만원|천원|원)` 이라
+#: `"1만 5천원"` 에서 앞의 `1만` 을 통째로 놓치고 `{5000}` 만 냈다. 주석에는
+#: "10,000 과 5,000 두 개로 읽힌다" 고 적혀 있었지만 사실이 아니었고, 그래서
+#: "어차피 없는 금액 신호가 뜬다" 는 안전 논리도 성립하지 않았다 — 주문서가
+#: 5,000원이면 문구에 `"1만 5천원"` 이 적혀도 위반 없이 통과했다.
+#:
+#: 세 자리가 전부 선택이라 `"원두"` 의 `원` 처럼 숫자 없는 곳에도 빈 매치가 걸린다.
+#: 그건 `amounts()` 에서 걸러낸다.
+_AMOUNT = re.compile(
+    r"(?:(\d[\d,]*)\s*만)?\s*"  # 만 단위
+    r"(?:(\d[\d,]*)\s*천)?\s*"  # 천 단위
+    r"(\d[\d,]*)?\s*원"  # 나머지 (또는 `4,500원` 처럼 단위 없는 금액)
+)
 
 #: 근거 없이 쓰면 사실과 다른 광고가 되는 낱말. AGENTS.md 의 분류를 따랐다.
 #: 사장님이 직접 말했으면 근거가 있는 것이므로 걸리지 않는다(`grounds` 대조).
@@ -53,16 +64,21 @@ CLAIM_TERMS: dict[str, tuple[str, ...]] = {
 }
 
 
+def _digits(part: str) -> int:
+    return int(part.replace(",", "")) if part else 0
+
+
 def amounts(text: str) -> set[int]:
-    """문구에 적힌 금액을 원 단위 정수로 뽑는다."""
+    """문구에 적힌 금액을 원 단위 정수로 뽑는다.
+
+    `"1만 5천원"` 처럼 단위가 겹친 금액은 **하나로 더해서** 15,000 을 낸다.
+    쪼개서 두 개로 내면 주문서 금액과 우연히 맞아떨어져 위반을 놓친다.
+    """
     found = set()
-    for number, unit in _AMOUNT.findall(text):
-        value = int(number.replace(",", ""))
-        if "만" in unit:
-            value *= 10_000
-        elif "천" in unit:
-            value *= 1_000
-        found.add(value)
+    for man, cheon, rest in _AMOUNT.findall(text):
+        if not (man or cheon or rest):
+            continue  # 숫자 없이 `원` 만 있는 자리 (`원두` 등)
+        found.add(_digits(man) * 10_000 + _digits(cheon) * 1_000 + _digits(rest))
     return found
 
 
