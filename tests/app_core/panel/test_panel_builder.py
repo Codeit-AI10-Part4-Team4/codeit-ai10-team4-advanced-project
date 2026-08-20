@@ -245,3 +245,29 @@ def test_말이_안_되는_비중은_사장님_언어로_막는다() -> None:
 def test_조정하지_않으면_그대로다() -> None:
     ps = build_panel(_features())
     assert adjust_weights(ps, {}) == ps
+
+
+def test_골든_픽스처가_지금_코드가_만드는_패널과_같다(yeoksam_raw: dict[str, Any]) -> None:
+    """픽스처가 코드보다 낡으면 **그 픽스처로 잰 모든 것이 과거를 잰다.**
+
+    2026-08-20 실측: `price_sens` 나이 보정이 코드에만 들어가고 픽스처에는
+    반영되지 않아, 12명이 전원 `mid` 인 패널로 평가·A/B·라벨 검사를 돌리고
+    있었다. 실제 앱은 DuckDB 로 매번 새로 만들므로 `high 2 · mid 8 · low 2`
+    를 쓴다 — **평가와 제품이 다른 패널을 보고 있었다.**
+
+    `weight`·`narrative`·`evidence` 는 12명 다 맞아서 테스트 688 개가 전부
+    통과했다. 픽스처를 정답으로 삼는 테스트는 이 어긋남을 구조적으로 못 본다.
+    그래서 **픽스처를 코드와 대조하는** 검사가 따로 필요하다.
+
+    DB 를 안 쓴다 — 픽스처 자신의 `features` 로 다시 만들어 견준다.
+    """
+    rebuilt = {p["demo"]: p for p in build_panel(yeoksam_raw["features"])}
+    stale = [
+        f"{p['demo']}: {p['axes']} → {rebuilt[p['demo']]['axes']}"
+        for p in yeoksam_raw["personas"]
+        if p != rebuilt[p["demo"]]
+    ]
+    assert not stale, (
+        "골든 픽스처가 코드와 어긋난다 — personas 를 build_panel(features) 로 "
+        "다시 만들어 넣어야 한다: " + " / ".join(stale)
+    )
