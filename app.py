@@ -274,12 +274,14 @@ def _make_copies(store: Store, brief: AdBrief, parent_id: int | None = None) -> 
             st.caption("⚠️ MODEL_PROFILE 이 stub 이라 항상 빈 결과입니다 — .env 를 확인하세요.")
         return False
 
-    st.session_state.copies = copies
     st.session_state.brief = brief
-    st.session_state.ad_id = ads.save(store.id, brief, copies, parent_id=parent_id)
-    # 문구가 갈렸으니 이전 순위는 더 이상 화면의 것이 아니다. 안 지우면 사라진
-    # 문구의 평가가 새 문구 밑에 그대로 붙어 있는다.
+    st.session_state.ad_id = ad_id = ads.save(store.id, brief, copies, parent_id=parent_id)
+    # DB가 붙인 id를 실어 다시 꺼낸다 ─ 선택이 문자열이 아니라 id로 짚게 (docs/08 §2-2)
+    st.session_state.copies = ads.copies_of(store.id, ad_id)
+    # 문구가 갈렸으니 이전 순위·이전 선택은 더 이상 화면의 것이 아니다. 안 지우면
+    # 사라진 문구의 평가와 선택이 새 문구 밑에 그대로 붙어 있는다.
     st.session_state.pop("ranked", None)
+    st.session_state.pop("picked", None)
     return True
 
 
@@ -477,12 +479,17 @@ def copy_view(store: Store, draft: AdBriefDraft) -> None:
                 st.write(candidate.sub)
             for note in scored.defects if scored else []:
                 st.warning(note.text, icon="⚠️")
-            if st.button("이걸로 할게요", key=f"pick_copy{i}"):
-                # store.id 는 소유권 검사용(내 쪽), picked 는 손님 패널이 평가할
-                # 대상(아인님 쪽). 둘 다 필요해서 합쳤다.
-                ads.choose_copy(store.id, st.session_state.ad_id, candidate.headline)
-                st.session_state.picked = candidate
-                st.success("선택했습니다")
+            if st.button("이걸로 할게요", key=f"pick_copy{i}") and candidate.id is not None:
+                # store.id 는 소유권 검사용(내 쪽), picked 는 손님 패널이 평가할 대상(아인님 쪽)
+                # 둘 다 필요해서 합쳤다.
+                # id로 짚는다 ─ 제목이 같은 후보가 나와도 고른 한 건만 선택된다 (docs/08 §2-2)
+                if ads.choose_copy(store.id, st.session_state.ad_id, candidate.id):
+                    st.session_state.picked = candidate
+                    # 이전 문구로 만든 이미지는 더 이상 화면의 것이 아니다
+                    st.session_state.pop("images", None)
+                    st.success("선택했습니다")
+                else:
+                    st.error("문구를 선택하지 못했습니다. 다시 만들어주세요.")
 
     if copies:
         revise_view(store)
@@ -492,18 +499,16 @@ def copy_view(store: Store, draft: AdBriefDraft) -> None:
 
 
 def _make_images(store: Store, brief: AdBrief) -> bool:
-    """이미지 두 형태를 만들어 화면 상태에 담는다. 문구가 없으면 먼저 만든다."""
+    """사장님이 고른 문구(picked)로 이미지 두 형태를 만들어 화면 상태에 담는다."""
     # 확산 모델 의존이라 지연 import ─ 문구만 쓰는 환경에서도 앱이 뜨게 한다
     from app_core import pipeline
 
-    copies = st.session_state.get("copies") or []
-    if not copies:
-        with st.spinner("문구 만드는 중..."):
-            copies = copy_gen.generate(brief, store, ads.recent(store.id))
-        if not copies:
-            st.error("문구를 만들지 못했습니다. 다시 눌러주세요.")
-            return False
-        st.session_state.copies = copies
+    # 문구는 여기서 만들지 않는다 ─ 사장님이 고른 것(picked)만 쓴다.
+    # 고르기 전에는 이미지를 만들지 않는 게 계약이다 (docs/08 §3-2 규칙 5·6)
+    picked: CopyCandidate | None = st.session_state.get("picked")
+    if picked is None:
+        st.info("먼저 문구를 하나 골라주세요 ─ 위 후보에서 '이걸로 할게요'를 누르면 됩니다.")
+        return False
 
     # 부품들이 사장님께 보여줄 문장을 이미 써뒀다 — "보관함에 3번 사진이 없습니다",
     # "한글 글꼴을 찾지 못했습니다", "모르는 팔레트입니다". 안 받으면 그 문장 대신
@@ -512,7 +517,7 @@ def _make_images(store: Store, brief: AdBrief) -> bool:
     for style, label in STYLES:
         try:
             with st.spinner(f"{label} 만드는 중... (20~30초)"):
-                images[style] = pipeline.generate_ad(brief, store, copies[0], style=style)
+                images[style] = pipeline.generate_ad(brief, store, picked, style=style)
         except (OSError, ValueError, RuntimeError, ImportError) as e:
             st.error(f"{label}을(를) 만들지 못했습니다. {e}")
             if llm.profile() == "stub":
@@ -527,9 +532,14 @@ def _make_images(store: Store, brief: AdBrief) -> bool:
 
 
 def image_view(store: Store, draft: AdBriefDraft) -> None:
-    """광고 이미지 ─ 감성 피드형과 정보 포스터형을 나란히 만든다."""
-    if draft.next_slot():
-        st.caption("더 안 알려주셔도 지금 바로 만들 수 있습니다")
+    """광고 이미지 ─ 문구를 고른 뒤 감성 피드형과 정보 포스터형을 나란히 만든다.
+
+    문구 후보·패널·선택은 문구 갈래와 **같은 부품**(copy_view)을 그대로 쓴다 ─
+    따로 만들면 두 화면이 서로 다르게 늙는다 (docs/08 §2 ③④)
+    """
+    copy_view(store, draft)
+    if st.session_state.get("picked") is None:
+        return  # 고르기 전엔 이미지 버튼도 안 보인다 ─ 누르고 안내받는 것보다 낫다
     if st.button("광고 이미지 만들기", type="primary"):
         _make_images(store, draft.to_brief())
 
