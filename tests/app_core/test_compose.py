@@ -236,3 +236,61 @@ def test_두_줄_제목은_줄_간격이_붙지_않는다(monkeypatch):
     assert holes, "제목이 두 줄로 안 나뉘었다 — 문구가 짧아졌는지 확인"
     # em 을 쓰면 9px, asc+desc 면 16px (540 기준 실측). 2.5% 를 문턱으로 둔다.
     assert max(holes) >= size * 0.025
+
+
+# ── 연출 표기 ────────────────────────────────────────────────
+#
+# pipeline 쪽 테스트는 "어느 갈래에 표기가 붙는가"(판단)를 대역으로 본다.
+# 여기서는 **실제로 픽셀이 바뀌는지**를 본다 — 안 나눠두면 "부르기는 하는데
+# 아무것도 안 그리는" 상태를 양쪽 다 놓친다.
+
+
+def test_연출_표기가_실제로_그려진다(monkeypatch):
+    monkeypatch.setattr(fonts, "load", _fake_font)
+    size = 400
+    plain = Image.new("RGBA", (size, size), (128, 128, 128, 255))
+    marked = plain.copy()
+
+    compose.draw_staged_notice(marked, "bottom")
+
+    assert marked.tobytes() != plain.tobytes(), "표기를 그렸다는데 픽셀이 그대로다"
+
+
+def test_표기는_지정한_구석에_그려진다(monkeypatch):
+    """글자 영역 반대쪽에 놓으려면 위·아래가 실제로 갈려야 한다."""
+    monkeypatch.setattr(fonts, "load", _fake_font)
+    size = 400
+
+    def inked_rows(corner: str) -> set[int]:
+        base = Image.new("RGBA", (size, size), (128, 128, 128, 255))
+        after = base.copy()
+        compose.draw_staged_notice(after, corner)
+        before_px, after_px = base.load(), after.load()
+        return {
+            y
+            for y in range(size)
+            for x in range(size)
+            if before_px[x, y] != after_px[x, y]  # type: ignore[index]
+        }
+
+    top, bottom = inked_rows("top"), inked_rows("bottom")
+    assert top and bottom
+    assert max(top) < min(bottom), "위/아래 표기가 같은 자리에 그려진다"
+
+
+def test_표기는_왼쪽에_그려진다(monkeypatch):
+    """가운데(문구·정보 줄)와 오른쪽(제품·배지)은 두 조판이 이미 쓴다."""
+    monkeypatch.setattr(fonts, "load", _fake_font)
+    size = 400
+    base = Image.new("RGBA", (size, size), (128, 128, 128, 255))
+    after = base.copy()
+    compose.draw_staged_notice(after, "bottom")
+
+    before_px, after_px = base.load(), after.load()
+    cols = {
+        x
+        for x in range(size)
+        for y in range(size)
+        if before_px[x, y] != after_px[x, y]  # type: ignore[index]
+    }
+    assert max(cols) < size / 2
