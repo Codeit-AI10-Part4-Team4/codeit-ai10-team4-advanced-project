@@ -55,6 +55,27 @@ def test_페르소나는_성별x연령_12개다() -> None:
     assert sum(p["weight"] for p in ps) == pytest.approx(1.0, abs=0.01)
 
 
+def test_매출이_0_인_연령대는_페르소나를_안_만든다() -> None:
+    """`Persona.weight` 는 `gt=0.0` 이라 가중치 0 이면 패널이 통째로 터진다.
+
+    실측(2026-08-19) — 랜덤 상권 9곳에 관통을 돌리자 4곳이 여기서 죽었다.
+    난우중학교 미용실은 20대 매출이 0원, 동평화시장 한식은 10대가 0원이었다.
+    주소 × 업종 50,016 조합 중 10,448 (20.9%) 이 해당한다.
+
+    좌표를 박아둔 역삼·홍대·수유에서만 돌리는 동안은 한 번도 안 보였다 —
+    그 셋은 전 연령대에 매출이 있다.
+    """
+    f = _features(age_share={"10": 0.0, "20": 0.2, "30": 0.4, "40": 0.2, "50": 0.13, "60": 0.07})
+    ps = build_panel(f)
+
+    assert len(ps) == 10, "10대 남녀 둘이 빠져야 한다"
+    assert all(p["weight"] > 0 for p in ps)
+    assert "10대" not in {p["demo"].split()[0] for p in ps}
+    # 뺀 항이 0 이라 합은 그대로다 — `Panel._check_personas` 가 이걸 본다.
+    assert sum(p["weight"] for p in ps) == pytest.approx(1.0, abs=0.01)
+    assert len({p["persona_id"] for p in ps}) == 10, "id 가 안 겹쳐야 한다"
+
+
 def test_가중치는_두_축의_곱이다() -> None:
     f = _features()
     for p in build_panel(f):

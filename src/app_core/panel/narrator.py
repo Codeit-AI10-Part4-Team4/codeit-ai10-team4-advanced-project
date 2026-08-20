@@ -108,7 +108,9 @@ def build_prompt(personas: list[dict[str, Any]], features: dict[str, Any]) -> st
         f"이 동네 {features['category_nm']} 객단가 {features['avg_ticket']:,}원, "
         f"경쟁 점포 {features['competitor_cnt']}곳, 주말 매출 비중 "
         f"{features['weekend_ratio'] * 100:.0f}%\n\n"
-        "## 손님 12명\n" + "\n".join(_persona_line(p, features) for p in personas)
+        # 12명이 아닐 수 있다 — 매출이 0 인 연령대는 `build_panel` 이 뺀다.
+        # 숫자를 박아두면 모델이 없는 사람 몫까지 서사를 지어낸다.
+        f"## 손님 {len(personas)}명\n" + "\n".join(_persona_line(p, features) for p in personas)
     )
 
 
