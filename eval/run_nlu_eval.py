@@ -1,7 +1,10 @@
 """골든셋으로 NLU 추출 정확도를 잰다.
 
-    MODEL_PROFILE=openai python eval/run_nlu_eval.py
-    MODEL_PROFILE=openai python eval/run_nlu_eval.py --source real   출처별로 나눠 보기
+    MODEL_PROFILE=openai python -m eval.run_nlu_eval
+    MODEL_PROFILE=openai python -m eval.run_nlu_eval --source real   출처별로 나눠 보기
+
+⚠️ **`-m` 으로 부른다.** `python eval/run_nlu_eval.py` 로 부르면 sys.path 맨 앞이
+저장소 뿌리가 아니라 `eval/` 이 되어 `from eval.metrics ...` 가 `ModuleNotFoundError` 로 깨진다.
 
 실 API 를 호출하므로 pytest 에는 넣지 않는다 (AGENTS.md — 외부 API 호출은
 비용·비결정성 때문에 테스트에서 mock). 프롬프트를 고칠 때마다 손으로 돌린다.

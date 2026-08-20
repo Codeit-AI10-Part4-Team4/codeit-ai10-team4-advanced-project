@@ -100,6 +100,7 @@ class CopyCandidate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    id: int | None = None  #: DB 에 저장된 뒤에만 있다 — 생성 직후엔 None, ads.copies_of 가 채운다
     headline: str = Field(min_length=1)
     sub: str = ""
 
