@@ -21,13 +21,22 @@ def _brief() -> AdBrief:
     return AdBrief(goal="image", product="크로플", price=4500, situation="신메뉴")
 
 
+def _both_backends(monkeypatch, fake):
+    """로컬 배경 생성과 새 이미지 백엔드를 같은 대역으로 바꾼다.
+
+    포스터형은 generate_background를 사용하고,
+    감성형은 generate_scene을 사용하므로 둘 다 막아야 실제 모델이 호출되지 않는다.
+    """
+    monkeypatch.setattr(pipeline, "generate_background", fake)
+    monkeypatch.setattr(pipeline, "generate_scene", fake)
+
+
 def test_poster_style_uses_plan(monkeypatch):
     """포스터 형태는 기획 부품이 채운 내용으로 그린다."""
     monkeypatch.setattr(fonts, "load", _fake_font)
     monkeypatch.setattr(pipeline, "build_hero_prompt", lambda *a, **k: "hero prompt")
-    monkeypatch.setattr(
-        pipeline,
-        "generate_background",
+    _both_backends(
+        monkeypatch,
         lambda prompt: Image.new("RGB", (512, 512), (200, 180, 160)),
     )
     monkeypatch.setattr(
@@ -53,9 +62,7 @@ def test_simple_style_uses_generated_background(monkeypatch):
     """심플 형태는 배경을 생성해 그 위에 얹는다."""
     monkeypatch.setattr(fonts, "load", _fake_font)
     monkeypatch.setattr(pipeline, "build_hero_prompt", lambda *a, **k: "prompt")
-    monkeypatch.setattr(
-        pipeline, "generate_background", lambda prompt: Image.new("RGB", (1080, 1080), (10, 20, 30))
-    )
+    _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (1080, 1080), (10, 20, 30)))
     ad = pipeline.generate_ad(_brief(), _store(), CopyCandidate(headline="크로플"), "simple")
     assert ad.size == (1080, 1080)
 
@@ -64,9 +71,8 @@ def test_poster_style_without_photo_generates_hero(monkeypatch):
     """사진이 없으면 주인공 이미지를 생성해 채운다 — 오른쪽이 비면 안 된다."""
     monkeypatch.setattr(fonts, "load", _fake_font)
     monkeypatch.setattr(pipeline, "build_hero_prompt", lambda *a, **k: "hero prompt")
-    monkeypatch.setattr(
-        pipeline,
-        "generate_background",
+    _both_backends(
+        monkeypatch,
         lambda prompt: Image.new("RGB", (512, 512), (200, 180, 160)),
     )
     monkeypatch.setattr(
@@ -129,7 +135,7 @@ def test_레퍼런스가_있으면_프롬프트에_분위기가_붙는다(tmp_pa
         seen["prompt"] = prompt
         return Image.new("RGB", (1080, 1080))
 
-    monkeypatch.setattr(pipeline, "generate_background", fake_bg)
+    _both_backends(monkeypatch, fake_bg)
 
     brief = _brief().model_copy(update={"ref_id": _put()})
     pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
@@ -146,7 +152,7 @@ def test_레퍼런스가_없으면_프롬프트를_안_건드린다(tmp_path, mo
         seen["prompt"] = prompt
         return Image.new("RGB", (1080, 1080))
 
-    monkeypatch.setattr(pipeline, "generate_background", fake_bg)
+    _both_backends(monkeypatch, fake_bg)
 
     pipeline.generate_ad(_brief(), _store(), CopyCandidate(headline="크로플"), "simple")
     assert seen["prompt"] == "hero prompt"  # 레퍼런스가 안 붙었다
@@ -156,9 +162,7 @@ def test_보관함에_레퍼런스가_없어도_광고는_만든다(tmp_path, mo
     """번호는 남았는데 파일이 사라진 경우. 분위기만 못 얹고 계속 간다."""
     _photo_dir(tmp_path, monkeypatch)
     _simple_ready(monkeypatch)
-    monkeypatch.setattr(
-        pipeline, "generate_background", lambda prompt: Image.new("RGB", (1080, 1080))
-    )
+    _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (1080, 1080)))
     brief = _brief().model_copy(update={"ref_id": 999})
     assert pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
 
@@ -166,9 +170,7 @@ def test_보관함에_레퍼런스가_없어도_광고는_만든다(tmp_path, mo
 def test_스케치가_있으면_그쪽으로_그린다(tmp_path, monkeypatch):
     _photo_dir(tmp_path, monkeypatch)
     _simple_ready(monkeypatch)
-    monkeypatch.setattr(
-        pipeline, "generate_background", lambda prompt: Image.new("RGB", (1080, 1080), (1, 1, 1))
-    )
+    _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (1080, 1080), (1, 1, 1)))
     called = {}
 
     def fake_sketch(sketch, prompt, **kw):
@@ -189,15 +191,33 @@ def test_스케치가_있으면_그쪽으로_그린다(tmp_path, monkeypatch):
 def test_스케치가_없으면_평소대로_그린다(tmp_path, monkeypatch):
     _photo_dir(tmp_path, monkeypatch)
     _simple_ready(monkeypatch)
-    monkeypatch.setattr(
-        pipeline, "generate_background", lambda prompt: Image.new("RGB", (1080, 1080))
-    )
+    _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (1080, 1080)))
 
     def boom(*a, **k):
         raise AssertionError("스케치가 없는데 sketch_gen 을 불렀다")
 
     monkeypatch.setattr(pipeline.sketch_gen, "generate_from_sketch", boom)
     assert pipeline.generate_ad(_brief(), _store(), CopyCandidate(headline="크로플"), "simple")
+
+
+def test_감성형_배경은_이미지_백엔드가_그린다(monkeypatch):
+    """감성형 배경이 새 이미지 백엔드를 거치는지 확인한다."""
+    _simple_ready(monkeypatch)
+
+    def _wrong_door(prompt):
+        raise AssertionError("감성형이 백엔드를 거치지 않고 로컬 모델을 직접 불렀다")
+
+    monkeypatch.setattr(pipeline, "generate_background", _wrong_door)
+    monkeypatch.setattr(
+        pipeline,
+        "generate_scene",
+        lambda prompt: Image.new("RGB", (1080, 1080)),
+    )
+
+    materials = pipeline.prepare_materials(_brief(), _store(), "simple")
+
+    assert isinstance(materials, pipeline.SimpleMaterials)
+    assert materials.background.size == (1080, 1080)
 
 
 def test_레퍼런스와_스케치를_같이_쓸_수_있다(tmp_path, monkeypatch):
@@ -235,7 +255,7 @@ def test_keep_갈래는_원본을_배경으로_쓰고_생성하지_않는다(tmp
     def _boom(prompt):
         raise AssertionError("keep 갈래는 확산 모델을 부르면 안 된다")
 
-    monkeypatch.setattr(pipeline, "generate_background", _boom)
+    _both_backends(monkeypatch, _boom)
 
     def _spy(product, headline, sub="", background=None, **kwargs):
         seen["product"] = product
@@ -260,9 +280,7 @@ def test_cutout_갈래는_청소된_누끼가_그대로_전달된다(tmp_path, m
     monkeypatch.setattr(pipeline, "remove_crumbs", lambda cut: cleaned)
     monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, cut: "cutout")
     monkeypatch.setattr(pipeline, "build_bg_prompt", lambda *a, **k: "bg")
-    monkeypatch.setattr(
-        pipeline, "generate_background", lambda prompt: Image.new("RGB", (256, 256))
-    )
+    _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (256, 256)))
 
     def _spy(product, headline, sub="", **kwargs):
         seen["product"] = product
@@ -293,7 +311,7 @@ def test_generate_갈래는_제품이_든_장면을_그린다(tmp_path, monkeypa
         seen["prompt"] = prompt
         return Image.new("RGB", (256, 256))
 
-    monkeypatch.setattr(pipeline, "generate_background", _gen)
+    _both_backends(monkeypatch, _gen)
     brief = AdBrief(goal="image", product="크로플", price=0, photo_id=7)
     pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
     assert seen["product"] == "크로플"
@@ -382,7 +400,7 @@ def _watch(monkeypatch):
         seen["누끼"] = product is not None
         return Image.new("RGB", (1080, 1080))
 
-    monkeypatch.setattr(pipeline, "generate_background", bg)
+    _both_backends(monkeypatch, bg)
     monkeypatch.setattr(pipeline.sketch_gen, "generate_from_sketch", sketch)
     monkeypatch.setattr(pipeline, "compose_ad", compose)
     return seen
@@ -469,9 +487,7 @@ def test_사진_없이_만들면_연출_표기가_붙는다(monkeypatch):
     """상품까지 AI 가 그렸다. 표기가 없으면 사장님이 자기 상품 사진인 양 올리게 된다."""
     _simple_ready(monkeypatch)
     calls = _notice_spy(monkeypatch)
-    monkeypatch.setattr(
-        pipeline, "generate_background", lambda prompt: Image.new("RGB", (1080, 1080), (10, 20, 30))
-    )
+    _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (1080, 1080), (10, 20, 30)))
 
     pipeline.generate_ad(_brief(), _store(), CopyCandidate(headline="크로플"), "simple")
 
@@ -483,9 +499,8 @@ def test_사진_없이_만든_포스터에도_연출_표기가_붙는다(monkeyp
     monkeypatch.setattr(fonts, "load", _fake_font)
     monkeypatch.setattr(pipeline, "build_hero_prompt", lambda *a, **k: "hero prompt")
     calls = _notice_spy(monkeypatch)
-    monkeypatch.setattr(
-        pipeline,
-        "generate_background",
+    _both_backends(
+        monkeypatch,
         lambda prompt: Image.new("RGB", (512, 512), (200, 180, 160)),
     )
     monkeypatch.setattr(
@@ -532,9 +547,7 @@ def test_누끼를_얹으면_표기하지_않는다(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "remove_background", lambda im: cut)
     monkeypatch.setattr(pipeline, "remove_crumbs", lambda c: cut)
     monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, c: "cutout")
-    monkeypatch.setattr(
-        pipeline, "generate_background", lambda prompt: Image.new("RGB", (1080, 1080), (10, 20, 30))
-    )
+    _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (1080, 1080), (10, 20, 30)))
 
     brief = _brief().model_copy(update={"photo_id": _put()})
     pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
@@ -558,7 +571,7 @@ def test_문구를_바꿔도_재료_생성은_다시_돌지_않는다(monkeypatc
         calls["bg"] += 1
         return Image.new("RGB", (1080, 1080), (10, 20, 30))
 
-    monkeypatch.setattr(pipeline, "generate_background", _bg)
+    _both_backends(monkeypatch, _bg)
     materials = pipeline.prepare_materials(_brief(), _store(), "simple")
     pipeline.render_ad(materials, CopyCandidate(headline="첫 문구"))
     pipeline.render_ad(materials, CopyCandidate(headline="다른 문구"))
@@ -568,9 +581,7 @@ def test_문구를_바꿔도_재료_생성은_다시_돌지_않는다(monkeypatc
 def test_바뀐_문구가_조판에_그대로_전달된다(monkeypatch):
     """픽셀 비교가 아니라 인자로 확인한다 — compose 가 받은 headline 이 증거다."""
     monkeypatch.setattr(pipeline, "build_hero_prompt", lambda *a, **k: "prompt")
-    monkeypatch.setattr(
-        pipeline, "generate_background", lambda prompt: Image.new("RGB", (1080, 1080))
-    )
+    _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (1080, 1080)))
     seen: list[str] = []
 
     def _compose(product, headline, sub="", size=(1080, 1080), background=None, staged=False):
@@ -587,9 +598,7 @@ def test_바뀐_문구가_조판에_그대로_전달된다(monkeypatch):
 def test_문구만_바꾸면_포스터_기획은_재사용된다(monkeypatch):
     """기획(LLM)은 문구를 모른다 — 문구 수정에 기획이 또 돌면 돈이 또 나간다."""
     monkeypatch.setattr(pipeline, "build_hero_prompt", lambda *a, **k: "hero")
-    monkeypatch.setattr(
-        pipeline, "generate_background", lambda prompt: Image.new("RGB", (512, 512))
-    )
+    _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (512, 512)))
     calls = {"plan": 0}
 
     def _plan(**kwargs):
@@ -616,9 +625,7 @@ def test_문구만_바꾸면_포스터_기획은_재사용된다(monkeypatch):
 def test_바뀐_주문서로_재료를_다시_만들면_기획에_전달된다(monkeypatch):
     """변경 감지·재호출 결정은 화면(PR-B) 몫이지만, 다시 불렀을 때 새 값이 기획에 가는 건 여기 계약이다."""
     monkeypatch.setattr(pipeline, "build_hero_prompt", lambda *a, **k: "hero")
-    monkeypatch.setattr(
-        pipeline, "generate_background", lambda prompt: Image.new("RGB", (512, 512))
-    )
+    _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (512, 512)))
     seen: list[str] = []
 
     def _plan(**kwargs):

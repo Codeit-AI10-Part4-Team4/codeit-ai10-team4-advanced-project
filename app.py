@@ -22,6 +22,7 @@ from app_core import (
     chat,
     config,
     copy_gen,
+    image_backend,
     llm,
     photo_store,
     registry,
@@ -94,6 +95,7 @@ def _reset_chat() -> None:
     st.session_state.pop("materials", None)
     st.session_state.pop("materials_brief", None)
     st.session_state.pop("mat_errors", None)
+    st.session_state.pop("backend_notes", None)
     st.session_state.pop("saved", None)
     for slot in PHOTO_SLOTS:
         _clear_uploader(slot.field)
@@ -528,6 +530,7 @@ def _prepare_materials(store: Store, brief: AdBrief) -> bool:
     st.session_state.materials = materials
     st.session_state.mat_errors = errors
     st.session_state.materials_brief = brief
+    st.session_state.backend_notes = image_backend.pop_notices()
     if not materials and llm.profile() == "stub":
         st.caption("⚠️ MODEL_PROFILE 이 stub 이라 기획 단계에서 멈춥니다 — .env 를 확인하세요.")
     return bool(materials)
@@ -643,6 +646,9 @@ def image_view(store: Store, draft: AdBriefDraft) -> None:
                 continue
             st.image(img, use_container_width=True)
             _save_and_download(store, draft.product or "광고", style, label, img)
+
+    for note in st.session_state.get("backend_notes") or []:
+        st.caption(f"ℹ️ {note}")
 
     if images and st.button("사진만 다시 만들기"):
         # 문구는 그대로 두고 재료(배경·상품)만 새로 뽑는다 — 생성은 매번 다르게 나온다

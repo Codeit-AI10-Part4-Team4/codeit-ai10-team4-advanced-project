@@ -17,6 +17,7 @@ from app_core import photo_store, ref_style, sketch_gen
 from app_core.background import remove_background
 from app_core.compose import compose_ad
 from app_core.gen_background import generate_background
+from app_core.image_backend import generate_scene
 from app_core.photo_router import mask_area, remove_crumbs, route_photo
 from app_core.poster import generate_poster
 from app_core.poster_plan import PosterPlan, plan_poster
@@ -70,12 +71,18 @@ def _with_reference(brief: AdBrief, prompt: str) -> str:
 
 
 def _background(brief: AdBrief, prompt: str) -> Image.Image:
-    """배경 한 장. 스케치가 있으면 그 구도를 따라 그린다 (이미지 4번)."""
+    """배경 한 장. 스케치가 있으면 그 구도를 따라 그린다 (이미지 4번).
+
+    스케치가 없으면 이미지 백엔드가 그린다 — IMAGE_PROFILE 이 openai 면 GPT,
+    아니면 sd-turbo. 스케치 갈래는 로컬 전용이라 그대로다 (docs/09 v1).
+    """
     if brief.sketch_id is None:
-        return generate_background(prompt)
+        return generate_scene(prompt)
+
     path = photo_store.path_of(brief.sketch_id)
     if path is None:
-        return generate_background(prompt)
+        return generate_scene(prompt)
+
     with Image.open(path) as sketch:
         return sketch_gen.generate_from_sketch(sketch.copy(), prompt)
 
