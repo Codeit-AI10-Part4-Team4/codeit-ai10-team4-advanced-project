@@ -366,3 +366,34 @@ def test_filtered_resistance_keeps_comments_and_scores(yeoksam: Panel) -> None:
     assert len(result.persona_comments) == len(yeoksam.personas)
     assert all(c.resistance == "price" for c in result.persona_comments)
     assert result.scores["intent"] == 85.0
+
+
+# --- 좁은 패널 (2026-08-19 무작위 관통에서 실제로 나옴) ----------------------
+
+
+def test_narrow_age_panel_is_flagged(yeoksam: Panel) -> None:
+    """연령대 두어 개만 남은 패널은 "동네 손님"이라고 부르기 어렵다.
+
+    매출이 0 인 연령대는 애초에 페르소나가 안 만들어진다. 무작위 관통
+    40 조합에서 실제로 나왔다 — 충정로역 정육점은 10·20·30·40대 매출이
+    0원이라 손님이 **4명**(50·60대)뿐이었다.
+
+    점수 자체는 틀리지 않다. 그 넷이 이 업종을 실제로 사는 층이다.
+    다만 화면이 그 사실을 말해야 하므로 사유로 남긴다.
+    """
+    panel = yeoksam.model_copy(deep=True)
+    panel.personas = [p for p in panel.personas if p.demo[:2] in ("50", "60")]
+    total = sum(p.weight for p in panel.personas)
+    for p in panel.personas:
+        p.weight = p.weight / total
+
+    result = aggregate(panel, _all_valid(panel, attention=70), ad_id=AD_ID)
+
+    assert any("연령대로 좁음" in r for r in result.confidence_reasons)
+    assert result.scores["attention"] == 70.0, "점수는 그대로 낸다"
+
+
+def test_full_panel_is_not_flagged(yeoksam: Panel) -> None:
+    """12명 다 있으면 이 사유는 안 붙는다."""
+    result = aggregate(yeoksam, _all_valid(yeoksam, attention=70), ad_id=AD_ID)
+    assert not any("연령대로 좁음" in r for r in result.confidence_reasons)

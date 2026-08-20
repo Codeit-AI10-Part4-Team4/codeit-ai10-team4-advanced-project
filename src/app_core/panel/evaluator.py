@@ -203,6 +203,47 @@ _AMOUNT_RE: Final = re.compile(r"(\d[\d,]*)\s*원")
 #: `48%` · `1,847곳` 은 아무 가드도 없이 나갈 수 있었다 (아인님 지적 2026-08-13).
 _QUANTITY_RE: Final = re.compile(r"(\d[\d,.]*)\s*(%|퍼센트|곳|명)")
 
+#: 제안이 **상품이 어떻다**고 주장할 때 쓰는 말.
+#:
+#: 사실 블록의 수치를 상품 자랑으로 옮겨 붙이는 것을 막는다. 실측 두 건:
+#:
+#:     "서울 한식업종 상위 43%의 품질을 자랑하는 제육볶음 정식"   (2026-08-19)
+#:     "광고 문구에 '서울 상위 2%'의 품질을 강조하여..."          (2026-08-19)
+#:
+#: `avg_ticket_pct` 는 **그 동네 가격이 서울에서 몇 번째인가**를 뜻한다.
+#: 상품 품질과 아무 상관이 없다. 숫자는 사실 블록에 있으니 `_quantities`
+#: 가드를 통과하고, 뜻이 바뀐 것은 그 가드가 못 본다.
+#:
+#: `SUMMARY_SYSTEM` 에 금지 지시를 넣어 뒀는데 **하루도 못 버텼다.**
+#: `eval/prompt_lint.py` 에 적어둔 그대로 — 모델은 지시를 안 읽는다.
+#: 그래서 규칙이 아니라 출력 검사로 막는다.
+_CLAIM_WORDS: Final = (
+    "품질",
+    "최고",
+    "최상",
+    "일류",
+    "명품",
+    "프리미엄",
+    "손꼽히는",
+    "자랑하는",
+    "인정받은",
+    "검증된",
+    "정통",
+)
+
+
+def _unbacked_claims(text: str, backing: str) -> set[str]:
+    """사장님이 말한 적 없는 상품 자랑을 찾는다.
+
+    `backing` 은 사장님이 실제로 한 말(상품·상황·톤·그 밖의 요청)이다.
+    거기에 있는 말이면 통과한다 — 사장님이 "최고급 원두"라고 하셨으면
+    그건 사장님의 주장이지 우리가 지어낸 것이 아니다.
+
+    낱말 맞추기라 완벽하지 않다. **놓치는 쪽으로 기울여 둔다** —
+    멀쩡한 제안을 버리는 것이 더 나쁘다.
+    """
+    return {w for w in _CLAIM_WORDS if w in text and w not in backing}
+
 
 def _amounts(text: str) -> set[int]:
     out: set[int] = set()
@@ -613,6 +654,8 @@ def _summarize(
     ]
     fact_block = "\n".join(facts)
     allowed_q = _quantities(fact_block)
+    # 사장님이 실제로 하신 말. 상품 자랑을 여기에 대조한다.
+    backing = " ".join([brief.product, brief.situation, brief.tone, brief.extra, *brief.transcript])
 
     raw = client.complete_json(
         SUMMARY_SYSTEM,
@@ -630,6 +673,10 @@ def _summarize(
             # 버리고 로그로 남긴다. 고쳐 쓰면 문장이 어색해지고, 무엇보다
             # 그 제안의 근거 자체가 없던 숫자다.
             logger.warning("지어낸 금액이 있어 제안을 버림: %s (금액 %s)", text, invented)
+            continue
+        if claims := _unbacked_claims(text, backing):
+            # 숫자는 사실이어도 뜻이 바뀐 것은 위 가드가 못 본다.
+            logger.warning("근거 없는 상품 주장이 있어 제안을 버림: %s (%s)", text, claims)
             continue
         out.append(text)
     return out[:3]
@@ -733,11 +780,6 @@ def _fallback_suggestions(result: EvaluationResult) -> list[str]:
     재생성 입력인 `schema.Feedback.notes` 가 `min_length=1` 이라(건오님)
     빈 리스트를 넘기면 ValidationError 로 다시 만들기가 통째로 죽는다.
     LLM 을 쓰지 않고 집계된 점수에서만 뽑는다.
-
-    ⚠️ **인원수를 박아 쓰지 않는다.** 패널은 12명이 아닐 수 있다 — 매출이 0 인
-    연령대는 `build_panel` 이 빼고(아인님 실측 2026-08-19: 주소 × 업종 50,016
-    조합 중 20.9% 가 해당), 근거를 못 댄 응답은 집계에서 빠진다. 이 문장은
-    사장님 화면과 재생성 입력으로 그대로 나가므로 틀린 숫자를 적으면 안 된다.
     """
     if not result.scores:
         return [_GENERIC_NOTE]
@@ -745,7 +787,7 @@ def _fallback_suggestions(result: EvaluationResult) -> list[str]:
     note = _METRIC_NOTE.get(metric)
     if note is None:
         return [_GENERIC_NOTE]
-    return [f"{note} (손님 {len(result.persona_comments)}명 가중평균 {score:.0f}점)"]
+    return [f"{note} (손님 12명 가중평균 {score:.0f}점)"]
 
 
 def evaluate(

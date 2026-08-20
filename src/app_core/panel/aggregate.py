@@ -63,6 +63,20 @@ MIN_SCORED_PERSONAS: Final = 3
 #: 명이 절반을 넘을 수 있는데, 그 점수는 패널이 아니라 개인의 취향이다.
 WEIGHT_CONCENTRATION_MAX: Final = 0.5
 
+#: 패널이 대변한다고 말할 수 있는 최소 연령대 수.
+#:
+#: 매출이 0 인 연령대는 애초에 페르소나가 안 만들어진다(A쪽 `build_panel`).
+#: 그래서 어떤 상권·업종에서는 패널이 두세 연령대로 좁아진다 — 무작위 관통
+#: 40 조합에서 실제로 나왔다 (2026-08-19):
+#:
+#:     충정로역 7번 · 정육점    손님 4명   10·20·30·40대 매출 0원
+#:     남서울상가 · 반찬가게     손님 6명   10·20·30대 매출 0원
+#:
+#: 50·60대만 남은 패널은 **그 업종을 실제로 사는 층**이므로 점수 자체는
+#: 틀리지 않다. 다만 "동네 손님"이라고 부르기엔 좁아서 화면이 그 사실을
+#: 말해야 한다. 그래서 점수를 막지 않고 사유만 남긴다.
+MIN_AGE_BANDS: Final = 3
+
 
 class AggregationError(ValueError):
     """집계할 수 있는 응답이 하나도 남지 않았을 때."""
@@ -184,6 +198,12 @@ def aggregate(
     if len(scored) < MIN_SCORED_PERSONAS:
         reasons.append(
             f"통과한 손님이 {len(scored)}명뿐이라 표본이 작음 (기준 {MIN_SCORED_PERSONAS}명)"
+        )
+    bands = {p.demo[:2] for p, _ in valid}
+    if len(bands) < MIN_AGE_BANDS:
+        reasons.append(
+            f"패널이 {len(bands)}개 연령대로 좁음 — 나머지 연령대는 이 업종에서 "
+            f"매출이 잡히지 않음 (기준 {MIN_AGE_BANDS}개)"
         )
     top_weight = max(w for w, _ in normalized)
     if top_weight > WEIGHT_CONCENTRATION_MAX:
