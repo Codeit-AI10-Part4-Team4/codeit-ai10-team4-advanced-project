@@ -90,7 +90,7 @@ def _josa(word: str, with_batchim: str, without: str) -> str:
     return without  # 한글이 아니면(숫자·괄호 등) 받침 없는 쪽으로 둔다
 
 
-def price_note(features: TradeAreaFeatures, brief: AdBrief) -> Note | None:
+def price_note(features: TradeAreaFeatures, brief: AdBrief, copy: CopyCandidate) -> Note | None:
     """광고에 적은 가격과 이 동네 객단가를 나란히 놓는다.
 
     ⚠️ 둘은 같은 단위가 아니다. 객단가는 **결제 1건**의 평균이라 여러 개를
@@ -124,7 +124,10 @@ def price_note(features: TradeAreaFeatures, brief: AdBrief) -> Note | None:
     같은 입력을 통째로 3회씩 전/후 돌렸을 때는 2/3 → 0/3 으로 **좋아 보였다.**
     손님 답이 매번 새로 흔들려서 생긴 착시다. 요약 콜만 갈라야 보인다.
     """
-    if not brief.show_price:
+    # 광고에 안 실린 가격은 견줄 대상이 아니다 — 손님이 그 값을 못 본다.
+    # 이 문장은 요약 콜의 사실 블록으로도 들어가므로, 여기서 안 막으면
+    # 손님에게 가격을 숨겨놓고 제안만 가격 이야기를 하게 된다 (2026-08-20).
+    if not price_visible(brief, copy):
         return None
     pct = round(features.avg_ticket_pct * 100)
     return Note(
@@ -435,7 +438,7 @@ def contrast(features: TradeAreaFeatures, brief: AdBrief, copy: CopyCandidate) -
     문구 자체의 결함은 여기 없다 — `copy_defects()` 를 따로 부른다(이유는 그쪽).
     """
     notes = [
-        price_note(features, brief),
+        price_note(features, brief, copy),
         timing_note(features, copy),
         weekend_note(features, copy),
         composition_note(features),

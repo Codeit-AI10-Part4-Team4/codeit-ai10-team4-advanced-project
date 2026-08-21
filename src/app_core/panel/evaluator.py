@@ -27,7 +27,7 @@ from pydantic import ValidationError
 
 from app_core.llm import ChatClient, get_client
 from app_core.panel.aggregate import DEFAULT_SIGMA_MAX, aggregate
-from app_core.panel.contrast import TIME_WORDS, contrast
+from app_core.panel.contrast import TIME_WORDS, contrast, price_visible
 from app_core.panel.evidence import evidence_failures
 from app_core.panel.narrator import MOTIVE_KO, TIME_KO
 from app_core.panel.schemas import (
@@ -416,7 +416,9 @@ def _ad_lines(store: Store, brief: AdBrief, copy: CopyCandidate) -> str:
     if brief.tone:
         parts.append(f"- 원하는 느낌: {brief.tone}")
     # 0 원은 "가격 없음"이라는 뜻이다. 없는 가격을 평가하게 하면 안 된다.
-    parts.append(f"- 가격: {brief.price:,}원" if brief.show_price else "- 가격: 광고에 없음")
+    parts.append(
+        f"- 가격: {brief.price:,}원" if price_visible(brief, copy) else "- 가격: 광고에 없음"
+    )
     return "\n".join(parts)
 
 
@@ -434,7 +436,7 @@ def build_user_prompt(
         f"{MOTIVE_KO[axes.motive]} 편이고, {_PRICE_SENS_KO[axes.price_sens]}\n"
         f"{standing(features, persona)}\n\n"
         f"## 우리 동네 숫자 (evidence 는 여기서만 고른다)\n"
-        f"{_feature_lines(features, persona, copy, show_price=brief.show_price)}\n\n"
+        f"{_feature_lines(features, persona, copy, show_price=price_visible(brief, copy))}\n\n"
         f"## 광고물\n{_ad_lines(store, brief, copy)}"
     )
 
@@ -471,7 +473,7 @@ def _evaluate_one(
 ) -> PersonaEval | None:
     """한 명을 평가한다. 두 관문 중 하나라도 실패하면 1회만 다시 부른다."""
     user = build_user_prompt(persona, features, store, brief, copy)
-    allowed = offered_paths(features, persona, copy, show_price=brief.show_price)
+    allowed = offered_paths(features, persona, copy, show_price=price_visible(brief, copy))
     hint = ""
 
     for attempt in range(RETRY_ONCE + 1):
@@ -489,7 +491,7 @@ def _evaluate_one(
         # 코드가 아는 사실이므로 모델의 자기검열에 맡기지 않고 여기서 되묻는다.
         # 한 번만 되묻고, 그래도 같으면 점수는 살려 둔다 — 걸림돌 하나 때문에
         # 그 손님의 평가 전체를 버리면 12명이 통째로 날아갈 수 있다.
-        if attempt == 0 and result.resistance == "price" and not brief.show_price:
+        if attempt == 0 and result.resistance == "price" and not price_visible(brief, copy):
             logger.debug("가격 없는 광고에 price 응답 %s — 되묻는다", persona.persona_id)
             hint = _retry_hint(
                 "이 광고에는 **가격이 적혀 있지 않다.** 적히지도 않은 가격을 "
@@ -599,6 +601,7 @@ def _summarize(
     panel: Panel,
     evals: list[PersonaEval],
     brief: AdBrief,
+    copy: CopyCandidate,
     notes: list[ContrastNote],
 ) -> list[str]:
     """저항 요인과 코멘트를 개선 제안으로 옮긴다 (07 §7.3).
@@ -630,7 +633,7 @@ def _summarize(
     features = panel.features
     allowed = {features.avg_ticket}
     facts = [f"- 이 동네 {features.category_nm} 결제 1건 평균: {features.avg_ticket:,}원"]
-    if brief.show_price:
+    if price_visible(brief, copy):
         allowed.add(brief.price)
         facts.insert(0, f"- 광고에 적은 가격: {brief.price:,}원")
     else:
@@ -883,7 +886,7 @@ def evaluate(
     # 걸림돌은 손님 콜이 아니라 코멘트에서 정한다 (`_classify_resistance`).
     if evals:
         try:
-            labels = _classify_resistance(chat, evals, show_price=brief.show_price)
+            labels = _classify_resistance(chat, evals, show_price=price_visible(brief, copy))
             if labels is not None:
                 evals = [
                     e.model_copy(update={"resistance": lab})
@@ -895,7 +898,7 @@ def evaluate(
     suggestions: list[str] = []
     if summarize and evals:
         try:
-            suggestions = _summarize(chat, panel, evals, brief, notes)
+            suggestions = _summarize(chat, panel, evals, brief, copy, notes)
         except Exception:
             # 요약은 부가물이다. 여기서 터졌다고 이미 끝난 평가를 버리면 안 된다.
             logger.exception("제안 요약 실패 %s — 제안 없이 반환", ad_id or "(무명)")
