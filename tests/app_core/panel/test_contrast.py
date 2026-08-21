@@ -93,6 +93,12 @@ def test_광고에_금액이_보일_때만_가격이_보인다() -> None:
     assert not price_visible(brief, CopyCandidate(headline="점심 10분 컷, 크로플"))
     # 사장님이 정한 적 없는 금액이다 (price_text_note ③ 가 따로 짚는다)
     assert not price_visible(brief, CopyCandidate(headline="크로플 8,900원"))
+    # 정한 값이 있어도 **다른 금액이 섞이면** 닫는다 (귀한님 지적, PR #50 리뷰)
+    assert not price_visible(brief, CopyCandidate(headline="크로플 6,000원, 원래 8,900원"))
+    # 한글 단위 금액도 읽는다 — "1만 5천원" 을 15,000 하나로 본다
+    pricey = AdBrief(goal="copy", product="크로플", price=15000)
+    assert price_visible(pricey, CopyCandidate(headline="크로플 1만 5천원"))
+    assert not price_visible(pricey, CopyCandidate(headline="크로플 5천원"))
     # 가격을 빼기로 한 광고
     assert not price_visible(
         AdBrief(goal="copy", product="크로플", price=0),

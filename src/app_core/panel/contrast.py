@@ -261,7 +261,24 @@ DEFECT_KINDS: Final = frozenset({"product", "claim", "price_text"})
 #: (실측 2026-08-12: 검사 코드 0건, `CopyCandidate` 는 헤드라인이 비었는지만 본다).
 CLAIM_WORDS: Final = ("최고", "최상", "1위", "일위", "최초", "제일", "유일", "넘버원", "No.1")
 
-_AMOUNT_RE: Final = re.compile(r"(\d[\d,]*)\s*원")
+#: 금액. `4,500원` · `1만원` · `5천원` · `1만 5천원` · `2만 3천 500원` 을 잡는다.
+#:
+#: 만·천·나머지를 **한 덩어리로** 읽는다. 쪼개서 두 개로 내면 주문서 금액과
+#: 우연히 맞아떨어져 판정이 뒤집힌다. 이 규칙과 `_digits` 는 건오님이
+#: `eval/copy_metrics.py` 에서 실제 오탐을 겪고 보강한 것을 그대로 가져왔다 —
+#: 저쪽이 이제 이걸 import 한다. 목록을 복사해두면 한쪽만 고쳐진다.
+#:
+#: 세 자리가 전부 선택이라 `"원두"` 의 `원` 처럼 숫자 없는 곳에도 빈 매치가
+#: 걸린다. 그건 `copy_amounts` 에서 걸러낸다.
+_AMOUNT_RE: Final = re.compile(
+    r"(?:(\d[\d,]*)\s*만)?\s*"  # 만 단위
+    r"(?:(\d[\d,]*)\s*천)?\s*"  # 천 단위
+    r"(\d[\d,]*)?\s*원"  # 나머지 (또는 `4,500원` 처럼 단위 없는 금액)
+)
+
+
+def _digits(part: str) -> int:
+    return int(part.replace(",", "")) if part else 0
 
 
 def product_note(brief: AdBrief, copy: CopyCandidate) -> Note | None:
@@ -303,8 +320,16 @@ def claim_note(copy: CopyCandidate, store: Store | None = None) -> Note | None:
 
 
 def copy_amounts(copy: CopyCandidate) -> set[int]:
-    """문구에 적힌 금액. 손님이 광고에서 **실제로 볼 수 있는** 값이다."""
-    return {int(m.replace(",", "")) for m in _AMOUNT_RE.findall(_text(copy))}
+    """문구에 적힌 금액. 손님이 광고에서 **실제로 볼 수 있는** 값이다.
+
+    `"1만 5천원"` 은 하나로 더해 15,000 을 낸다.
+    """
+    found: set[int] = set()
+    for man, cheon, rest in _AMOUNT_RE.findall(_text(copy)):
+        if not (man or cheon or rest):
+            continue  # 숫자 없이 `원` 만 있는 자리 (`원두` 등)
+        found.add(_digits(man) * 10_000 + _digits(cheon) * 1_000 + _digits(rest))
+    return found
 
 
 def price_visible(brief: AdBrief, copy: CopyCandidate) -> bool:
@@ -324,11 +349,13 @@ def price_visible(brief: AdBrief, copy: CopyCandidate) -> bool:
     제안이 *"광고에 가격 정보를 추가하세요"* 로 바뀐다. 이쪽이 실행 가능한
     조언이다 — 사장님은 이미 가격을 정하셨으니 넣기만 하면 된다.
 
-    ⚠️ 사장님이 정한 값과 **다른** 금액이 문구에 적힌 경우(`price_text_note` ③)
-    는 False 로 본다. 손님에게 보여줄 값이 어느 쪽인지 정해지지 않아서다.
-    그 자체가 결함이라 `price_text_note` 가 따로 짚는다.
+    ⚠️ **정한 값 하나만 적혀 있어야 True 다.** `"6,000원, 원래 8,900원"` 처럼
+    다른 금액이 섞이면 손님에게 보여줄 값이 어느 쪽인지 정해지지 않으므로
+    닫는다 (귀한님 지적, PR #50 리뷰). 그 자체가 결함이라 `price_text_note` ③
+    가 따로 짚는다. 한 광고에 여러 상품 가격을 적는 경우도 같이 닫히는데,
+    지금 주문서가 상품 하나를 전제하므로 그때 다시 본다.
     """
-    return brief.show_price and brief.price in copy_amounts(copy)
+    return brief.show_price and copy_amounts(copy) == {brief.price}
 
 
 def price_text_note(brief: AdBrief, copy: CopyCandidate) -> Note | None:
