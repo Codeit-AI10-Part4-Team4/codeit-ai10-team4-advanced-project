@@ -23,6 +23,7 @@ from app_core.panel.schemas import (
     EvaluationResult,
     Panel,
     Persona,
+    PersonaComment,
     Resistance,
 )
 from app_core.schema import AdBrief, CopyCandidate, Store, StoreInput
@@ -1540,6 +1541,42 @@ def test_가격이_문구에_없으면_여섯_자리가_모두_닫힌다(yeoksam
     assert result.scores
 
 
+def test_대체_문장은_인원을_실제로_센다() -> None:
+    """패널은 10~12명 가변이다(#39) — 무작위 60조합에서 3명짜리도 나왔다.
+
+    제안 문장의 "12명" 은 #40 이 고쳤는데 대체 문장에는 남아 있었다.
+    요약 콜이 실패한 날 3명 패널에 "손님 12명" 이라고 말하게 된다.
+    """
+    from app_core.panel.evaluator import _fallback_suggestions
+
+    result = EvaluationResult(
+        ad_id="x",
+        scores={"attention": 40.0, "message": 70.0, "intent": 60.0},
+        confidence="low",
+        max_metric_std=0.0,
+        top_resistance=[],
+        persona_comments=[
+            PersonaComment(
+                persona_id=f"p{i}",
+                demo="30대 여성",
+                weight=0.33,
+                is_boundary=False,
+                resistance="none",
+                comment="한마디",
+            )
+            for i in range(3)
+        ],
+        area_nm="역삼역",
+        quarter="20261",
+        is_fallback=False,
+        demo_coverage=0.714,
+    )
+    (note,) = _fallback_suggestions(result)
+    assert "손님 3명" in note
+    assert "12명" not in note
+    assert note.endswith("어떨까요 (손님 3명 가중평균 40점)")  # 권유형
+
+
 def test_every_label_has_a_classifier_example() -> None:
     """예시가 없는 라벨은 안 나온다 — 예시 목록이 곧 답의 분포다.
 
@@ -1641,3 +1678,51 @@ def test_claim_words_cover_the_measured_cases() -> None:
     """실측에 나온 낱말이 목록에 있어야 한다. 늘릴 때는 실측으로."""
     for word in ("품질", "자랑하는", "손꼽히는"):
         assert word in evaluator._CLAIM_WORDS
+
+
+def _result_with(n: int) -> EvaluationResult:
+    return EvaluationResult(
+        ad_id="x",
+        scores={"attention": 40.0, "message": 70.0, "intent": 60.0},
+        confidence="low",
+        max_metric_std=0.0,
+        top_resistance=[],
+        persona_comments=[
+            PersonaComment(
+                persona_id=f"p{i}",
+                demo="30대 여성",
+                weight=1.0 / n,
+                is_boundary=False,
+                resistance="none",
+                comment="한마디",
+            )
+            for i in range(n)
+        ],
+        area_nm="역삼역",
+        quarter="20261",
+        is_fallback=False,
+        demo_coverage=0.714,
+    )
+
+
+def test_두_명_이하는_가중평균이라_부르지_않는다() -> None:
+    """**한 명의 평균은 평균이 아니다.**
+
+    수호님이 씨앗 5개 300조합에서 손님 1명짜리 패널을 찾았다
+    (한국의류시험연구원 × 옷가게 · 50대 남성 하나). `demo_coverage` 가
+    1.000 이라 데이터가 부실한 게 아니라, 그 동네에서 옷을 사는 사람이
+    정말 그 층뿐이었다.
+
+    경계 3 은 `#56` 의 "손님 2명 이하는 가중평균이라 부를 수 없는 크기" 와
+    같은 값이다.
+    """
+    from app_core.panel.evaluator import _fallback_suggestions
+
+    for n in (1, 2):
+        (note,) = _fallback_suggestions(_result_with(n))
+        assert f"손님 {n}명 점수" in note, note
+        assert "가중평균" not in note
+
+    for n in (3, 12):
+        (note,) = _fallback_suggestions(_result_with(n))
+        assert f"손님 {n}명 가중평균" in note, note
