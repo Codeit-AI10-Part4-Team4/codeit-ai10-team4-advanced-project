@@ -22,7 +22,7 @@ from app_core.image_backend import profile as image_profile
 from app_core.photo_router import mask_area, remove_crumbs, route_photo
 from app_core.poster import generate_poster
 from app_core.poster_plan import PosterPlan, plan_poster
-from app_core.prompt_builder import build_bg_prompt, build_hero_prompt
+from app_core.prompt_builder import build_bg_prompt, build_hero_prompt, build_scene_prompt
 from app_core.schema import AdBrief, CopyCandidate, Store
 
 Style = Literal["simple", "poster"]
@@ -106,7 +106,16 @@ def _simple_materials(brief: AdBrief, store: Store, product: Image.Image | None)
     올렸을 때 배경에도 제품이 그려지고 누끼도 얹혀 제품이 둘로** 나왔다.
     """
     if product is None:
-        prompt = build_hero_prompt(store.industry_label, brief.product, brief.tone)
+        prompt = build_scene_prompt(
+            shop=store.name,
+            location=store.address,
+            industry=store.industry_label,
+            product=brief.product,
+            situation=brief.situation,
+            tone=brief.tone,
+            extra=brief.extra,
+            transcript=brief.raw_utterance,
+        )
     else:
         prompt = build_bg_prompt(store.industry_label, brief.situation, brief.tone)
 
