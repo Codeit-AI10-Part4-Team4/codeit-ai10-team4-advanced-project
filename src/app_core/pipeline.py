@@ -106,16 +106,22 @@ def _simple_materials(brief: AdBrief, store: Store, product: Image.Image | None)
     올렸을 때 배경에도 제품이 그려지고 누끼도 얹혀 제품이 둘로** 나왔다.
     """
     if product is None:
-        prompt = build_scene_prompt(
-            shop=store.name,
-            location=store.address,
-            industry=store.industry_label,
-            product=brief.product,
-            situation=brief.situation,
-            tone=brief.tone,
-            extra=brief.extra,
-            transcript=brief.raw_utterance,
-        )
+        if brief.sketch_id is not None:
+            # 스케치 생성(sd-turbo+ControlNet)은 CLIP 입력이 짧다 — 긴 촬영 기획
+            # 프롬프트는 잘려서 구도 지시가 약해진다. 스케치 주문은 짧은 주인공
+            # 프롬프트를 유지한다 (제품이 들어 있어 "흐릿한 덩어리"도 안 된다).
+            prompt = build_hero_prompt(store.industry_label, brief.product, brief.tone)
+        else:
+            prompt = build_scene_prompt(
+                shop=store.name,
+                location=store.address,
+                industry=store.industry_label,
+                product=brief.product,
+                situation=brief.situation,
+                tone=brief.tone,
+                extra=brief.extra,
+                transcript=brief.raw_utterance,
+            )
     else:
         prompt = build_bg_prompt(store.industry_label, brief.situation, brief.tone)
 

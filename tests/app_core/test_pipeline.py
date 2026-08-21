@@ -183,9 +183,10 @@ def test_스케치가_있으면_그쪽으로_그린다(tmp_path, monkeypatch):
 
     brief = _brief().model_copy(update={"sketch_id": _put()})
     pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
-    # 배경("빈 탁자")이 아니라 촬영 장면 프롬프트여야 한다 — 안 그러면 그린 것이
-    # 흐릿한 덩어리로 나온다. 실제로 그랬다.
-    assert called["prompt"] == "scene prompt"
+    # 긴 촬영 기획(scene)이 아니라 짧은 주인공 프롬프트여야 한다 — 스케치 모델의
+    # CLIP 입력이 짧아 긴 프롬프트는 잘리고 구도 지시가 약해진다.
+    # (배경 프롬프트("빈 탁자")도 안 된다 — 제품이 없어 흐릿한 덩어리가 나온다)
+    assert called["prompt"] == "hero prompt"
     assert called["size"] == (64, 64)
 
 
@@ -236,7 +237,7 @@ def test_레퍼런스와_스케치를_같이_쓸_수_있다(tmp_path, monkeypatc
 
     brief = _brief().model_copy(update={"ref_id": _put(), "sketch_id": _put((0, 0, 0))})
     pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
-    assert called["prompt"] == "scene prompt, warm light"
+    assert called["prompt"] == "hero prompt, warm light"
 
 
 def _photo(tmp_path):
@@ -535,7 +536,7 @@ def test_스케치만_있으면_스케치가_제품을_그린다(tmp_path, monke
     brief = _brief().model_copy(update={"sketch_id": _put()})
     pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
 
-    assert seen["prompt"] == "scene prompt"
+    assert seen["prompt"] == "hero prompt"
     assert seen["누끼"] is False
 
 
