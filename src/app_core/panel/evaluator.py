@@ -686,13 +686,16 @@ def _summarize(
 
 
 #: 요약 콜 없이도 낼 수 있는 한 줄. 지표별로 문구가 다르다.
+#: 요약 콜이 못 돌 때 쓰는 대체 문장. **권유형으로 쓴다** — 사장님이 자기 가게를
+#: 제일 잘 아는 사람이고 우리는 손님 반응을 전하는 쪽이다. LLM 이 쓰는 제안의
+#: 어투(`SUMMARY_SYSTEM`)는 프롬프트라 따로 재야 하지만, 여기는 코드 문자열이다.
 _METRIC_NOTE: Final[dict[str, str]] = {
-    "attention": "눈길을 끄는 힘이 가장 약했습니다 — 첫 줄을 더 구체적으로 바꿔 보세요",
-    "message": "무엇을 파는 곳인지가 가장 약했습니다 — 상품을 문구 앞쪽에 드러내 보세요",
-    "intent": "가 볼 이유가 가장 약했습니다 — 지금 가야 할 이유를 한 줄 넣어 보세요",
+    "attention": "눈길을 끄는 힘이 가장 약했습니다 — 첫 줄을 더 구체적으로 바꿔보시면 어떨까요",
+    "message": "무엇을 파는 곳인지가 가장 약했습니다 — 상품을 문구 앞쪽에 드러내보시면 어떨까요",
+    "intent": "가 볼 이유가 가장 약했습니다 — 지금 가야 할 이유를 한 줄 넣어보시면 어떨까요",
 }
 
-_GENERIC_NOTE: Final = "손님 반응이 갈렸습니다 — 문구를 바꿔 다시 만들어 보세요"
+_GENERIC_NOTE: Final = "손님 반응이 갈렸습니다 — 문구를 바꿔 다시 만들어보시면 어떨까요"
 
 
 def _classify_resistance(
@@ -790,7 +793,9 @@ def _fallback_suggestions(result: EvaluationResult) -> list[str]:
     note = _METRIC_NOTE.get(metric)
     if note is None:
         return [_GENERIC_NOTE]
-    return [f"{note} (손님 12명 가중평균 {score:.0f}점)"]
+    # 인원은 상권마다 다르다 — 매출 0 인 연령대는 손님으로 안 만든다(#39).
+    # 무작위 60조합에서 3명짜리 패널이 실제로 나왔다 (2026-08-20).
+    return [f"{note} (손님 {len(result.persona_comments)}명 가중평균 {score:.0f}점)"]
 
 
 def evaluate(

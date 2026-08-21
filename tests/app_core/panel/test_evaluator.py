@@ -23,6 +23,7 @@ from app_core.panel.schemas import (
     EvaluationResult,
     Panel,
     Persona,
+    PersonaComment,
     Resistance,
 )
 from app_core.schema import AdBrief, CopyCandidate, Store, StoreInput
@@ -1538,6 +1539,42 @@ def test_가격이_문구에_없으면_여섯_자리가_모두_닫힌다(yeoksam
     assert f"{brief.price:,}원" not in seen["summary"]
     # ⑥ 되묻기가 걸린 뒤에도 평가는 끝난다
     assert result.scores
+
+
+def test_대체_문장은_인원을_실제로_센다() -> None:
+    """패널은 10~12명 가변이다(#39) — 무작위 60조합에서 3명짜리도 나왔다.
+
+    제안 문장의 "12명" 은 #40 이 고쳤는데 대체 문장에는 남아 있었다.
+    요약 콜이 실패한 날 3명 패널에 "손님 12명" 이라고 말하게 된다.
+    """
+    from app_core.panel.evaluator import _fallback_suggestions
+
+    result = EvaluationResult(
+        ad_id="x",
+        scores={"attention": 40.0, "message": 70.0, "intent": 60.0},
+        confidence="low",
+        max_metric_std=0.0,
+        top_resistance=[],
+        persona_comments=[
+            PersonaComment(
+                persona_id=f"p{i}",
+                demo="30대 여성",
+                weight=0.33,
+                is_boundary=False,
+                resistance="none",
+                comment="한마디",
+            )
+            for i in range(3)
+        ],
+        area_nm="역삼역",
+        quarter="20261",
+        is_fallback=False,
+        demo_coverage=0.714,
+    )
+    (note,) = _fallback_suggestions(result)
+    assert "손님 3명" in note
+    assert "12명" not in note
+    assert note.endswith("어떨까요 (손님 3명 가중평균 40점)")  # 권유형
 
 
 def test_every_label_has_a_classifier_example() -> None:
