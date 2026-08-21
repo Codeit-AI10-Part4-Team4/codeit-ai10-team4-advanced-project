@@ -318,6 +318,83 @@ def test_generate_갈래는_제품이_든_장면을_그린다(tmp_path, monkeypa
     assert seen["prompt"] == "hero prompt"
 
 
+def test_openai_cutout_갈래는_원본_전체를_보정한다(tmp_path, monkeypatch):
+    """누끼+배경 합성 대신 원본 전체를 편집해 공중부양 경로를 없앤다."""
+    seen = {}
+    source = _photo(tmp_path)
+    edited = Image.new("RGB", (1080, 1080), (9, 9, 9))
+    monkeypatch.setenv("IMAGE_PROFILE", "openai")
+    monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: source)
+    monkeypatch.setattr(
+        pipeline, "remove_background", lambda im: Image.new("RGBA", (64, 64), (255, 255, 255, 255))
+    )
+    monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, cut: "cutout")
+
+    def _edit(photo, product, tone="", size=(1080, 1080)):
+        seen.update(photo=photo, product=product, tone=tone)
+        return edited
+
+    monkeypatch.setattr(pipeline, "edit_photo", _edit)
+    monkeypatch.setattr(
+        pipeline,
+        "generate_scene",
+        lambda prompt: (_ for _ in ()).throw(AssertionError("배경 생성 금지")),
+    )
+
+    materials = pipeline.prepare_materials(
+        AdBrief(goal="image", product="크로플", price=0, photo_id=7, tone="차분"),
+        _store(),
+        "simple",
+    )
+
+    assert isinstance(materials, pipeline.SimpleMaterials)
+    assert materials.product is None
+    assert materials.background is edited
+    assert materials.staged is False
+    assert seen["product"] == "크로플"
+    assert seen["tone"] == "차분"
+
+
+def test_openai_generate_갈래도_사진을_버리지_않고_보정한다(tmp_path, monkeypatch):
+    source = _photo(tmp_path)
+    edited = Image.new("RGB", (1080, 1080), (9, 9, 9))
+    monkeypatch.setenv("IMAGE_PROFILE", "openai")
+    monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: source)
+    monkeypatch.setattr(
+        pipeline, "remove_background", lambda im: Image.new("RGBA", (64, 64), (255, 255, 255, 255))
+    )
+    monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, cut: "generate")
+    monkeypatch.setattr(pipeline, "edit_photo", lambda *a, **k: edited)
+
+    materials = pipeline.prepare_materials(
+        AdBrief(goal="image", product="크로플", price=0, photo_id=7), _store(), "simple"
+    )
+
+    assert isinstance(materials, pipeline.SimpleMaterials)
+    assert materials.background is edited
+    assert materials.product is None
+    assert materials.staged is False
+
+
+def test_openai여도_사진과_스케치가_같이_있으면_기존_합성을_유지한다(tmp_path, monkeypatch):
+    """B단계가 스케치의 구도 계약을 조용히 버리면 안 된다."""
+    _cutout_ready(tmp_path, monkeypatch)
+    monkeypatch.setenv("IMAGE_PROFILE", "openai")
+    monkeypatch.setattr(
+        pipeline,
+        "edit_photo",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("사진 편집 금지")),
+    )
+    seen = _watch(monkeypatch)
+
+    brief = _brief().model_copy(update={"photo_id": 1, "sketch_id": _put()})
+    pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
+
+    assert seen["스케치로"] is True
+    assert seen["prompt"] == "base prompt"
+    assert seen["누끼"] is True
+
+
 def test_라우터는_청소_전_누끼를_받는다(tmp_path, monkeypatch):
     """청소를 먼저 하면 라우터가 보기 전에 상품이 사라진다 — 순서를 고정한다."""
     seen = {}

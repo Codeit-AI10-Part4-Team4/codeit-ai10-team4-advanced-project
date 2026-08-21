@@ -35,6 +35,22 @@ _PROFILES: Final = ("local", "openai")
 _notices: list[str] = []
 
 
+_EDIT_PROMPT = """Turn this customer-taken photo of {product} into a polished, photorealistic
+Instagram-ready shop photo. Preserve every visible product exactly as photographed: the same
+number, shape, size, colors, layers, condition, arrangement, containers, plates, packages,
+labels, and logos. Do not add, remove, replace, repair, restyle, or invent any product,
+ingredient, topping, component, claim, or text. You may improve only exposure, white balance,
+framing, depth of field, soft natural lighting, and unrelated background clutter. Use a
+{tone} mood with useful negative space for later typography. No overlay text, captions, new
+logos, people, or watermarks."""
+
+
+class _NamedPng(io.BytesIO):
+    """OpenAI multipart 업로드에 파일 이름을 제공하는 메모리 PNG."""
+
+    name = "input.png"
+
+
 def profile() -> str:
     """지금 쓰는 이미지 백엔드 이름 — local | openai. 모르는 값이면 즉시 죽는다.
 
@@ -69,6 +85,59 @@ def _openai_scene(prompt: str, size: tuple[int, int]) -> Image.Image:
 
     img = Image.open(io.BytesIO(base64.b64decode(rsp.data[0].b64_json)))
     return img.convert("RGB").resize(size)
+
+
+def _openai_edit(
+    photo: Image.Image,
+    product: str,
+    tone: str,
+    size: tuple[int, int],
+) -> Image.Image:
+    """gpt-image-2 로 원본 사진 전체를 정돈하되 상품은 그대로 보존한다."""
+    from openai import OpenAI
+
+    prepared = photo.convert("RGB")
+    prepared.thumbnail((1536, 1536), Image.Resampling.LANCZOS)
+    image_file = _NamedPng()
+    prepared.save(image_file, format="PNG")
+    image_file.seek(0)
+
+    prompt = _EDIT_PROMPT.format(
+        product=product,
+        tone=tone.strip() or "clean, natural, restrained",
+    )
+    rsp = OpenAI().images.edit(
+        model=_MODEL,
+        image=[image_file],
+        prompt=prompt,
+        size="1024x1024",
+        quality=_QUALITY,
+    )
+    if not rsp.data or not rsp.data[0].b64_json:
+        raise ValueError("응답에 이미지가 없습니다")
+
+    img = Image.open(io.BytesIO(base64.b64decode(rsp.data[0].b64_json)))
+    return img.convert("RGB").resize(size)
+
+
+def edit_photo(
+    photo: Image.Image,
+    product: str,
+    tone: str = "",
+    size: tuple[int, int] = (1080, 1080),
+) -> Image.Image:
+    """사장님 사진을 보정한다. 실패하면 상품 보호를 위해 원본을 그대로 쓴다.
+
+    이 함수는 openai 프로필의 사진 경로에서만 호출한다. 로컬 프로필은 기존
+    누끼·배경 합성을 유지한다. 편집 결과도 사장님 상품을 보존한 사진이므로
+    ``staged`` 판단은 부르는 파이프라인이 False 로 유지한다.
+    """
+    try:
+        return _openai_edit(photo, product, tone, size)
+    except Exception:  # noqa: BLE001 — 편집 실패가 광고 전체를 막으면 안 된다
+        _log.warning("GPT 사진 보정 실패 — 원본을 사용합니다", exc_info=True)
+        _notices.append("사진 보정에 실패해 원본 사진으로 만들었습니다.")
+        return photo.convert("RGB").resize(size)
 
 
 def generate_scene(
