@@ -16,6 +16,7 @@ from app_core.panel.contrast import (
     composition_note,
     contrast,
     price_note,
+    price_visible,
     timing_note,
     weakest,
     weekend_note,
@@ -74,6 +75,35 @@ def test_객단가와_광고가격을_나란히_보여준다() -> None:
     assert "6,000원" in note.text  # 광고가 적은 값
     assert "9,546원" in note.text  # 동네 실측값
     assert "비쌉" not in note.text and "저렴" not in note.text  # 판정하지 않는다
+
+
+def test_광고에_금액이_보일_때만_가격이_보인다() -> None:
+    """`show_price` 는 "입력했나"만 본다 — 문구에 실렸는지는 여기서 본다.
+
+    2026-08-20 실측: 가격만 바꾼 포스터 세 장 어디에도 금액이 없었는데
+    패널은 `price` 비중을 5.6% / 66.7% / 100% 로 갈랐다. 손님이 못 보는 값으로
+    판정한 것이다.
+    """
+    brief = AdBrief(goal="copy", product="크로플", price=6000)
+
+    assert price_visible(brief, CopyCandidate(headline="크로플 6,000원"))
+    assert price_visible(brief, CopyCandidate(headline="갓 구운 크로플", sub="6,000원"))
+
+    # 금액이 아예 없다 — 지금 대부분의 문구가 이 경우다
+    assert not price_visible(brief, CopyCandidate(headline="점심 10분 컷, 크로플"))
+    # 사장님이 정한 적 없는 금액이다 (price_text_note ③ 가 따로 짚는다)
+    assert not price_visible(brief, CopyCandidate(headline="크로플 8,900원"))
+    # 정한 값이 있어도 **다른 금액이 섞이면** 닫는다 (귀한님 지적, PR #50 리뷰)
+    assert not price_visible(brief, CopyCandidate(headline="크로플 6,000원, 원래 8,900원"))
+    # 한글 단위 금액도 읽는다 — "1만 5천원" 을 15,000 하나로 본다
+    pricey = AdBrief(goal="copy", product="크로플", price=15000)
+    assert price_visible(pricey, CopyCandidate(headline="크로플 1만 5천원"))
+    assert not price_visible(pricey, CopyCandidate(headline="크로플 5천원"))
+    # 가격을 빼기로 한 광고
+    assert not price_visible(
+        AdBrief(goal="copy", product="크로플", price=0),
+        CopyCandidate(headline="크로플 6,000원"),
+    )
 
 
 def test_시점을_말하지_않으면_시간_대조가_없다() -> None:
