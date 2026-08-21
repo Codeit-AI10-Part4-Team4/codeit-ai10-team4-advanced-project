@@ -1726,3 +1726,63 @@ def test_두_명_이하는_가중평균이라_부르지_않는다() -> None:
     for n in (3, 12):
         (note,) = _fallback_suggestions(_result_with(n))
         assert f"손님 {n}명 가중평균" in note, note
+
+
+def test_금액_가드가_한글_단위를_읽는다() -> None:
+    r"""`_amounts` 는 제안이 **지어낸 금액**을 잡는 가드다.
+
+    옛 규칙 `r"(\d[\d,]*)\s*원"` 은 한글 단위를 못 읽었다. 특히 두 번째가
+    위험하다 — 23,500원을 500원으로 읽으면 "사실 블록에 있는 값"으로
+    오판해 지어낸 금액이 그대로 사장님께 나간다.
+
+        "1만 5천원"      옛 set()   → 새 {15000}
+        "2만 3천 500원"  옛 {500}   → 새 {23500}
+    """
+    from app_core.panel.evaluator import _amounts
+
+    assert _amounts("1만 5천원에 맞춰보세요") == {15000}
+    assert _amounts("2만 3천 500원 세트를 만들어보세요") == {23500}
+    assert _amounts("15,000원") == {15000}
+    assert _amounts("원두를 바꿔보세요") == set()  # 숫자 없는 `원`
+
+
+def test_금액_규칙이_contrast_와_같다() -> None:
+    """규칙을 두 곳에 두면 한쪽만 고쳐진다 — PR #50 에서 겪은 그대로다."""
+    from app_core.panel.contrast import copy_amounts
+    from app_core.panel.evaluator import _amounts
+
+    for text in ("1만 5천원", "2만 3천 500원", "4,500원", "원두", "9천원"):
+        assert _amounts(text) == copy_amounts(CopyCandidate(headline=text)), text
+
+
+def test_관문이_가격_평가어를_잡는다() -> None:
+    """관문이 재료·품질만 막아서 **가격 주장은 통과했다** (실측 2026-08-21).
+
+        "평양냉면 가격을 '합리적인 가격'으로 강조하여 부담감을 줄여보세요"
+        "'가성비 좋은 평양냉면'이라는 문구를 추가하여…"
+        "연어덮밥의 가격을 '합리적인 가격'으로 강조하는 문구를 추가해 보세요"
+
+    18,000원을 '합리적'이라고 부르는 것도 사장님이 말한 적 없는 사실 주장이다.
+    """
+    from app_core.panel.evaluator import _unbacked_claims
+
+    assert _unbacked_claims("'합리적인 가격'으로 강조해보세요", "") == {"합리적"}
+    assert _unbacked_claims("'가성비 좋은 평양냉면'을 추가하여", "") == {"가성비"}
+
+
+def test_사장님이_한_말이면_가격어도_통과한다() -> None:
+    """`backing` 은 사장님이 실제로 한 말이다. 사장님의 주장은 막지 않는다."""
+    from app_core.panel.evaluator import _unbacked_claims
+
+    assert (
+        _unbacked_claims("'합리적인 가격'으로 강조해보세요", "합리적인 가격으로 알리고 싶다")
+        == set()
+    )
+
+
+def test_멀쩡한_제안은_그대로_통과한다() -> None:
+    """이 관문은 '놓치는 쪽으로 기울여' 두는 것이 원칙이다 — 좁게 유지한다."""
+    from app_core.panel.evaluator import _unbacked_claims
+
+    assert _unbacked_claims("지금 가야 할 이유를 한 줄 넣어보시면 어떨까요", "") == set()
+    assert _unbacked_claims("영업시간을 광고에 적어보시면 어떨까요", "") == set()
