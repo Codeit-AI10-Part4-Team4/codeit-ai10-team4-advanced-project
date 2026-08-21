@@ -795,7 +795,17 @@ def _fallback_suggestions(result: EvaluationResult) -> list[str]:
         return [_GENERIC_NOTE]
     # 인원은 상권마다 다르다 — 매출 0 인 연령대는 손님으로 안 만든다(#39).
     # 무작위 60조합에서 3명짜리 패널이 실제로 나왔다 (2026-08-20).
-    return [f"{note} (손님 {len(result.persona_comments)}명 가중평균 {score:.0f}점)"]
+    n = len(result.persona_comments)
+    # **한 명의 평균은 평균이 아니다.** 수호님이 씨앗 5개 300조합에서 손님
+    # 1명짜리 패널을 찾았다 (한국의류시험연구원 × 옷가게 · 50대 남성 하나).
+    # demo_coverage 가 1.000 이라 데이터가 부실한 게 아니라, 그 동네에서
+    # 옷을 사는 사람이 정말 그 층뿐이었다. 신뢰도 사유가 이미 셋 붙지만
+    # 문장 자체가 없는 평균을 말하면 사장님이 무게를 잘못 잡는다.
+    #
+    # 경계 3 은 수호님이 `#56` 에서 쓴 "손님 2명 이하는 가중평균이라 부를 수
+    # 없는 크기" 와 같은 값이다. 두 곳이 갈라지지 않게 맞춰 둔다.
+    how = "가중평균" if n >= 3 else "점수"
+    return [f"{note} (손님 {n}명 {how} {score:.0f}점)"]
 
 
 def evaluate(
