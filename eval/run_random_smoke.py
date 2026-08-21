@@ -10,7 +10,8 @@
 없었던 것**이다. 골든 픽스처도 역삼역 하나뿐이라 같은 눈을 갖고 있다.
 
     python eval/run_random_smoke.py                 # 60 조합 · API 0 콜
-    python eval/run_random_smoke.py --n 200         # 넓게
+    python eval/run_random_smoke.py --seeds 5       # 씨앗 5개로 넓게 훑기
+    python eval/run_random_smoke.py --n 200         # 한 씨앗에서 깊게
     python eval/run_random_smoke.py --seed 7        # 다시 같은 조합으로
     MODEL_PROFILE=openai python eval/run_random_smoke.py --n 3 --llm   # 평가까지
 
@@ -68,6 +69,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--n", type=int, default=60, help="돌려볼 조합 수")
     ap.add_argument("--seed", type=int, default=0, help="같은 조합을 다시 뽑으려면")
+    ap.add_argument(
+        "--seeds",
+        type=int,
+        default=1,
+        help="씨앗을 몇 개 돌릴지 (--seed 부터 차례로). 극단은 씨앗을 바꿔야 나온다",
+    )
     ap.add_argument("--llm", action="store_true", help="평가까지 (실제 API · 조합당 14콜)")
     args = ap.parse_args()
 
@@ -75,34 +82,48 @@ def main() -> int:
         print(f"상권 데이터가 없습니다 ({DB_PATH}).")
         return 2
 
-    rng = random.Random(args.seed)
     inds = sorted(registry.industry_ids() - {registry.OTHER})
-    picked = areas(args.n, rng)
+    seeds = list(range(args.seed, args.seed + args.seeds))
 
-    print(f"상권 {len(picked)}곳 × 무작위 업종 · seed {args.seed}")
-    print(f"API {'사용' if args.llm else '미사용'}\n")
+    print(f"상권 {args.n}곳 × 무작위 업종 × 씨앗 {len(seeds)}개 {seeds}")
+    print(f"API {'사용' if args.llm else '미사용'}")
+    if args.seeds == 1:
+        print("  ⚠️ 씨앗 하나로는 극단이 안 나온다 — 손님 1명짜리 패널은")
+        print("     씨앗 4 에서야 나왔다 (2026-08-20). 넓게 보려면 --seeds 5")
+    print()
 
     tally: Counter[str] = Counter()
     sizes: Counter[int] = Counter()
     broken: list[str] = []
+    total = 0
 
-    for area in picked:
-        kind, detail = one(area, rng.choice(inds))
-        tally[kind] += 1
-        if kind == "정상":
-            sizes[int(detail.rstrip("명"))] += 1
-        elif kind != "폴백":
-            broken.append(f"[{kind}] {detail}")
+    for seed in seeds:
+        rng = random.Random(seed)
+        for area in areas(args.n, rng):
+            total += 1
+            kind, detail = one(area, rng.choice(inds))
+            tally[kind] += 1
+            if kind == "정상":
+                sizes[int(detail.rstrip("명"))] += 1
+            elif kind != "폴백":
+                broken.append(f"[seed {seed}] [{kind}] {detail}")
 
     print(f"{'=' * 74}")
     for kind, cnt in tally.most_common():
         mark = "  " if kind in ("정상", "폴백") else "❌"
-        print(f"  {mark} {kind:<24} {cnt:>4} / {len(picked)}  ({cnt / len(picked):.0%})")
+        print(f"  {mark} {kind:<24} {cnt:>4} / {total}  ({cnt / total:.0%})")
     if sizes:
         detail = " · ".join(f"{k}명 {v}곳" for k, v in sorted(sizes.items(), reverse=True))
         print(f"\n  패널 크기   {detail}")
-        if len(sizes) > 1:
-            print("  (12명이 아닌 곳이 있다 — 매출 0 인 연령대는 손님으로 안 만든다)")
+        small = sum(v for k, v in sizes.items() if k < 12)
+        if small:
+            print(
+                f"  12명이 아닌 곳 {small} / {sum(sizes.values())} "
+                f"({small / sum(sizes.values()):.0%}) — 매출 0 인 연령대는 손님으로 안 만든다"
+            )
+        tiny = sum(v for k, v in sizes.items() if k <= 2)
+        if tiny:
+            print(f"  ⚠️ 손님 2명 이하 {tiny}곳 — 가중평균이라 부를 수 없는 크기다")
     print(f"{'=' * 74}")
 
     if broken:
