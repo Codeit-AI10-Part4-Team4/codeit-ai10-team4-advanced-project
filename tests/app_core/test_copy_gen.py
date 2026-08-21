@@ -207,3 +207,96 @@ def test_재생성해도_지어내지_말라는_지시는_남는다(store: Store
     client = FakeClient(three())
     copy_gen.generate(revised(), store, client=client)
     assert client.system is not None and "지어내지 마라" in client.system
+
+
+# ── 수량 오인 거르기 ────────────────────────────────────────
+#
+# 금액 자체는 맞는데 "무엇의 금액인가" 가 틀린 경우다. 가격 검사로는 안 잡힌다.
+
+
+def event_brief() -> AdBrief:
+    """한 캔 2,000원짜리 카스에 2+1 행사를 얹은 주문."""
+    return AdBrief(
+        goal="copy",
+        product="카스",
+        price=2000,
+        situation="2 + 1 이벤트",
+        transcript=["2000원", "2 + 1 이벤트 홍보하려고"],
+    )
+
+
+def test_한_개_값을_행사에_붙인_후보는_버린다(store: Store) -> None:
+    """2,000원은 한 캔 값이다. "2,000원에 2+1" 은 세 캔을 2,000원에 준다는 뜻이 된다."""
+    raw = {
+        "candidates": [
+            {"headline": "카스 한 잔 2,000원", "sub": "2 + 1 이벤트 진행 중"},
+            {"headline": "카스 2+1", "sub": "2,000원에 2 + 1으로 만나요"},
+        ]
+    }
+    got = copy_gen.generate(event_brief(), store, client=FakeClient(raw))
+    assert [c.headline for c in got] == ["카스 한 잔 2,000원"]
+
+
+def test_사장님이_말한_적_없는_개수는_버린다(store: Store) -> None:
+    """2+1 은 두 잔 값에 세 잔이다 — "한 잔 값에 세 잔" 은 사장님이 한 말이 아니다."""
+    raw = {"candidates": [{"headline": "카스 이벤트", "sub": "한 잔 값에 세 잔 즐기세요"}]}
+    assert copy_gen.generate(event_brief(), store, client=FakeClient(raw)) == []
+
+
+def test_한_개_값에_개수를_붙이면_버린다(store: Store) -> None:
+    raw = {"candidates": [{"headline": "크로플 두 개 4,500원"}]}
+    assert copy_gen.generate(brief(), store, client=FakeClient(raw)) == []
+
+
+def test_개수를_말하지_않은_문구는_통과한다(store: Store) -> None:
+    """거르개가 멀쩡한 문구까지 잡으면 후보가 남지 않는다."""
+    raw = {"candidates": [{"headline": "겨울 크로플", "sub": "지금 4,500원"}]}
+    assert len(copy_gen.generate(brief(), store, client=FakeClient(raw))) == 1
+
+
+def test_사장님이_바로잡은_금액은_쓸_수_있다(store: Store) -> None:
+    """다시 만들기로 하신 정정도 사장님 말이라 근거가 된다."""
+    fixed = event_brief().revised(
+        Feedback(source="typed", notes=["한 캔에 2000원이니까 2+1 행사면 카스 3캔에 4000원이다"]),
+        [],
+    )
+    raw = {"candidates": [{"headline": "카스 2+1 이벤트", "sub": "한 캔에 2,000원, 3캔에 4,000원"}]}
+    got = copy_gen.generate(fixed, store, client=FakeClient(raw))
+    assert [c.sub for c in got] == ["한 캔에 2,000원, 3캔에 4,000원"]
+
+
+def test_금액_옆에_행사표기를_붙이면_버린다(store: Store) -> None:
+    """2,000원은 한 캔 값이다 — "2,000원에 2+1" 은 세 캔을 2,000원에 준다는 뜻이 된다.
+
+    개수가 금액에 더 가까우면("2+1 행사, 한 캔 2,000원") 금액은 그 한 캔에 붙은
+    것이라 멀쩡하다. 붙은 순서가 뜻을 바꾼다.
+    """
+    raw = {
+        "candidates": [
+            {"headline": "카스 특가", "sub": "2,000원에 2+1으로 만나요!"},
+            {"headline": "카스 행사", "sub": "2+1 행사 · 한 캔 2,000원!"},
+        ]
+    }
+    got = copy_gen.generate(event_brief(), store, client=FakeClient(raw))
+    assert [c.sub for c in got] == ["2+1 행사 · 한 캔 2,000원!"]
+
+
+def test_행사를_풀어_쓴_개수는_버린다(store: Store) -> None:
+    """실제로 화면에 떴던 문구다. 2+1 은 **두 캔 값에 세 캔**이지 한 캔 값에 두 캔이 아니다."""
+    raw = {
+        "candidates": [
+            {"headline": "청량한 카스, 2+1!", "sub": "한 캔에 2000원으로 두 캔의 기쁨을!"}
+        ]
+    }
+    assert copy_gen.generate(event_brief(), store, client=FakeClient(raw)) == []
+
+
+def test_행사_표기를_바꿔_쓰면_버린다(store: Store) -> None:
+    """사장님은 2+1 이라고 하셨다. 1+1 은 다른 조건이다."""
+    raw = {"candidates": [{"headline": "카스 1+1 행사!", "sub": "시원하게 즐기세요"}]}
+    assert copy_gen.generate(event_brief(), store, client=FakeClient(raw)) == []
+
+
+def test_사장님이_쓴_행사_표기는_그대로_통과한다(store: Store) -> None:
+    raw = {"candidates": [{"headline": "카스 2+1 행사!", "sub": "청량함을 만끽하세요"}]}
+    assert len(copy_gen.generate(event_brief(), store, client=FakeClient(raw))) == 1
