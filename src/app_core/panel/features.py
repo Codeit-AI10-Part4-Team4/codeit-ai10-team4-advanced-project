@@ -122,11 +122,29 @@ def _haversine_sql() -> str:
 
 
 def match_area(con: duckdb.DuckDBPyConnection, lon: float, lat: float) -> dict[str, Any]:
-    """좌표에서 가장 가까운 상권. 거리도 함께 준다(신뢰도 판단에 쓴다)."""
+    """좌표에서 가장 가까운 상권. 거리도 함께 준다(신뢰도 판단에 쓴다).
+
+    **매출 데이터가 있는 상권만 후보로 둔다.** 상권 1,650곳 중 86곳(5.2%)은
+    `sales` 에 행이 하나도 없다. 그런 곳이 가장 가까우면 `_sales_row` 가
+    "이 상권에는 매출 데이터가 없습니다" 로 죽어 **주소가 통째로 못 쓰게 된다**
+    — 실주소 17곳으로 재보니 1곳이 여기 걸렸다 (2026-08-21).
+
+        서울 마포구 백범로 152 (공덕파크자이)
+          염리초등학교        202m   매출   0건  ← 여기로 붙어서 실패
+          공덕역(공덕오거리)   394m   매출  26건  ← 192m 더 가면 있다
+
+    빈 상권 86곳 전부, 가장 가까운 "데이터 있는 상권"이 중앙값 285m ·
+    최대 1,129m 로 `MAX_MATCH_M` 안에 있다. 즉 이 필터로 86곳이 전부
+    구제되고, 서울 밖 주소를 막는 거리 상한은 그대로 살아 있다.
+
+    빈 상권 이름은 청운초등학교·세화어린이공원·마장지하차도처럼 **주거지·생활
+    시설**이 많다. 동네 가게 사장님이 정확히 그런 곳에 있다.
+    """
     row = _one(
         con.execute(
             f"SELECT area_cd, area_nm, area_type, gu_nm, dong_nm, {_haversine_sql()} AS dist "
-            "FROM area ORDER BY dist LIMIT 1",
+            "FROM area WHERE area_cd IN (SELECT area_cd FROM sales) "
+            "ORDER BY dist LIMIT 1",
             [lat, lat, lon],
         )
     )
