@@ -28,6 +28,7 @@ import random
 import sys
 from collections import Counter
 from pathlib import Path
+from typing import Final
 
 import duckdb
 
@@ -36,8 +37,15 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from app_core import registry
 from app_core.panel.features import DB_PATH, NoTradeAreaError, build_features
-from app_core.panel.panel_builder import build_panel
+from app_core.panel.panel_builder import AGE_LABEL, build_panel
 from app_core.panel.schemas import Panel
+
+#: 매출이 전 연령대에 있을 때의 패널 크기 — 연령대 × 성별.
+#:
+#: 숫자를 박지 않는다. `12` 를 손으로 적었다가 이미 세 번 틀렸다
+#: (#40 제안 문장 · #55 대체 문장 · 이 파일). 연령대 구간이 바뀌면
+#: 여기도 같이 틀리는데 그때는 아무도 못 본다.
+FULL: Final = len(AGE_LABEL) * 2
 
 
 def areas(n: int, rng: random.Random) -> list[tuple[str, str, float, float]]:
@@ -78,6 +86,13 @@ def main() -> int:
     ap.add_argument("--llm", action="store_true", help="평가까지 (실제 API · 조합당 14콜)")
     args = ap.parse_args()
 
+    # 0 을 주면 루프가 통째로 안 돌고 `broken` 도 비어서 초록불이 난다.
+    # 사람이 직접 치는 동안은 눈에 띄지만, CI 에 들어간 뒤 인자가 잘못
+    # 넘어가면 검사가 **조용히 통과한다** (아인님 지적 2026-08-20).
+    if args.seeds < 1 or args.n < 1:
+        print("--seeds 와 --n 은 1 이상이어야 한다 (0 이면 아무것도 안 재고 통과한다).")
+        return 2
+
     if not DB_PATH.exists():
         print(f"상권 데이터가 없습니다 ({DB_PATH}).")
         return 2
@@ -115,10 +130,10 @@ def main() -> int:
     if sizes:
         detail = " · ".join(f"{k}명 {v}곳" for k, v in sorted(sizes.items(), reverse=True))
         print(f"\n  패널 크기   {detail}")
-        small = sum(v for k, v in sizes.items() if k < 12)
+        small = sum(v for k, v in sizes.items() if k < FULL)
         if small:
             print(
-                f"  12명이 아닌 곳 {small} / {sum(sizes.values())} "
+                f"  {FULL}명이 아닌 곳 {small} / {sum(sizes.values())} "
                 f"({small / sum(sizes.values()):.0%}) — 매출 0 인 연령대는 손님으로 안 만든다"
             )
         tiny = sum(v for k, v in sizes.items() if k <= 2)
