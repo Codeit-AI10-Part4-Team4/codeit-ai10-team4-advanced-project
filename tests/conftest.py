@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from app_core import db
+from app_core import db, gen_background, image_backend
 from app_core.panel.schemas import Panel
 from app_core.schema import Store
 
@@ -38,6 +38,22 @@ def clean_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     db.reset()
     yield
     db.reset()
+
+
+@pytest.fixture(autouse=True)
+def no_real_image_backends(monkeypatch: pytest.MonkeyPatch) -> None:
+    """대역을 빼먹은 테스트의 실제 sd-turbo·OpenAI 호출을 차단한다.
+
+    2026-08-19에 옛 대역이 남은 테스트가 sd-turbo를 진짜로 로드한 적이 있다.
+    실제 모델이나 API를 부르려 하면 즉시 AssertionError로 막는다.
+    """
+
+    def _boom(*_a: object, **_k: object) -> object:
+        raise AssertionError("테스트가 실제 이미지 모델/API를 부르려 했습니다 — 대역을 씌우세요")
+
+    monkeypatch.setattr(gen_background, "_load_pipe", _boom)
+    monkeypatch.setattr(image_backend, "_openai_scene", _boom)
+    image_backend._notices.clear()
 
 
 @pytest.fixture
