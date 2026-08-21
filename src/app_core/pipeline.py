@@ -196,6 +196,7 @@ def prepare_materials(
         photo is not None
         and route in ("cutout", "generate")
         and brief.sketch_id is None
+        and brief.ref_id is None
         and image_profile() == "openai"
     ):
         return SimpleMaterials(

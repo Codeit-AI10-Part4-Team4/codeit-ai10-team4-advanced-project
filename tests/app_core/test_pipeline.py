@@ -500,6 +500,31 @@ def test_사진과_스케치를_같이_올려도_제품이_하나다(tmp_path, m
     assert seen["누끼"] is True  # 제품은 누끼 한 번만
 
 
+def test_레퍼런스를_같이_주면_보정_대신_기존_경로로_간다(tmp_path, monkeypatch):
+    """레퍼런스도 명시 지시다 — edit 프롬프트가 분위기를 전달할 수 없어 기존 경로를 지킨다."""
+    _cutout_ready(tmp_path, monkeypatch)
+    monkeypatch.setenv("IMAGE_PROFILE", "openai")
+    monkeypatch.setattr(pipeline.photo_store, "load", lambda pid: (b"x", "image/png"))
+    monkeypatch.setattr(pipeline.ref_style, "describe_style", lambda *a, **k: "warm light")
+
+    def _no_edit(*a, **k):
+        raise AssertionError("레퍼런스 주문인데 보정으로 갔다")
+
+    monkeypatch.setattr(pipeline, "edit_photo", _no_edit)
+    seen = {}
+
+    def _bg(prompt):
+        seen["prompt"] = prompt
+        return Image.new("RGB", (1080, 1080))
+
+    _both_backends(monkeypatch, _bg)
+    materials = pipeline.prepare_materials(
+        _brief().model_copy(update={"photo_id": 7, "ref_id": 8}), _store(), "simple"
+    )
+    assert materials.product is not None  # 기존 누끼+배경 경로
+    assert "warm light" in seen["prompt"]  # 레퍼런스 분위기가 실제로 반영됐다
+
+
 def test_스케치만_있으면_스케치가_제품을_그린다(tmp_path, monkeypatch):
     """얹을 누끼가 없으니 스케치가 상품을 그려야 한다."""
     _photo_dir(tmp_path, monkeypatch)
