@@ -69,7 +69,7 @@
       "persona_id": "p01",
       "demo": "10대 남성",
       "axes": {
-        "price_sens": "mid",
+        "price_sens": "high",
         "motive": "habitual",
         "time": "evening"
       },
@@ -95,7 +95,7 @@
       "persona_id": "p02",
       "demo": "10대 여성",
       "axes": {
-        "price_sens": "mid",
+        "price_sens": "high",
         "motive": "habitual",
         "time": "evening"
       },
@@ -329,7 +329,7 @@
       "persona_id": "p11",
       "demo": "60대 남성",
       "axes": {
-        "price_sens": "mid",
+        "price_sens": "low",
         "motive": "habitual",
         "time": "evening"
       },
@@ -355,7 +355,7 @@
       "persona_id": "p12",
       "demo": "60대 여성",
       "axes": {
-        "price_sens": "mid",
+        "price_sens": "low",
         "motive": "habitual",
         "time": "evening"
       },

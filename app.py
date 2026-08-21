@@ -9,8 +9,9 @@
 from __future__ import annotations
 
 import io
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, NamedTuple
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 from PIL import Image
@@ -607,7 +608,7 @@ def _save_and_download(
     col_dl.download_button(
         "다운로드",
         data=buf.getvalue(),
-        file_name=f"{store.name}_{product}_{label}_{datetime.now(UTC):%Y%m%d}.png",
+        file_name=f"{store.name}_{product}_{label}_{datetime.now(ZoneInfo('Asia/Seoul')):%Y%m%d}.png",
         mime="image/png",
         key=f"dl_{style}",
     )

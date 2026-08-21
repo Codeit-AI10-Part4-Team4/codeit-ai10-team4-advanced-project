@@ -105,3 +105,39 @@ def test_문구만_바꾸면_재료를_다시_만들지_않는다(monkeypatch: p
 
     assert app._make_images(_store(), _brief()) is True
     assert prepare_calls == []  # 재료 재사용 — 배경 생성·기획이 다시 돌지 않았다
+
+
+def test_다운로드_파일명_날짜는_한국_시간으로_찍는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """UTC 로 찍으면 한국 오전 9시 전에 만든 광고가 전날 파일명이 된다 — #47 리뷰(아인님)."""
+    from datetime import datetime as real_datetime
+    from zoneinfo import ZoneInfo
+
+    from PIL import Image
+
+    from app_core.schema import Store, StoreInput
+
+    asked: dict[str, Any] = {}
+
+    class _FakeDatetime:
+        @staticmethod
+        def now(tz: Any = None) -> Any:
+            asked["tz"] = tz
+            return real_datetime(2026, 8, 21, 0, 30, tzinfo=tz)
+
+    class _Col:
+        def button(self, *a: Any, **kw: Any) -> bool:
+            return False
+
+        def download_button(self, *a: Any, **kw: Any) -> None:
+            asked["file_name"] = kw["file_name"]
+
+    monkeypatch.setattr(app.st, "session_state", FakeState())
+    monkeypatch.setattr(app.st, "columns", lambda n: (_Col(), _Col()))
+    monkeypatch.setattr(app, "datetime", _FakeDatetime)
+
+    base = StoreInput(industry="cafe", name="테스트카페", address="서울 강남구 테헤란로 152")
+    store = Store(**base.model_dump(), id=1, user_id=1)
+    app._save_and_download(store, "크로플", "simple", "감성 피드형", Image.new("RGB", (1, 1)))
+
+    assert asked["tz"] == ZoneInfo("Asia/Seoul")  # 서울 시간으로 물었는가 — 이게 계약
+    assert "20260821" in asked["file_name"]
