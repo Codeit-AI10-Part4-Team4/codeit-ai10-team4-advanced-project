@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import base64
 import io
+import sys
+from types import ModuleType
 
 import pytest
 from PIL import Image
@@ -99,8 +101,6 @@ def test_OpenAI_편집호출에_PNG와_상품보존_계약을_전달한다(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """실 SDK 표면을 대역으로 호출해 파일·인자·프롬프트 모양을 고정한다."""
-    import openai
-
     output = io.BytesIO()
     Image.new("RGB", (16, 16), (9, 8, 7)).save(output, format="PNG")
     encoded = base64.b64encode(output.getvalue()).decode()
@@ -114,7 +114,10 @@ def test_OpenAI_편집호출에_PNG와_상품보존_계약을_전달한다(
     class _Client:
         images = _Images()
 
-    monkeypatch.setattr(openai, "OpenAI", lambda: _Client())
+    fake_openai = ModuleType("openai")
+    fake_openai.__dict__["OpenAI"] = _Client
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+
     monkeypatch.setattr(image_backend, "_openai_edit", _REAL_OPENAI_EDIT)
 
     result = image_backend._openai_edit(
