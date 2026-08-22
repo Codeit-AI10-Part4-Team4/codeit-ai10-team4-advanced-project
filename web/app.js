@@ -23,6 +23,8 @@ const S = {
   tone: null,        // 고른 말투
   shots: {},         // { 칸: objectURL } — 올린 사진
   saved: {},         // { 형태: true } — 저장한 이미지
+  stores: [],        // 새로 등록한 가게
+  revised: null,     // 마지막으로 고쳐달라고 한 말
 };
 
 // ── 도구 ─────────────────────────────────────────────────────
@@ -59,6 +61,35 @@ function band(people, { legend = true } = {}) {
       aria-label="손님 ${people.length}명. 점 크기는 매출 비중입니다.">${dots}</div>${keys}</div>`;
 }
 
+// ── 다시 만들기 ──────────────────────────────────────────────
+// 사장님이 "뭘 원하세요"엔 답을 못 해도 "이거 어때요"엔 답한다.
+// 그래서 한 번에 맞히려 하지 않고 고쳐가는 길을 둔다 (revise_view).
+// 문구 화면과 손님 반응 화면 둘 다에 붙는다 — 두 벌로 만들면 서로 다르게 늙는다.
+
+function revise({ suggestions = null } = {}) {
+  return `
+    <section class="rule">
+      <h2 class="h2">마음에 안 드시면 고쳐드릴게요</h2>
+      <div class="chips">
+        ${M.revisionOptions.map((o) => `<button class="chip" data-revise="${esc(o)}">${esc(o)}</button>`).join('')}
+      </div>
+      <form class="compose" data-revise-form style="margin-top:12px">
+        <div class="field" style="flex:1">
+          <input name="say" placeholder="예: 좀 더 밝게" aria-label="어떻게 고칠지" autocomplete="off">
+        </div>
+        <button class="btn" style="width:auto;padding:12px 20px">보내기</button>
+      </form>
+      ${suggestions ? `
+        <div class="rule" style="margin-top:20px">
+          <p class="eyebrow">손님들의 제안</p>
+          <ul class="facts" style="gap:11px">
+            ${suggestions.map((s) => `<li style="border-left-color:var(--accent-soft)">${s}</li>`).join('')}
+          </ul>
+          <button class="btn" style="margin-top:16px" data-revise="제안 반영">제안 반영해 다시 만들기</button>
+        </div>` : ''}
+    </section>`;
+}
+
 // ── 화면 ─────────────────────────────────────────────────────
 
 const SCREENS = {
@@ -83,12 +114,33 @@ const SCREENS = {
         <button class="btn" data-go="stores">로그인</button>
         <p class="muted" style="text-align:center">
           아직 계정이 없으신가요?
-          <button class="btn--ghost" style="border:0;background:none;cursor:pointer;font-weight:600;padding:4px" data-go="stores">가입하기</button>
+          <button class="btn--ghost" style="border:0;background:none;cursor:pointer;font-weight:600;padding:4px" data-go="signup">가입하기</button>
         </p>
         <!-- 로그인 화면엔 상단 바가 없어서 화면 목록으로 갈 길이 여기밖에 없다 -->
         <p class="muted rule" style="text-align:center">
           <button class="btn--ghost" style="border:0;background:none;cursor:pointer;padding:6px;color:var(--ink-3)" data-drawer>전체 화면 목록 보기</button>
         </p>
+      </div>`,
+  },
+
+  signup: {
+    title: '가입하기',
+    bar: true, back: 'login',
+    render: () => `
+      <div class="stack">
+        <div>
+          <h2 class="h2" style="font-size:21px">가게 하나만 있으면 시작할 수 있어요</h2>
+          <p class="muted">가게는 가입한 뒤에 등록합니다.</p>
+        </div>
+        <div class="stack--s">
+          <div class="field"><label for="su-em">이메일</label>
+            <input id="su-em" type="email" inputmode="email" autocomplete="email" placeholder="sajang@example.com"></div>
+          <div class="field"><label for="su-pw">비밀번호</label>
+            <input id="su-pw" type="password" autocomplete="new-password" placeholder="8자 이상"></div>
+          <div class="field"><label for="su-pw2">비밀번호 확인</label>
+            <input id="su-pw2" type="password" autocomplete="new-password"></div>
+        </div>
+        <button class="btn" data-go="storeNew">가입하고 가게 등록하기</button>
       </div>`,
   },
 
@@ -102,7 +154,7 @@ const SCREENS = {
           <p class="muted">가게 주소로 그 동네 손님을 부릅니다.</p>
         </div>
         <div class="stack--s">
-          ${M.stores.map((s) => `
+          ${[...M.stores, ...S.stores].map((s) => `
             <button class="card card--tap" data-go="chat">
               <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">
                 <strong style="font-size:16px">${esc(s.name)}</strong>
@@ -111,8 +163,50 @@ const SCREENS = {
               <span class="muted">${esc(s.address)}</span>
             </button>`).join('')}
         </div>
-        <button class="btn btn--line" data-go="chat">새 가게 등록하기</button>
+        <button class="btn btn--line" data-go="storeNew">새 가게 등록하기</button>
+
+        <section class="rule">
+          <h2 class="h2">최근에 만든 광고</h2>
+          <div class="stack--s">
+            ${M.recent.map((a) => `
+              <div class="card" style="gap:4px">
+                <span class="data">${esc(a.at)} · ${esc(a.product)}</span>
+                <strong style="font-size:15px;font-weight:600">${esc(a.headline)}</strong>
+              </div>`).join('')}
+          </div>
+        </section>
       </div>`,
+  },
+
+  storeNew: {
+    title: '새 가게 등록',
+    bar: true, back: 'stores',
+    render: () => `
+      <form class="stack" data-store-new>
+        <div class="field"><label for="sn-name">상호</label>
+          <input id="sn-name" name="name" placeholder="행복한 순대국" required></div>
+
+        <div class="field">
+          <label for="sn-ind">업종</label>
+          <select id="sn-ind" name="industry" required>
+            <option value="" disabled selected>골라주세요</option>
+            ${M.industries.map((i) => `<option value="${esc(i.label)}">${i.emoji} ${esc(i.label)}</option>`).join('')}
+          </select>
+          <!-- 업종은 손님 패널이 그 동네 같은 업종 매출을 찾는 열쇠다.
+               맞는 업종이 없으면 동네 전체 평균으로 떨어져 객단가가 통째로 달라진다. -->
+          <p class="muted">고른 업종으로 그 동네 <b>같은 업종 손님</b>을 찾습니다.
+            맞는 게 없으면 동네 전체 평균으로 봅니다.</p>
+        </div>
+
+        <div class="field"><label for="sn-addr">주소</label>
+          <input id="sn-addr" name="address" placeholder="서울시 마포구 망원동 123-4" required>
+          <p class="muted">주소로 상권을 찾습니다. 지번·도로명 다 됩니다.</p></div>
+
+        <div class="field"><label for="sn-tel">연락처</label>
+          <input id="sn-tel" name="tel" type="tel" inputmode="tel" placeholder="02-000-0000"></div>
+
+        <button class="btn">등록하고 광고 만들기</button>
+      </form>`,
   },
 
   chat: {
@@ -144,9 +238,10 @@ const SCREENS = {
         </form>
 
         <div class="rule stack--s">
-          <button class="btn btn--line" data-go="photos">📷 사진 넣기 — 선택</button>
-          <button class="btn" data-go="panel">동네 손님들에게 보여주기</button>
-          <p class="muted" style="text-align:center">손님 12명이 문구 후보 셋을 봅니다. 1분쯤 걸립니다.</p>
+          <button class="btn btn--line" data-go="photos">
+            📷 사진 넣기 ${Object.keys(S.shots).length ? `— ${Object.keys(S.shots).length}장 넣음` : '— 선택'}
+          </button>
+          <button class="btn" data-go="copy">광고 문구 만들기</button>
         </div>
       </div>`,
   },
@@ -190,9 +285,42 @@ const SCREENS = {
     },
   },
 
+  // 문구 만들기와 손님 평가는 실제로도 두 단계다 — 평가가 비싸기 때문이다.
+  // 후보 1건당 손님 12명을 부르니 셋이면 36콜. 문구만 보고 마음에 안 들면
+  // 평가 없이 여기서 바로 다시 만들 수 있어야 한다.
+  copy: {
+    title: '문구 후보',
+    bar: true, back: 'chat',
+    render: () => `
+      <div class="stack">
+        ${S.revised ? `<div class="note note--accent">“${esc(S.revised)}”로 다시 만들었습니다.</div>` : ''}
+        <div>
+          <h2 class="h2" style="margin-bottom:2px">셋 중에 눈에 들어오는 게 있나요?</h2>
+          <p class="muted">고르기 전에 동네 손님들 반응을 먼저 들어보실 수 있습니다.</p>
+        </div>
+
+        <div class="stack--s">
+          ${M.copies.map((c) => `
+            <div class="card">
+              <strong style="font-size:18px;letter-spacing:-.02em;line-height:1.35">${esc(c.headline)}</strong>
+              <span class="muted" style="font-size:14px">${esc(c.sub)}</span>
+              ${c.defects.map((d) => `<div class="note note--flag" style="font-size:13px">⚠ ${esc(d)}</div>`).join('')}
+              <button class="btn btn--line btn--sm" data-go="image">이걸로 할게요</button>
+            </div>`).join('')}
+        </div>
+
+        <div class="rule stack--s">
+          <button class="btn" data-go="panel">동네 손님들에게 셋 다 보여주기</button>
+          <p class="muted" style="text-align:center">손님 12명이 셋을 다 봅니다. 1분쯤 걸립니다.</p>
+        </div>
+
+        ${revise()}
+      </div>`,
+  },
+
   panel: {
     title: '손님 반응',
-    bar: true, back: 'chat',
+    bar: true, back: 'copy',
     render: () => {
       const r = M.result;
       const people = r.persona_comments;
@@ -284,13 +412,7 @@ const SCREENS = {
           </ul>
         </section>
 
-        <section class="rule">
-          <h2 class="h2">이렇게 해보시면 어떨까요</h2>
-          <ul class="facts" style="gap:11px">
-            ${r.suggestions.map((s) => `<li style="border-left-color:var(--accent-soft)">${s}</li>`).join('')}
-          </ul>
-          <button class="btn" style="margin-top:16px" data-go="chat">제안 반영해 다시 만들기</button>
-        </section>
+        ${revise({ suggestions: r.suggestions })}
 
         <p class="muted rule">
           손님 ${total}명 중 ${r.excluded_cnt}명은 근거를 대지 못해 셈에서 뺐습니다.<br>
@@ -338,12 +460,15 @@ const SCREENS = {
 };
 
 const ORDER = [
-  ['login',  '로그인'],
-  ['stores', '내 가게'],
-  ['chat',   '대화 — 광고 만들기'],
-  ['photos', '사진 넣기'],
-  ['panel',  '손님 반응'],
-  ['image',  '광고 이미지'],
+  ['login',    '로그인'],
+  ['signup',   '가입하기'],
+  ['stores',   '내 가게'],
+  ['storeNew', '새 가게 등록'],
+  ['chat',     '대화 — 광고 만들기'],
+  ['photos',   '사진 넣기'],
+  ['copy',     '문구 후보'],
+  ['panel',    '손님 반응'],
+  ['image',    '광고 이미지'],
 ];
 
 // ── 라우팅 ───────────────────────────────────────────────────
@@ -376,7 +501,13 @@ function route() {
   drawList(name);
 }
 
-const go = (name) => { location.hash = `#/${name}`; };
+/** 같은 화면으로 가려 하면 hashchange 가 안 떠서 다시 그려지지 않는다 —
+ *  문구 화면에서 "다시 만들기"를 누르면 아무 일도 안 일어나던 이유다. */
+const go = (name) => {
+  const next = `#/${name}`;
+  if (location.hash === next) route();
+  else location.hash = next;
+};
 
 // ── 이벤트 ───────────────────────────────────────────────────
 
@@ -400,6 +531,10 @@ document.addEventListener('click', (e) => {
     route(); return;
   }
 
+  // 다시 만들기 — 문구를 새로 뽑아 문구 화면으로 되돌린다
+  const rev = e.target.closest('[data-revise]');
+  if (rev) { S.revised = rev.dataset.revise; go('copy'); toast('다시 만들었습니다'); return; }
+
   const save = e.target.closest('[data-save]');
   if (save) { S.saved[save.dataset.save] = true; route(); toast('저장했습니다'); return; }
 
@@ -418,13 +553,36 @@ document.addEventListener('change', (e) => {
 });
 
 document.addEventListener('submit', (e) => {
-  const form = e.target.closest('[data-send]');
+  const form = e.target.closest('form');
   if (!form) return;
-  e.preventDefault();                       // 새로고침되면 대화가 날아간다
-  const text = form.say.value.trim();
-  if (!text) return;
-  S.said.push({ who: 'me', text });
-  route();
+  e.preventDefault();                       // 새로고침되면 쓰던 게 다 날아간다
+
+  if (form.matches('[data-send]')) {
+    const text = form.say.value.trim();
+    if (!text) return;
+    S.said.push({ who: 'me', text });
+    route();
+    return;
+  }
+
+  if (form.matches('[data-revise-form]')) {
+    const text = form.say.value.trim();
+    if (!text) return;
+    S.revised = text;
+    go('copy');
+    toast('다시 만들었습니다');
+    return;
+  }
+
+  if (form.matches('[data-store-new]')) {
+    S.stores.push({
+      name: form.name.value.trim(),
+      industry: form.industry.value,
+      address: form.address.value.trim(),
+    });
+    go('chat');
+    toast('가게를 등록했습니다');
+  }
 });
 
 document.addEventListener('keydown', (e) => {

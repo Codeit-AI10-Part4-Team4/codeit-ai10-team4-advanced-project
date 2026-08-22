@@ -14,6 +14,53 @@ window.MOCK = {
     { id: 3, name: '마포 커피숍',   industry: '카페', address: '서울시 마포구 합정동 88-2' },
   ],
 
+  // registry.industry_options() 그대로 32종.
+  // 사장님이 고른 업종이 손님 패널의 업종 폴백 여부를 가른다 — 정확도의 입구다.
+  industries: [
+    { id: 'korean_food', label: '한식음식점', emoji: '🍚' },
+    { id: 'cafe', label: '카페·디저트', emoji: '☕' },
+    { id: 'snack', label: '분식·간이음식', emoji: '🍢' },
+    { id: 'chicken', label: '치킨전문점', emoji: '🍗' },
+    { id: 'pub', label: '호프·주점', emoji: '🍺' },
+    { id: 'bakery', label: '제과점·베이커리', emoji: '🥐' },
+    { id: 'chinese_food', label: '중식음식점', emoji: '🥟' },
+    { id: 'grill', label: '고기·구이전문점', emoji: '🥩' },
+    { id: 'japanese_food', label: '일식·횟집', emoji: '🍣' },
+    { id: 'pizza_burger', label: '피자·햄버거', emoji: '🍕' },
+    { id: 'western_food', label: '양식음식점', emoji: '🍝' },
+    { id: 'convenience', label: '편의점', emoji: '🏪' },
+    { id: 'clothing', label: '옷가게', emoji: '👕' },
+    { id: 'cosmetics', label: '화장품 가게', emoji: '💄' },
+    { id: 'grocery', label: '슈퍼마켓·식료품', emoji: '🛒' },
+    { id: 'butcher', label: '정육점', emoji: '🥓' },
+    { id: 'produce', label: '청과·채소', emoji: '🍎' },
+    { id: 'sidedish', label: '반찬가게', emoji: '🥗' },
+    { id: 'flower', label: '꽃집·화원', emoji: '💐' },
+    { id: 'petshop', label: '애견샵·펫용품', emoji: '🐶' },
+    { id: 'optician', label: '안경점', emoji: '👓' },
+    { id: 'salon', label: '미용실', emoji: '💇' },
+    { id: 'nail', label: '네일·속눈썹', emoji: '💅' },
+    { id: 'skincare', label: '피부관리·에스테틱', emoji: '🧖' },
+    { id: 'academy', label: '학원·교습소', emoji: '📚' },
+    { id: 'fitness', label: '헬스장·필라테스', emoji: '🏋️' },
+    { id: 'laundry', label: '세탁소', emoji: '🧺' },
+    { id: 'realestate', label: '부동산중개', emoji: '🏠' },
+    { id: 'carrepair', label: '자동차정비', emoji: '🔧' },
+    { id: 'pharmacy', label: '약국', emoji: '💊' },
+    { id: 'photostudio', label: '사진관', emoji: '📷' },
+    { id: 'other', label: '기타 (직접 입력)', emoji: '✏️' },
+  ],
+
+  // copy_gen.REVISION_OPTIONS 그대로.
+  // 사장님이 "뭘 원하세요"엔 답을 못 해도 "이거 어때요"엔 답한다.
+  revisionOptions: ['더 짧게', '더 힘있게', '더 부드럽게', '가격을 강조해서', '아예 다른 느낌으로'],
+
+  // ads.recent()
+  recent: [
+    { at: '8월 19일', product: '왕만두', headline: '점심에 딱, 갓 쪄낸 왕만두' },
+    { at: '8월 12일', product: '순대국', headline: '비 오는 날 생각나는 그 국물' },
+  ],
+
   // 대화 화면 — chat.respond 가 돌려주는 턴을 흉내낸다
   turns: [
     { who: 'ai', text: '어떤 메뉴를 알리고 싶으세요?' },
