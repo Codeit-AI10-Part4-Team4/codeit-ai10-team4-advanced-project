@@ -110,3 +110,28 @@ def test_other_labels_are_never_flagged() -> None:
 
 def test_empty_input() -> None:
     assert price_contradictions([]) == []
+
+
+#: 2026-08-21 실측 — 칭찬이 **상품**을 가리키는데 가격 칭찬으로 오독했다.
+#: 어미까지 봤지만 "무엇을 칭찬하는지" 는 안 보고 있었다. 두 번째 오탐이다.
+PRAISES_THE_PRODUCT = [
+    "평양냉면이 매력적이긴 한데, 가격이 너무 높아서 고민이 됩니다.",
+    "평양냉면이 매력적이긴 한데, 가격이 18,000원이어서 부담스러워요.",
+    "크로플이 맛있어 보이는데, 가격이 적당한지 고민이 되네요.",
+]
+
+
+def test_praise_of_the_product_is_not_praise_of_the_price() -> None:
+    """ "평양냉면이 매력적" 은 가격 칭찬이 아니다.
+
+    절을 나눠 **같은 절 안에 가격 말과 칭찬이 함께 있을 때만** 센다.
+    "A 는 매력적인데, 가격이 높다" 는 두 절이 각각 하나씩만 갖는다.
+    """
+    pairs = [(c, "price") for c in PRAISES_THE_PRODUCT]
+    assert price_contradictions(pairs) == []
+
+
+def test_praise_of_the_price_still_caught() -> None:
+    """가격을 가리키며 괜찮다고 한 것은 그대로 잡는다."""
+    pairs = [(c, "price") for c in CHEAP_AD_REAL_REASON_ELSEWHERE]
+    assert len(price_contradictions(pairs)) == len(CHEAP_AD_REAL_REASON_ELSEWHERE)

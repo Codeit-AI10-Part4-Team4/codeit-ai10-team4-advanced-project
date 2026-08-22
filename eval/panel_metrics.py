@@ -9,6 +9,7 @@ AI 패널이 실제 사람 평가를 얼마나 따라가는지 재는 데 쓴다
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Sequence
 from math import sqrt
 from typing import Final
@@ -78,12 +79,28 @@ def mean_absolute_error(pred: Sequence[float], truth: Sequence[float]) -> float:
 #: 그래서 단정형 어미까지 붙여 놓는다. 늘리기 전에 아래 테스트의 실측
 #: 코멘트로 반드시 확인할 것.
 PRICE_OK: Final = (
-    "괜찮지만", "괜찮은데", "괜찮고", "괜찮아서",
-    "적당하지만", "적당한데", "적당해", "적당하고",
-    "저렴해서", "저렴하지만", "저렴한데", "저렴하고",
-    "매력적이지만", "매력적이긴", "매력적인데", "매력적이라",
-    "합리적이지만", "합리적인데",
-    "싸지만", "싼데", "부담 없", "부담스럽지 않",
+    "괜찮지만",
+    "괜찮은데",
+    "괜찮고",
+    "괜찮아서",
+    "적당하지만",
+    "적당한데",
+    "적당해",
+    "적당하고",
+    "저렴해서",
+    "저렴하지만",
+    "저렴한데",
+    "저렴하고",
+    "매력적이지만",
+    "매력적이긴",
+    "매력적인데",
+    "매력적이라",
+    "합리적이지만",
+    "합리적인데",
+    "싸지만",
+    "싼데",
+    "부담 없",
+    "부담스럽지 않",
 )
 
 
@@ -97,12 +114,32 @@ def price_contradictions(pairs: Iterable[tuple[str, str]]) -> list[str]:
     가격뿐이다. 결함인 것은 **가격이 괜찮다고 말해 놓고 가격을 걸림돌로
     고르는 것**이다. 그건 광고가 아니라 프롬프트를 보고 답했다는 뜻이다.
 
+    ⚠️ **칭찬이 무엇을 가리키는지 본다.** 어미만 보면 상품 칭찬을 가격
+    칭찬으로 오독한다 (실측 2026-08-21, 2건):
+
+        "평양냉면이 매력적이긴 한데, 가격이 너무 높아서 고민이 됩니다"
+         └─ 매력적인 것은 냉면이지 가격이 아니다
+
+    그래서 절을 나눠 **같은 절 안에 가격 말과 칭찬이 함께 있을 때만** 센다.
+
     낱말 맞추기라 완벽하지 않다. **판정이 아니라 계기판으로 쓴다** —
-    놓치는 쪽(거짓 음성)으로 기울여 두었다. 잘못 울리는 계기판은
-    안 울리는 것보다 나쁘다.
+    놓치는 쪽으로 기울여 두었다. 잘못 울리는 계기판은 안 울리는 것보다 나쁘다.
     """
-    return [
-        comment
-        for comment, label in pairs
-        if label == "price" and any(word in comment for word in PRICE_OK)
-    ]
+    return [comment for comment, label in pairs if label == "price" and _praises_price(comment)]
+
+
+#: 절을 가르는 자리. "A 는 좋은데, B 가 걸린다" 의 쉼표·역접이다.
+_CLAUSE: Final = re.compile(r"[,·]|(?<=지만)|(?<=한데)|(?<=는데)|(?<=아서)|(?<=어서)")
+
+#: 가격을 가리키는 말. 이 말이 없는 절의 칭찬은 상품 칭찬이다.
+PRICE_WORDS: Final = ("가격", "값", "원")
+
+
+def _praises_price(comment: str) -> bool:
+    """가격을 가리키면서 괜찮다고 단정한 절이 있는가."""
+    for clause in _CLAUSE.split(comment):
+        if not clause:
+            continue
+        if any(p in clause for p in PRICE_WORDS) and any(w in clause for w in PRICE_OK):
+            return True
+    return False
