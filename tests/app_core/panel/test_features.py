@@ -128,3 +128,44 @@ def test_표본이_충분하면_업종_값을_쓴다() -> None:
     f = build_features("", "cafe", coord=YEOKSAM)
     assert f["is_category_fallback"] is False
     assert f["avg_ticket"] > 0
+
+
+def test_매출이_없는_상권으로는_붙지_않는다() -> None:
+    """상권 1,650곳 중 86곳은 `sales` 에 행이 없다. 거기 붙으면 주소가 죽는다.
+
+    실측(2026-08-21) 서울 마포구 백범로 152 — 공덕 한복판인데 모든 업종에서
+    `NoTradeAreaError` 였다. 염리초등학교(202m·매출 0건)로 붙었기 때문이고,
+    공덕역(394m)에는 매출 26건이 멀쩡히 있었다.
+
+    빈 상권 **자기 좌표**에서 조회해도 데이터 있는 상권으로 넘어가야 한다.
+    """
+    import duckdb
+
+    from app_core.panel.features import match_area
+
+    con = duckdb.connect(str(DB_PATH), read_only=True)
+    try:
+        empty = con.execute(
+            "SELECT area_nm, lon, lat FROM area WHERE area_cd NOT IN (SELECT area_cd FROM sales)"
+        ).fetchall()
+        assert empty, "매출 0건 상권이 없다 — 이 테스트의 전제가 사라졌다"
+
+        for area_nm, lon, lat in empty:
+            got = match_area(con, lon, lat)
+            assert got["area_nm"] != area_nm, f"{area_nm} 로 그대로 붙었다"
+            cnt = con.execute(
+                "SELECT count(*) FROM sales WHERE area_cd = ?", [got["area_cd"]]
+            ).fetchone()[0]
+            assert cnt > 0, f"{area_nm} → {got['area_nm']} 인데 매출이 없다"
+    finally:
+        con.close()
+
+
+def test_서울_밖_주소는_여전히_막힌다() -> None:
+    """빈 상권을 걸러도 `MAX_MATCH_M` 은 살아 있어야 한다.
+
+    후보를 좁히면 최근접 거리가 늘어나므로, 거리 상한이 헐거워지는 방향이
+    아니라 오히려 더 조여지는 쪽이다. 부산 좌표로 확인한다.
+    """
+    with pytest.raises(NoTradeAreaError, match="서울 안의 주소가 아닌"):
+        build_features("", "cafe", coord=(129.1603, 35.1587))  # 부산 해운대
