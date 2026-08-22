@@ -16,6 +16,7 @@ from app_core.panel.contrast import (
     composition_note,
     contrast,
     price_note,
+    price_visible,
     timing_note,
     weakest,
     weekend_note,
@@ -65,15 +66,47 @@ def test_근거가_전부_실제값과_일치한다() -> None:
 
 
 def test_가격을_안_적으면_가격_대조가_없다() -> None:
-    assert price_note(_features(), AdBrief(goal="copy", product="크로플", price=0)) is None
+    zero = AdBrief(goal="copy", product="크로플", price=0)
+    assert price_note(_features(), zero, CopyCandidate(headline="크로플 6,000원")) is None
+    # 가격을 정했어도 문구에 안 실리면 견줄 것이 없다 (2026-08-20)
+    assert price_note(_features(), BRIEF, CopyCandidate(headline="갓 구운 크로플")) is None
 
 
 def test_객단가와_광고가격을_나란히_보여준다() -> None:
-    note = price_note(_features(), BRIEF)
+    note = price_note(_features(), BRIEF, CopyCandidate(headline="크로플 6,000원"))
     assert note is not None
     assert "6,000원" in note.text  # 광고가 적은 값
     assert "9,546원" in note.text  # 동네 실측값
     assert "비쌉" not in note.text and "저렴" not in note.text  # 판정하지 않는다
+
+
+def test_광고에_금액이_보일_때만_가격이_보인다() -> None:
+    """`show_price` 는 "입력했나"만 본다 — 문구에 실렸는지는 여기서 본다.
+
+    2026-08-20 실측: 가격만 바꾼 포스터 세 장 어디에도 금액이 없었는데
+    패널은 `price` 비중을 5.6% / 66.7% / 100% 로 갈랐다. 손님이 못 보는 값으로
+    판정한 것이다.
+    """
+    brief = AdBrief(goal="copy", product="크로플", price=6000)
+
+    assert price_visible(brief, CopyCandidate(headline="크로플 6,000원"))
+    assert price_visible(brief, CopyCandidate(headline="갓 구운 크로플", sub="6,000원"))
+
+    # 금액이 아예 없다 — 지금 대부분의 문구가 이 경우다
+    assert not price_visible(brief, CopyCandidate(headline="점심 10분 컷, 크로플"))
+    # 사장님이 정한 적 없는 금액이다 (price_text_note ③ 가 따로 짚는다)
+    assert not price_visible(brief, CopyCandidate(headline="크로플 8,900원"))
+    # 정한 값이 있어도 **다른 금액이 섞이면** 닫는다 (귀한님 지적, PR #50 리뷰)
+    assert not price_visible(brief, CopyCandidate(headline="크로플 6,000원, 원래 8,900원"))
+    # 한글 단위 금액도 읽는다 — "1만 5천원" 을 15,000 하나로 본다
+    pricey = AdBrief(goal="copy", product="크로플", price=15000)
+    assert price_visible(pricey, CopyCandidate(headline="크로플 1만 5천원"))
+    assert not price_visible(pricey, CopyCandidate(headline="크로플 5천원"))
+    # 가격을 빼기로 한 광고
+    assert not price_visible(
+        AdBrief(goal="copy", product="크로플", price=0),
+        CopyCandidate(headline="크로플 6,000원"),
+    )
 
 
 def test_시점을_말하지_않으면_시간_대조가_없다() -> None:
@@ -145,7 +178,8 @@ def test_시점_단어를_알아챈다(word: str) -> None:
 
 def test_적합도는_해당되는_항목에만_붙는다() -> None:
     f = _features()
-    plain = CopyCandidate(headline="갓 구운 크로플")  # 시점·주말 언급 없음
+    # 금액은 실려 있어야 가격 대조가 붙는다 (2026-08-20 `price_visible`)
+    plain = CopyCandidate(headline="크로플 6,000원")  # 시점·주말 언급 없음
     kinds = {n.kind: n.fit for n in contrast(f, BRIEF, plain)}
     assert kinds["price"] is not None
     assert "timing" not in kinds and "weekend" not in kinds
@@ -157,7 +191,8 @@ def test_비싼_쪽만_감점한다() -> None:
     f = _features()  # avg_ticket 9546
 
     def fit(price: int) -> float | None:
-        note = price_note(f, AdBrief(goal="copy", product="크로플", price=price))
+        brief = AdBrief(goal="copy", product="크로플", price=price)
+        note = price_note(f, brief, CopyCandidate(headline=f"크로플 {price:,}원"))
         return note.fit if note else None
 
     assert fit(2000) == 1.0
@@ -321,10 +356,10 @@ def test_잘_맞는_광고에는_경고를_띄우지_않는다() -> None:
     """
     from app_core.panel.contrast import WEAK_FIT
 
-    cheap = weakest(contrast(_features(), BRIEF, CopyCandidate(headline="갓 구운 크로플")))
+    cheap = weakest(contrast(_features(), BRIEF, CopyCandidate(headline="크로플 6,000원")))
     assert cheap is not None and cheap.fit == 1.0
     assert cheap.fit >= WEAK_FIT  # → 화면이 강조하지 않는다
 
-    off = weakest(contrast(_features(), BRIEF, CopyCandidate(headline="새벽 감성 크로플")))
+    off = weakest(contrast(_features(), BRIEF, CopyCandidate(headline="새벽 감성 크로플 6,000원")))
     assert off is not None and off.fit is not None
     assert off.fit < WEAK_FIT  # → 강조한다

@@ -9,6 +9,7 @@ import pytest
 
 from app_core.panel import evaluator
 from app_core.panel.aggregate import AggregationError
+from app_core.panel.contrast import price_visible
 from app_core.panel.evaluator import (
     FOLLOW_UP_CALLS,
     MAX_EVAL_CALLS,
@@ -22,6 +23,7 @@ from app_core.panel.schemas import (
     EvaluationResult,
     Panel,
     Persona,
+    PersonaComment,
     Resistance,
 )
 from app_core.schema import AdBrief, CopyCandidate, Store, StoreInput
@@ -410,7 +412,9 @@ def test_contrast_notes_are_carried(yeoksam: Panel, shop, brief, copy) -> None:
     화면이 `contrast()` 를 따로 부르며 features 를 다시 들고 다녀야 한다.
     """
     client = FakeClient(_reply_by_demo(yeoksam))
-    result = evaluate(yeoksam, shop, brief, copy, client=client)
+    # 금액이 실려야 가격 대조가 붙는다 (2026-08-20 `price_visible`)
+    priced = CopyCandidate(headline=f"크로플 {brief.price:,}원", sub=copy.sub)
+    result = evaluate(yeoksam, shop, brief, priced, client=client)
 
     kinds = {n.kind for n in result.contrast_notes}
     assert "composition" in kinds  # 동네 구성은 항상 들어간다
@@ -779,10 +783,16 @@ def test_invented_amount_is_dropped(yeoksam: Panel, shop, copy) -> None:
 
 
 def test_real_price_may_be_quoted(yeoksam: Panel, shop, copy) -> None:
-    """게이트가 과하면 쓸 만한 제안까지 사라진다 — 실제 가격은 인용 가능해야 한다."""
+    """게이트가 과하면 쓸 만한 제안까지 사라진다 — 실제 가격은 인용 가능해야 한다.
+
+    ⚠️ **문구에 금액이 실려 있어야 한다.** 2026-08-20 부터 "가격이 있는 광고"는
+    사장님이 입력했는지가 아니라 **광고에 보이는지**로 정한다 (`contrast.price_visible`).
+    입력만 하고 문구에 안 실리면 손님은 그 값을 모르므로 가격 축을 닫는다.
+    """
     brief = AdBrief(goal="copy", product="크로플", price=6000)
+    priced = CopyCandidate(headline="크로플 6,000원", sub=copy.sub)
     client = _suggest(_reply_by_demo(yeoksam), ["6,000원이라는 점을 헤드라인에 넣어보세요"])
-    result = evaluate(yeoksam, shop, brief, copy, client=client, consistency_k=1)
+    result = evaluate(yeoksam, shop, brief, priced, client=client, consistency_k=1)
     assert result.suggestions == ["6,000원이라는 점을 헤드라인에 넣어보세요"]
 
 
@@ -798,8 +808,9 @@ def test_avg_ticket_may_be_quoted(yeoksam: Panel, shop, copy) -> None:
 def test_summary_prompt_carries_the_real_price(yeoksam: Panel, shop, copy) -> None:
     """지어낼 이유를 없애는 것이 1차 방어다 — 게이트는 2차다."""
     brief = AdBrief(goal="copy", product="크로플", price=6000)
+    priced = CopyCandidate(headline="크로플 6,000원", sub=copy.sub)
     client = _suggest(_reply_by_demo(yeoksam), [])
-    evaluate(yeoksam, shop, brief, copy, client=client, consistency_k=1)
+    evaluate(yeoksam, shop, brief, priced, client=client, consistency_k=1)
 
     assert "6,000원" in client.summary_prompt
     assert f"{yeoksam.features.avg_ticket:,}원" in client.summary_prompt
@@ -1466,7 +1477,12 @@ def test_classifier_cannot_pick_price_without_a_price(yeoksam: Panel, shop, copy
 
 
 def test_classifier_rule_is_not_added_when_price_exists(yeoksam: Panel, shop, brief, copy) -> None:
-    """가격이 있는 광고에는 그 규칙을 붙이지 않는다 — 붙이면 price 를 못 고른다."""
+    """가격이 있는 광고에는 그 규칙을 붙이지 않는다 — 붙이면 price 를 못 고른다.
+
+    ⚠️ **문구에 금액이 실려 있어야 한다.** 2026-08-20 부터 "가격이 있는 광고"는
+    사장님이 입력했는지가 아니라 **광고에 보이는지**로 정한다 (`contrast.price_visible`).
+    입력만 하고 문구에 안 실리면 손님은 그 값을 모르므로 가격 축을 닫는다.
+    """
     seen: list[str] = []
 
     class Spy(FakeClient):
@@ -1475,9 +1491,90 @@ def test_classifier_rule_is_not_added_when_price_exists(yeoksam: Panel, shop, br
                 seen.append(system)
             return super().complete_json(system, user)
 
-    evaluate(yeoksam, shop, brief, copy, client=Spy(_reply_by_demo(yeoksam)), consistency_k=1)
+    priced = CopyCandidate(headline=f"크로플 {brief.price:,}원", sub=copy.sub)
+    evaluate(yeoksam, shop, brief, priced, client=Spy(_reply_by_demo(yeoksam)), consistency_k=1)
 
     assert seen and "가격이 적혀 있지 않다" not in seen[0]
+
+
+def test_가격이_문구에_없으면_여섯_자리가_모두_닫힌다(yeoksam: Panel, shop, brief, copy) -> None:
+    """가격 축을 읽는 자리가 여섯이다. **하나만 빠뜨려도 어긋난다.**
+
+    손님에게는 가격을 안 보여주는데 분류는 price 를 고를 수 있는 상태가 되면
+    2026-08-20 에 잡은 문제가 그대로 남는다. 그래서 여섯 자리가 같은 판정
+    (`contrast.price_visible`)을 보는지 한 번에 확인한다.
+
+    `brief` 는 가격 9,500원이고 `copy` 에는 금액이 없다 — 지금 생성되는 문구
+    대부분이 이 상태다 (실측 2026-08-12: 문구 27개 중 3건이 금액 누락).
+    """
+    seen: dict[str, str] = {}
+
+    class Spy(FakeClient):
+        def complete_json(self, system: str, user: str) -> dict[str, Any]:
+            if system.startswith("손님이 남긴 한 줄을"):
+                seen["classify"] = system
+            elif system.startswith("손님들의 평가를"):
+                seen["summary"] = user
+            else:
+                seen.setdefault("persona", user)
+            return super().complete_json(system, user)
+
+    result = evaluate(
+        yeoksam, shop, brief, copy, client=Spy(_reply_by_demo(yeoksam)), consistency_k=1
+    )
+
+    # ① 손님 프롬프트의 가격 줄 · ② 손님에게 보여주는 숫자 목록
+    assert "- 가격: 광고에 없음" in seen["persona"]
+    assert "avg_ticket" not in seen["persona"]
+    # ③ 근거 경로 — 객단가를 인용할 수 없다
+    assert "avg_ticket" not in str(
+        offered_paths(
+            yeoksam.features, yeoksam.personas[0], copy, show_price=price_visible(brief, copy)
+        )
+    )
+    # ④ 분류 콜에 "가격이 적혀 있지 않다" 가 붙는다
+    assert "가격이 적혀 있지 않다" in seen["classify"]
+    # ⑤ 요약 콜의 사실 블록
+    assert "광고에 가격이 없다" in seen["summary"]
+    assert f"{brief.price:,}원" not in seen["summary"]
+    # ⑥ 되묻기가 걸린 뒤에도 평가는 끝난다
+    assert result.scores
+
+
+def test_대체_문장은_인원을_실제로_센다() -> None:
+    """패널은 10~12명 가변이다(#39) — 무작위 60조합에서 3명짜리도 나왔다.
+
+    제안 문장의 "12명" 은 #40 이 고쳤는데 대체 문장에는 남아 있었다.
+    요약 콜이 실패한 날 3명 패널에 "손님 12명" 이라고 말하게 된다.
+    """
+    from app_core.panel.evaluator import _fallback_suggestions
+
+    result = EvaluationResult(
+        ad_id="x",
+        scores={"attention": 40.0, "message": 70.0, "intent": 60.0},
+        confidence="low",
+        max_metric_std=0.0,
+        top_resistance=[],
+        persona_comments=[
+            PersonaComment(
+                persona_id=f"p{i}",
+                demo="30대 여성",
+                weight=0.33,
+                is_boundary=False,
+                resistance="none",
+                comment="한마디",
+            )
+            for i in range(3)
+        ],
+        area_nm="역삼역",
+        quarter="20261",
+        is_fallback=False,
+        demo_coverage=0.714,
+    )
+    (note,) = _fallback_suggestions(result)
+    assert "손님 3명" in note
+    assert "12명" not in note
+    assert note.endswith("어떨까요 (손님 3명 가중평균 40점)")  # 권유형
 
 
 def test_every_label_has_a_classifier_example() -> None:
@@ -1581,3 +1678,111 @@ def test_claim_words_cover_the_measured_cases() -> None:
     """실측에 나온 낱말이 목록에 있어야 한다. 늘릴 때는 실측으로."""
     for word in ("품질", "자랑하는", "손꼽히는"):
         assert word in evaluator._CLAIM_WORDS
+
+
+def _result_with(n: int) -> EvaluationResult:
+    return EvaluationResult(
+        ad_id="x",
+        scores={"attention": 40.0, "message": 70.0, "intent": 60.0},
+        confidence="low",
+        max_metric_std=0.0,
+        top_resistance=[],
+        persona_comments=[
+            PersonaComment(
+                persona_id=f"p{i}",
+                demo="30대 여성",
+                weight=1.0 / n,
+                is_boundary=False,
+                resistance="none",
+                comment="한마디",
+            )
+            for i in range(n)
+        ],
+        area_nm="역삼역",
+        quarter="20261",
+        is_fallback=False,
+        demo_coverage=0.714,
+    )
+
+
+def test_두_명_이하는_가중평균이라_부르지_않는다() -> None:
+    """**한 명의 평균은 평균이 아니다.**
+
+    수호님이 씨앗 5개 300조합에서 손님 1명짜리 패널을 찾았다
+    (한국의류시험연구원 × 옷가게 · 50대 남성 하나). `demo_coverage` 가
+    1.000 이라 데이터가 부실한 게 아니라, 그 동네에서 옷을 사는 사람이
+    정말 그 층뿐이었다.
+
+    경계 3 은 `#56` 의 "손님 2명 이하는 가중평균이라 부를 수 없는 크기" 와
+    같은 값이다.
+    """
+    from app_core.panel.evaluator import _fallback_suggestions
+
+    for n in (1, 2):
+        (note,) = _fallback_suggestions(_result_with(n))
+        assert f"손님 {n}명 점수" in note, note
+        assert "가중평균" not in note
+
+    for n in (3, 12):
+        (note,) = _fallback_suggestions(_result_with(n))
+        assert f"손님 {n}명 가중평균" in note, note
+
+
+def test_금액_가드가_한글_단위를_읽는다() -> None:
+    r"""`_amounts` 는 제안이 **지어낸 금액**을 잡는 가드다.
+
+    옛 규칙 `r"(\d[\d,]*)\s*원"` 은 한글 단위를 못 읽었다. 특히 두 번째가
+    위험하다 — 23,500원을 500원으로 읽으면 "사실 블록에 있는 값"으로
+    오판해 지어낸 금액이 그대로 사장님께 나간다.
+
+        "1만 5천원"      옛 set()   → 새 {15000}
+        "2만 3천 500원"  옛 {500}   → 새 {23500}
+    """
+    from app_core.panel.evaluator import _amounts
+
+    assert _amounts("1만 5천원에 맞춰보세요") == {15000}
+    assert _amounts("2만 3천 500원 세트를 만들어보세요") == {23500}
+    assert _amounts("15,000원") == {15000}
+    assert _amounts("원두를 바꿔보세요") == set()  # 숫자 없는 `원`
+
+
+def test_금액_규칙이_contrast_와_같다() -> None:
+    """규칙을 두 곳에 두면 한쪽만 고쳐진다 — PR #50 에서 겪은 그대로다."""
+    from app_core.panel.contrast import copy_amounts
+    from app_core.panel.evaluator import _amounts
+
+    for text in ("1만 5천원", "2만 3천 500원", "4,500원", "원두", "9천원"):
+        assert _amounts(text) == copy_amounts(CopyCandidate(headline=text)), text
+
+
+def test_관문이_가격_평가어를_잡는다() -> None:
+    """관문이 재료·품질만 막아서 **가격 주장은 통과했다** (실측 2026-08-21).
+
+        "평양냉면 가격을 '합리적인 가격'으로 강조하여 부담감을 줄여보세요"
+        "'가성비 좋은 평양냉면'이라는 문구를 추가하여…"
+        "연어덮밥의 가격을 '합리적인 가격'으로 강조하는 문구를 추가해 보세요"
+
+    18,000원을 '합리적'이라고 부르는 것도 사장님이 말한 적 없는 사실 주장이다.
+    """
+    from app_core.panel.evaluator import _unbacked_claims
+
+    assert _unbacked_claims("'합리적인 가격'으로 강조해보세요", "") == {"합리적"}
+    assert _unbacked_claims("'가성비 좋은 평양냉면'을 추가하여", "") == {"가성비"}
+
+
+def test_사장님이_한_말이면_가격어도_통과한다() -> None:
+    """`backing` 은 사장님이 실제로 한 말이다. 사장님의 주장은 막지 않는다."""
+    from app_core.panel.evaluator import _unbacked_claims
+
+    assert (
+        _unbacked_claims("'합리적인 가격'으로 강조해보세요", "합리적인 가격으로 알리고 싶다")
+        == set()
+    )
+
+
+def test_멀쩡한_제안은_그대로_통과한다() -> None:
+    """이 관문은 '놓치는 쪽으로 기울여' 두는 것이 원칙이다 — 좁게 유지한다."""
+    from app_core.panel.evaluator import _unbacked_claims
+
+    assert _unbacked_claims("지금 가야 할 이유를 한 줄 넣어보시면 어떨까요", "") == set()
+    assert _unbacked_claims("영업시간을 광고에 적어보시면 어떨까요", "") == set()

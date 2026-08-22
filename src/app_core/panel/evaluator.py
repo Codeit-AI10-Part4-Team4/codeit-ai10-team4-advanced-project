@@ -27,7 +27,7 @@ from pydantic import ValidationError
 
 from app_core.llm import ChatClient, get_client
 from app_core.panel.aggregate import DEFAULT_SIGMA_MAX, aggregate
-from app_core.panel.contrast import TIME_WORDS, contrast
+from app_core.panel.contrast import TIME_WORDS, contrast, copy_amounts, price_visible
 from app_core.panel.evidence import evidence_failures
 from app_core.panel.narrator import MOTIVE_KO, TIME_KO
 from app_core.panel.schemas import (
@@ -196,7 +196,6 @@ SUMMARY_SYSTEM = """손님들의 평가를 사장님이 바로 쓸 수 있는 **
 
 #: 제안에서 "9,500원" 같은 금액을 찾는다. 사장님 화면에 실제와 다른 금액이
 #: 뜨는 것을 코드로 막기 위한 것이다.
-_AMOUNT_RE: Final = re.compile(r"(\d[\d,]*)\s*원")
 
 #: 대조 문장이 사실 블록에 들어오면서 금액 말고도 인용할 수치가 생겼다.
 #: 금액만 두 겹으로 막아 둔 것은 팀 규칙(01 P0, 가격은 사장님이 입력) 때문인데,
@@ -229,6 +228,21 @@ _CLAIM_WORDS: Final = (
     "인정받은",
     "검증된",
     "정통",
+    # 가격 평가어. 위 낱말이 재료·품질 쪽만 막아서 **가격 주장은 통과했다**
+    # (실측 2026-08-21, 세 건):
+    #
+    #     "평양냉면 가격을 '합리적인 가격'으로 강조하여 부담감을 줄여보세요"
+    #     "'가성비 좋은 평양냉면'이라는 문구를 추가하여…"
+    #     "연어덮밥의 가격을 '합리적인 가격'으로 강조하는 문구를 추가해 보세요"
+    #
+    # 18,000원을 '합리적'이라고 부르는 것도 사장님이 말한 적 없는 사실
+    # 주장이다. 사장님이 "저렴하게 알리고 싶다"고 하셨으면 `backing` 에
+    # 있어 그대로 통과하므로, 사장님의 주장을 막지는 않는다.
+    #
+    # 좁게 둔다 — 이 함수는 "놓치는 쪽으로 기울여" 두는 것이 원칙이고,
+    # 실측된 세 건은 이 둘로 전부 잡힌다.
+    "합리적",
+    "가성비",
 )
 
 
@@ -246,13 +260,20 @@ def _unbacked_claims(text: str, backing: str) -> set[str]:
 
 
 def _amounts(text: str) -> set[int]:
-    out: set[int] = set()
-    for raw in _AMOUNT_RE.findall(text):
-        try:
-            out.add(int(raw.replace(",", "")))
-        except ValueError:
-            continue
-    return out
+    r"""제안 문장에 적힌 금액. 규칙은 `contrast.copy_amounts` 하나뿐이다.
+
+    여기 있던 `r"(\d[\d,]*)\s*원"` 은 한글 단위를 못 읽었다.
+    귀한님이 PR #50 리뷰에서 같은 결함을 짚어주셔서 규칙을 `contrast` 로
+    모았는데, `eval/copy_metrics.py` 만 옮겨 붙고 **여기가 남아 있었다.**
+
+        "1만 5천원"        set()   ← 통째로 놓침       (새 규칙 {15000})
+        "2만 3천 500원"    {500}   ← 500원으로 오독    (새 규칙 {23500})
+
+    두 번째가 더 위험하다. 이 함수는 **제안이 지어낸 금액을 잡는 가드**라,
+    23,500원을 500원으로 읽으면 "사실 블록에 있는 값"으로 오판해 그대로
+    사장님께 나간다.
+    """
+    return copy_amounts(CopyCandidate(headline=text))
 
 
 def _quantities(text: str) -> set[str]:
@@ -416,7 +437,9 @@ def _ad_lines(store: Store, brief: AdBrief, copy: CopyCandidate) -> str:
     if brief.tone:
         parts.append(f"- 원하는 느낌: {brief.tone}")
     # 0 원은 "가격 없음"이라는 뜻이다. 없는 가격을 평가하게 하면 안 된다.
-    parts.append(f"- 가격: {brief.price:,}원" if brief.show_price else "- 가격: 광고에 없음")
+    parts.append(
+        f"- 가격: {brief.price:,}원" if price_visible(brief, copy) else "- 가격: 광고에 없음"
+    )
     return "\n".join(parts)
 
 
@@ -434,7 +457,7 @@ def build_user_prompt(
         f"{MOTIVE_KO[axes.motive]} 편이고, {_PRICE_SENS_KO[axes.price_sens]}\n"
         f"{standing(features, persona)}\n\n"
         f"## 우리 동네 숫자 (evidence 는 여기서만 고른다)\n"
-        f"{_feature_lines(features, persona, copy, show_price=brief.show_price)}\n\n"
+        f"{_feature_lines(features, persona, copy, show_price=price_visible(brief, copy))}\n\n"
         f"## 광고물\n{_ad_lines(store, brief, copy)}"
     )
 
@@ -471,7 +494,7 @@ def _evaluate_one(
 ) -> PersonaEval | None:
     """한 명을 평가한다. 두 관문 중 하나라도 실패하면 1회만 다시 부른다."""
     user = build_user_prompt(persona, features, store, brief, copy)
-    allowed = offered_paths(features, persona, copy, show_price=brief.show_price)
+    allowed = offered_paths(features, persona, copy, show_price=price_visible(brief, copy))
     hint = ""
 
     for attempt in range(RETRY_ONCE + 1):
@@ -489,7 +512,7 @@ def _evaluate_one(
         # 코드가 아는 사실이므로 모델의 자기검열에 맡기지 않고 여기서 되묻는다.
         # 한 번만 되묻고, 그래도 같으면 점수는 살려 둔다 — 걸림돌 하나 때문에
         # 그 손님의 평가 전체를 버리면 12명이 통째로 날아갈 수 있다.
-        if attempt == 0 and result.resistance == "price" and not brief.show_price:
+        if attempt == 0 and result.resistance == "price" and not price_visible(brief, copy):
             logger.debug("가격 없는 광고에 price 응답 %s — 되묻는다", persona.persona_id)
             hint = _retry_hint(
                 "이 광고에는 **가격이 적혀 있지 않다.** 적히지도 않은 가격을 "
@@ -599,6 +622,7 @@ def _summarize(
     panel: Panel,
     evals: list[PersonaEval],
     brief: AdBrief,
+    copy: CopyCandidate,
     notes: list[ContrastNote],
 ) -> list[str]:
     """저항 요인과 코멘트를 개선 제안으로 옮긴다 (07 §7.3).
@@ -630,7 +654,7 @@ def _summarize(
     features = panel.features
     allowed = {features.avg_ticket}
     facts = [f"- 이 동네 {features.category_nm} 결제 1건 평균: {features.avg_ticket:,}원"]
-    if brief.show_price:
+    if price_visible(brief, copy):
         allowed.add(brief.price)
         facts.insert(0, f"- 광고에 적은 가격: {brief.price:,}원")
     else:
@@ -683,13 +707,16 @@ def _summarize(
 
 
 #: 요약 콜 없이도 낼 수 있는 한 줄. 지표별로 문구가 다르다.
+#: 요약 콜이 못 돌 때 쓰는 대체 문장. **권유형으로 쓴다** — 사장님이 자기 가게를
+#: 제일 잘 아는 사람이고 우리는 손님 반응을 전하는 쪽이다. LLM 이 쓰는 제안의
+#: 어투(`SUMMARY_SYSTEM`)는 프롬프트라 따로 재야 하지만, 여기는 코드 문자열이다.
 _METRIC_NOTE: Final[dict[str, str]] = {
-    "attention": "눈길을 끄는 힘이 가장 약했습니다 — 첫 줄을 더 구체적으로 바꿔 보세요",
-    "message": "무엇을 파는 곳인지가 가장 약했습니다 — 상품을 문구 앞쪽에 드러내 보세요",
-    "intent": "가 볼 이유가 가장 약했습니다 — 지금 가야 할 이유를 한 줄 넣어 보세요",
+    "attention": "눈길을 끄는 힘이 가장 약했습니다 — 첫 줄을 더 구체적으로 바꿔보시면 어떨까요",
+    "message": "무엇을 파는 곳인지가 가장 약했습니다 — 상품을 문구 앞쪽에 드러내보시면 어떨까요",
+    "intent": "가 볼 이유가 가장 약했습니다 — 지금 가야 할 이유를 한 줄 넣어보시면 어떨까요",
 }
 
-_GENERIC_NOTE: Final = "손님 반응이 갈렸습니다 — 문구를 바꿔 다시 만들어 보세요"
+_GENERIC_NOTE: Final = "손님 반응이 갈렸습니다 — 문구를 바꿔 다시 만들어보시면 어떨까요"
 
 
 def _classify_resistance(
@@ -787,7 +814,19 @@ def _fallback_suggestions(result: EvaluationResult) -> list[str]:
     note = _METRIC_NOTE.get(metric)
     if note is None:
         return [_GENERIC_NOTE]
-    return [f"{note} (손님 12명 가중평균 {score:.0f}점)"]
+    # 인원은 상권마다 다르다 — 매출 0 인 연령대는 손님으로 안 만든다(#39).
+    # 무작위 60조합에서 3명짜리 패널이 실제로 나왔다 (2026-08-20).
+    n = len(result.persona_comments)
+    # **한 명의 평균은 평균이 아니다.** 수호님이 씨앗 5개 300조합에서 손님
+    # 1명짜리 패널을 찾았다 (한국의류시험연구원 × 옷가게 · 50대 남성 하나).
+    # demo_coverage 가 1.000 이라 데이터가 부실한 게 아니라, 그 동네에서
+    # 옷을 사는 사람이 정말 그 층뿐이었다. 신뢰도 사유가 이미 셋 붙지만
+    # 문장 자체가 없는 평균을 말하면 사장님이 무게를 잘못 잡는다.
+    #
+    # 경계 3 은 수호님이 `#56` 에서 쓴 "손님 2명 이하는 가중평균이라 부를 수
+    # 없는 크기" 와 같은 값이다. 두 곳이 갈라지지 않게 맞춰 둔다.
+    how = "가중평균" if n >= 3 else "점수"
+    return [f"{note} (손님 {n}명 {how} {score:.0f}점)"]
 
 
 def evaluate(
@@ -883,7 +922,7 @@ def evaluate(
     # 걸림돌은 손님 콜이 아니라 코멘트에서 정한다 (`_classify_resistance`).
     if evals:
         try:
-            labels = _classify_resistance(chat, evals, show_price=brief.show_price)
+            labels = _classify_resistance(chat, evals, show_price=price_visible(brief, copy))
             if labels is not None:
                 evals = [
                     e.model_copy(update={"resistance": lab})
@@ -895,7 +934,7 @@ def evaluate(
     suggestions: list[str] = []
     if summarize and evals:
         try:
-            suggestions = _summarize(chat, panel, evals, brief, notes)
+            suggestions = _summarize(chat, panel, evals, brief, copy, notes)
         except Exception:
             # 요약은 부가물이다. 여기서 터졌다고 이미 끝난 평가를 버리면 안 된다.
             logger.exception("제안 요약 실패 %s — 제안 없이 반환", ad_id or "(무명)")

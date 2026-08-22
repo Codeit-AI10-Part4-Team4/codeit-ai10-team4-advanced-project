@@ -90,7 +90,7 @@ def _josa(word: str, with_batchim: str, without: str) -> str:
     return without  # 한글이 아니면(숫자·괄호 등) 받침 없는 쪽으로 둔다
 
 
-def price_note(features: TradeAreaFeatures, brief: AdBrief) -> Note | None:
+def price_note(features: TradeAreaFeatures, brief: AdBrief, copy: CopyCandidate) -> Note | None:
     """광고에 적은 가격과 이 동네 객단가를 나란히 놓는다.
 
     ⚠️ 둘은 같은 단위가 아니다. 객단가는 **결제 1건**의 평균이라 여러 개를
@@ -108,8 +108,26 @@ def price_note(features: TradeAreaFeatures, brief: AdBrief) -> Note | None:
     #23 이 금지한 그것이다. `SUMMARY_SYSTEM` 에 금지 지시가 이미 있는데도
     뚫렸다 — 수호님 `prompt_lint.py` 가 적어둔 대로 **모델은 금지를 안 읽는다.**
     그래서 금지를 세게 쓰는 대신 **문장에서 빈칸을 없앤다.**
+
+    ⚠️ **싼 쪽에는 이 처방을 쓰지 마라 — 재봤고 역효과였다** (2026-08-20).
+    광고가가 객단가보다 싼데도 제안이 "가성비를 강조하라"로 나가는 것을 막으려고
+    `price <= avg_ticket` 일 때 "이 가격은 이 동네에서 이례적이지 않습니다" 한 줄을
+    여기에 넣어봤다. 손님 12명을 **고정**하고 요약 콜만 문장 유/무로 10쌍 갈라 부른
+    결과:
+
+        가격 강조 제안이 든 회차   문장 없음 5/10 → 문장 있음 10/10
+
+    뒤집힌 5쌍이 전부 한 방향이었다. 가격이 문제가 아니라고 **적어주면** 모델은
+    그것을 "가격이 합리적이라고 광고에 쓰라"로 옮긴다. 빈칸을 없앤 것이 아니라
+    가격 이야깃거리를 하나 더 준 것이다.
+
+    같은 입력을 통째로 3회씩 전/후 돌렸을 때는 2/3 → 0/3 으로 **좋아 보였다.**
+    손님 답이 매번 새로 흔들려서 생긴 착시다. 요약 콜만 갈라야 보인다.
     """
-    if not brief.show_price:
+    # 광고에 안 실린 가격은 견줄 대상이 아니다 — 손님이 그 값을 못 본다.
+    # 이 문장은 요약 콜의 사실 블록으로도 들어가므로, 여기서 안 막으면
+    # 손님에게 가격을 숨겨놓고 제안만 가격 이야기를 하게 된다 (2026-08-20).
+    if not price_visible(brief, copy):
         return None
     pct = round(features.avg_ticket_pct * 100)
     return Note(
@@ -246,7 +264,24 @@ DEFECT_KINDS: Final = frozenset({"product", "claim", "price_text"})
 #: (실측 2026-08-12: 검사 코드 0건, `CopyCandidate` 는 헤드라인이 비었는지만 본다).
 CLAIM_WORDS: Final = ("최고", "최상", "1위", "일위", "최초", "제일", "유일", "넘버원", "No.1")
 
-_AMOUNT_RE: Final = re.compile(r"(\d[\d,]*)\s*원")
+#: 금액. `4,500원` · `1만원` · `5천원` · `1만 5천원` · `2만 3천 500원` 을 잡는다.
+#:
+#: 만·천·나머지를 **한 덩어리로** 읽는다. 쪼개서 두 개로 내면 주문서 금액과
+#: 우연히 맞아떨어져 판정이 뒤집힌다. 이 규칙과 `_digits` 는 건오님이
+#: `eval/copy_metrics.py` 에서 실제 오탐을 겪고 보강한 것을 그대로 가져왔다 —
+#: 저쪽이 이제 이걸 import 한다. 목록을 복사해두면 한쪽만 고쳐진다.
+#:
+#: 세 자리가 전부 선택이라 `"원두"` 의 `원` 처럼 숫자 없는 곳에도 빈 매치가
+#: 걸린다. 그건 `copy_amounts` 에서 걸러낸다.
+_AMOUNT_RE: Final = re.compile(
+    r"(?:(\d[\d,]*)\s*만)?\s*"  # 만 단위
+    r"(?:(\d[\d,]*)\s*천)?\s*"  # 천 단위
+    r"(\d[\d,]*)?\s*원"  # 나머지 (또는 `4,500원` 처럼 단위 없는 금액)
+)
+
+
+def _digits(part: str) -> int:
+    return int(part.replace(",", "")) if part else 0
 
 
 def product_note(brief: AdBrief, copy: CopyCandidate) -> Note | None:
@@ -287,6 +322,45 @@ def claim_note(copy: CopyCandidate, store: Store | None = None) -> Note | None:
     )
 
 
+def copy_amounts(copy: CopyCandidate) -> set[int]:
+    """문구에 적힌 금액. 손님이 광고에서 **실제로 볼 수 있는** 값이다.
+
+    `"1만 5천원"` 은 하나로 더해 15,000 을 낸다.
+    """
+    found: set[int] = set()
+    for man, cheon, rest in _AMOUNT_RE.findall(_text(copy)):
+        if not (man or cheon or rest):
+            continue  # 숫자 없이 `원` 만 있는 자리 (`원두` 등)
+        found.add(_digits(man) * 10_000 + _digits(cheon) * 1_000 + _digits(rest))
+    return found
+
+
+def price_visible(brief: AdBrief, copy: CopyCandidate) -> bool:
+    """사장님이 정한 가격이 **광고에 실제로 보이는가.**
+
+    `AdBrief.show_price` 는 "사장님이 가격을 입력했나"만 본다. 그런데 그 값이
+    문구에 실리지 않으면 **손님은 가격을 모른다.** 지금 패널은 광고물이 아니라
+    주문서를 보므로 그 차이를 못 본다.
+
+    실측(2026-08-20) — 같은 문구로 가격만 바꿔 포스터를 뽑았더니 1,000원·
+    9,500원·45,000원 세 장 **어디에도 금액이 없었다.** 사장님이 받는 결과물에서
+    셋은 같은 광고인데 패널은 `price` 비중을 5.6% / 66.7% / 100% 로 갈랐다.
+    45,000원 광고에는 *"'합리적인 가격의 크로플'이라는 문구를 추가해보세요"* 가
+    나갔다 — 사장님이 한 적 없는 주장이라 AGENTS.md #23 이 금지한 그것이다.
+
+    가격 경로를 닫고 다시 재면(42콜) 손님이 **"가격이 궁금해서"** 라고 말하고,
+    제안이 *"광고에 가격 정보를 추가하세요"* 로 바뀐다. 이쪽이 실행 가능한
+    조언이다 — 사장님은 이미 가격을 정하셨으니 넣기만 하면 된다.
+
+    ⚠️ **정한 값 하나만 적혀 있어야 True 다.** `"6,000원, 원래 8,900원"` 처럼
+    다른 금액이 섞이면 손님에게 보여줄 값이 어느 쪽인지 정해지지 않으므로
+    닫는다 (귀한님 지적, PR #50 리뷰). 그 자체가 결함이라 `price_text_note` ③
+    가 따로 짚는다. 한 광고에 여러 상품 가격을 적는 경우도 같이 닫히는데,
+    지금 주문서가 상품 하나를 전제하므로 그때 다시 본다.
+    """
+    return brief.show_price and copy_amounts(copy) == {brief.price}
+
+
 def price_text_note(brief: AdBrief, copy: CopyCandidate) -> Note | None:
     """문구에 적힌 금액이 사장님이 정한 것과 맞는가.
 
@@ -305,7 +379,7 @@ def price_text_note(brief: AdBrief, copy: CopyCandidate) -> Note | None:
     "없습니다"로 두었다 — 이 파일의 "판정하지 않는다" 원칙 그대로다. 사장님이
     귀찮아하면 ② 만 빼면 된다.
     """
-    amounts = {int(m.replace(",", "")) for m in _AMOUNT_RE.findall(_text(copy))}
+    amounts = copy_amounts(copy)
     if not brief.show_price:
         if not amounts:
             return None
@@ -364,7 +438,7 @@ def contrast(features: TradeAreaFeatures, brief: AdBrief, copy: CopyCandidate) -
     문구 자체의 결함은 여기 없다 — `copy_defects()` 를 따로 부른다(이유는 그쪽).
     """
     notes = [
-        price_note(features, brief),
+        price_note(features, brief, copy),
         timing_note(features, copy),
         weekend_note(features, copy),
         composition_note(features),
