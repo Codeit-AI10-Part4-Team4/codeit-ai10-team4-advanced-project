@@ -111,16 +111,17 @@ def _put(color=(255, 255, 255)) -> int:
 def _simple_ready(monkeypatch):
     """simple 형태를 돌리는 데 필요한 무거운 부품을 전부 대역으로.
 
-    프롬프트가 둘인 이유: **얹을 누끼가 없으면** 주인공 프롬프트를 쓴다.
-    배경 프롬프트("빈 탁자")는 누끼를 얹을 캔버스라 그 위에 올릴 게 없으면
-    광고 대상이 사라진다.
+    프롬프트가 셋인 이유: 사진 없는 감성형은 촬영 장면(scene),
+    포스터는 작은 주인공(hero),
+    누끼가 있으면 빈 배경(gb)을 쓴다.
 
-    글꼴은 fonts.load 하나만 잡으면 된다 — compose 가 갖고 있던 별도 목록은
-    #18 에서 fonts.py 로 합쳐졌다.
+    글꼴은 fonts.load 하나만 잡으면 된다 —
+    compose 가 갖고 있던 별도 목록은 #18 에서 fonts.py 로 합쳐졌다.
     """
     monkeypatch.setattr(fonts, "load", _fake_font)
     monkeypatch.setattr(pipeline, "build_bg_prompt", lambda *a, **k: "base prompt")
     monkeypatch.setattr(pipeline, "build_hero_prompt", lambda *a, **k: "hero prompt")
+    monkeypatch.setattr(pipeline, "build_scene_prompt", lambda *a, **k: "scene prompt")
 
 
 def test_레퍼런스가_있으면_프롬프트에_분위기가_붙는다(tmp_path, monkeypatch):
@@ -139,8 +140,8 @@ def test_레퍼런스가_있으면_프롬프트에_분위기가_붙는다(tmp_pa
 
     brief = _brief().model_copy(update={"ref_id": _put()})
     pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
-    # 사진이 없으면 hero 프롬프트가 바탕이 된다(#22) — 레퍼런스는 그 뒤에 붙는다
-    assert seen["prompt"] == "hero prompt, dim candlelight, dark wood"
+    # 사진이 없으면 scene 프롬프트가 바탕이 된다 — 레퍼런스는 그 뒤에 붙는다
+    assert seen["prompt"] == "scene prompt, dim candlelight, dark wood"
 
 
 def test_레퍼런스가_없으면_프롬프트를_안_건드린다(tmp_path, monkeypatch):
@@ -155,7 +156,7 @@ def test_레퍼런스가_없으면_프롬프트를_안_건드린다(tmp_path, mo
     _both_backends(monkeypatch, fake_bg)
 
     pipeline.generate_ad(_brief(), _store(), CopyCandidate(headline="크로플"), "simple")
-    assert seen["prompt"] == "hero prompt"  # 레퍼런스가 안 붙었다
+    assert seen["prompt"] == "scene prompt"  # 레퍼런스가 안 붙었다
 
 
 def test_보관함에_레퍼런스가_없어도_광고는_만든다(tmp_path, monkeypatch):
@@ -182,8 +183,9 @@ def test_스케치가_있으면_그쪽으로_그린다(tmp_path, monkeypatch):
 
     brief = _brief().model_copy(update={"sketch_id": _put()})
     pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
-    # 배경("빈 탁자")이 아니라 주인공 프롬프트여야 한다 — 안 그러면 그린 것이
-    # 흐릿한 덩어리로 나온다. 실제로 그랬다.
+    # 긴 촬영 기획(scene)이 아니라 짧은 주인공 프롬프트여야 한다 — 스케치 모델의
+    # CLIP 입력이 짧아 긴 프롬프트는 잘리고 구도 지시가 약해진다.
+    # (배경 프롬프트("빈 탁자")도 안 된다 — 제품이 없어 흐릿한 덩어리가 나온다)
     assert called["prompt"] == "hero prompt"
     assert called["size"] == (64, 64)
 
@@ -301,11 +303,11 @@ def test_generate_갈래는_제품이_든_장면을_그린다(tmp_path, monkeypa
     )
     monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, cut: "generate")
 
-    def _hero(industry, product, tone=""):
-        seen["product"] = product
-        return "hero prompt"
+    def _scene(**kwargs):
+        seen["product"] = kwargs["product"]
+        return "scene prompt"
 
-    monkeypatch.setattr(pipeline, "build_hero_prompt", _hero)
+    monkeypatch.setattr(pipeline, "build_scene_prompt", _scene)
 
     def _gen(prompt):
         seen["prompt"] = prompt
@@ -315,7 +317,84 @@ def test_generate_갈래는_제품이_든_장면을_그린다(tmp_path, monkeypa
     brief = AdBrief(goal="image", product="크로플", price=0, photo_id=7)
     pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
     assert seen["product"] == "크로플"
-    assert seen["prompt"] == "hero prompt"
+    assert seen["prompt"] == "scene prompt"
+
+
+def test_openai_cutout_갈래는_원본_전체를_보정한다(tmp_path, monkeypatch):
+    """누끼+배경 합성 대신 원본 전체를 편집해 공중부양 경로를 없앤다."""
+    seen = {}
+    source = _photo(tmp_path)
+    edited = Image.new("RGB", (1080, 1080), (9, 9, 9))
+    monkeypatch.setenv("IMAGE_PROFILE", "openai")
+    monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: source)
+    monkeypatch.setattr(
+        pipeline, "remove_background", lambda im: Image.new("RGBA", (64, 64), (255, 255, 255, 255))
+    )
+    monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, cut: "cutout")
+
+    def _edit(photo, product, tone="", size=(1080, 1080)):
+        seen.update(photo=photo, product=product, tone=tone)
+        return edited
+
+    monkeypatch.setattr(pipeline, "edit_photo", _edit)
+    monkeypatch.setattr(
+        pipeline,
+        "generate_scene",
+        lambda prompt: (_ for _ in ()).throw(AssertionError("배경 생성 금지")),
+    )
+
+    materials = pipeline.prepare_materials(
+        AdBrief(goal="image", product="크로플", price=0, photo_id=7, tone="차분"),
+        _store(),
+        "simple",
+    )
+
+    assert isinstance(materials, pipeline.SimpleMaterials)
+    assert materials.product is None
+    assert materials.background is edited
+    assert materials.staged is False
+    assert seen["product"] == "크로플"
+    assert seen["tone"] == "차분"
+
+
+def test_openai_generate_갈래도_사진을_버리지_않고_보정한다(tmp_path, monkeypatch):
+    source = _photo(tmp_path)
+    edited = Image.new("RGB", (1080, 1080), (9, 9, 9))
+    monkeypatch.setenv("IMAGE_PROFILE", "openai")
+    monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: source)
+    monkeypatch.setattr(
+        pipeline, "remove_background", lambda im: Image.new("RGBA", (64, 64), (255, 255, 255, 255))
+    )
+    monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, cut: "generate")
+    monkeypatch.setattr(pipeline, "edit_photo", lambda *a, **k: edited)
+
+    materials = pipeline.prepare_materials(
+        AdBrief(goal="image", product="크로플", price=0, photo_id=7), _store(), "simple"
+    )
+
+    assert isinstance(materials, pipeline.SimpleMaterials)
+    assert materials.background is edited
+    assert materials.product is None
+    assert materials.staged is False
+
+
+def test_openai여도_사진과_스케치가_같이_있으면_기존_합성을_유지한다(tmp_path, monkeypatch):
+    """B단계가 스케치의 구도 계약을 조용히 버리면 안 된다."""
+    _cutout_ready(tmp_path, monkeypatch)
+    monkeypatch.setenv("IMAGE_PROFILE", "openai")
+    monkeypatch.setattr(
+        pipeline,
+        "edit_photo",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("사진 편집 금지")),
+    )
+    seen = _watch(monkeypatch)
+
+    brief = _brief().model_copy(update={"photo_id": 1, "sketch_id": _put()})
+    pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
+
+    assert seen["스케치로"] is True
+    assert seen["prompt"] == "base prompt"
+    assert seen["누끼"] is True
 
 
 def test_라우터는_청소_전_누끼를_받는다(tmp_path, monkeypatch):
@@ -421,6 +500,31 @@ def test_사진과_스케치를_같이_올려도_제품이_하나다(tmp_path, m
     assert seen["스케치로"] is True  # 구도는 스케치를 따른다
     assert seen["prompt"] == "base prompt"  # 배경은 빈 무대 — 제품을 안 그린다
     assert seen["누끼"] is True  # 제품은 누끼 한 번만
+
+
+def test_레퍼런스를_같이_주면_보정_대신_기존_경로로_간다(tmp_path, monkeypatch):
+    """레퍼런스도 명시 지시다 — edit 프롬프트가 분위기를 전달할 수 없어 기존 경로를 지킨다."""
+    _cutout_ready(tmp_path, monkeypatch)
+    monkeypatch.setenv("IMAGE_PROFILE", "openai")
+    monkeypatch.setattr(pipeline.photo_store, "load", lambda pid: (b"x", "image/png"))
+    monkeypatch.setattr(pipeline.ref_style, "describe_style", lambda *a, **k: "warm light")
+
+    def _no_edit(*a, **k):
+        raise AssertionError("레퍼런스 주문인데 보정으로 갔다")
+
+    monkeypatch.setattr(pipeline, "edit_photo", _no_edit)
+    seen = {}
+
+    def _bg(prompt):
+        seen["prompt"] = prompt
+        return Image.new("RGB", (1080, 1080))
+
+    _both_backends(monkeypatch, _bg)
+    materials = pipeline.prepare_materials(
+        _brief().model_copy(update={"photo_id": 7, "ref_id": 8}), _store(), "simple"
+    )
+    assert materials.product is not None  # 기존 누끼+배경 경로
+    assert "warm light" in seen["prompt"]  # 레퍼런스 분위기가 실제로 반영됐다
 
 
 def test_스케치만_있으면_스케치가_제품을_그린다(tmp_path, monkeypatch):

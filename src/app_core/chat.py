@@ -12,11 +12,20 @@ AdBriefDraft 로 다시 검증한다.
 
 from __future__ import annotations
 
+import os
+
 from pydantic import ValidationError
 
-from app_core import turnlog
-from app_core.llm import ChatClient, get_client
+from app_core import llm, turnlog
+from app_core.llm import ChatClient
 from app_core.schema import AdBriefDraft, ChatTurn, Store
+
+#: 챗봇(대화·NLU)만 다른 모델로 돌리고 싶을 때 쓴다. 비어 있으면 기본 모델.
+#:
+#: `llm.py` 의 기본 모델을 바꾸면 문구·손님 패널·사진 판정까지 **전부** 같이
+#: 바뀐다. 그쪽은 A/B 와 골든셋 기준선이 걸려 있어서, 대화가 좋아지자고
+#: 남의 측정치를 흔들 수 없다. 그래서 이 한 칸만 따로 연다.
+CHAT_MODEL_ENV = "ADS_CHAT_MODEL"
 
 SYSTEM_PROMPT = """너는 동네 가게 사장님이 광고를 만들도록 돕는 챗봇이다.
 
@@ -74,6 +83,9 @@ SYSTEM_PROMPT = """너는 동네 가게 사장님이 광고를 만들도록 돕�
      만들어달라는 것이지 파는 물건이 아니다.
   ⚠️ **가게 이름도 상품명이 아니다.** 위 "가게" 에 이미 적혀 있다.
     "교촌치킨 레드콤보를 홍보해줘"  →  product: "레드콤보" (교촌치킨 아님)
+  ⚠️ **단위·개수는 상품명이 아니다.** 메뉴 이름만 남겨라.
+    "삼겹살 1인분 15000원"  →  product: "삼겹살" ("삼겹살 1인분" 아님)
+    "치킨 두 마리 시키면"    →  product: "치킨"
   **할인·행사 문장에도 상품이 들어 있다.** "반값"·"두 판 사면" 같은 말에
   정신이 팔려 상품명을 놓치지 마라.
     "이번 주만 아메리카노 반값이에요"  →  product: "아메리카노", situation: "할인"
@@ -104,6 +116,11 @@ SYSTEM_PROMPT = """너는 동네 가게 사장님이 광고를 만들도록 돕�
         값이 없거나       "가격 없어요"  "0"  "무료예요"
         아직 안 정했거나  "아직 안 정했어요"  "가격은 몰라요"  "미정이에요"
         **광고에 넣을 금액이 없다는 뜻이면 표현이 달라도 전부 ② 다.**
+        ⚠️ **이미 아는 가격을 0 으로 덮지 마라.** 위 "이미 알고 있는 것" 에 가격이
+        적혀 있는데 사장님이 그냥 "몰라요"·"글쎄요" 라고만 했으면, 그건 **지금
+        물어본 것을 피한 것**이지 가격을 빼달라는 말이 아니다. price 를 넣지 마라.
+            이미 4500원을 아는데  "몰라요"        →  {{}}  (4500 을 지우면 안 된다)
+            가격을 물어보는 중에  "가격은 몰라요"  →  {{"price": 0}}
         ⚠️ **0 은 금액이 아니라 "가격을 넣지 않는다" 는 표시다.** 사장님이 숫자를
         말하지 않았어도 "없다"·"모른다"·"안 정했다" 고 **답했으면** 0 을 넣어라.
         이건 없는 사실을 지어내는 것이 아니다 — 아래 "지어내지 마라" 는 여기
@@ -210,7 +227,12 @@ WRAP_UP = """물어볼 것을 다 물었다. **더 묻지 마라.**
    - 이번 말이 값을 **고치는 말**일 수 있으니 extracted 는 계속 채워라."""
 
 #: 더 물을 게 없을 때 하는 말. LLM 이 아니라 코드가 쓴다 — 아래 respond() 참고.
-DONE_MESSAGE = "필요한 건 다 여쭤봤어요. 이제 만들어드릴게요."
+#:
+#: 🪤 전에는 "이제 만들어드릴게요" 였다. **챗봇은 아무것도 만들지 않는다** —
+#: 만드는 것은 화면의 버튼이다. 사장님이 "ㅇㅇ" 하고 기다리면 아무 일도 안
+#: 일어나고, 뭘 더 입력해도 같은 말만 되풀이된다 (2026-08-20 사용 중 발견).
+#: 말이 못 지킬 약속을 하면 사장님은 화면이 멈춘 줄 안다. 할 일을 알려준다.
+DONE_MESSAGE = "필요한 건 다 여쭤봤어요. 아래 만들기 버튼을 눌러주세요."
 
 #: LLM 이 message 를 안 준 경우
 FALLBACK_MESSAGE = "조금 더 자세히 말씀해주시겠어요?"
@@ -293,6 +315,28 @@ def _safe_extract(raw: dict) -> AdBriefDraft:
     return AdBriefDraft(**safe)
 
 
+def _chat_client() -> ChatClient:
+    """챗봇이 쓸 클라이언트. 환경변수를 **부를 때마다** 읽는다 (llm.profile 과 같은 무늬).
+
+    stub 프로필에서는 모델 이름을 무시한다 — 안 그러면 키 없는 팀원 환경과
+    CI 가 실 API 를 부르게 된다 (#18 에서 겪은 그 사고).
+    """
+    name = os.environ.get(CHAT_MODEL_ENV, "").strip()
+    if not name or llm.profile() != "openai":
+        return llm.get_client()
+    return llm.OpenAIClient(model=name)
+
+
+def _asked_about(raw: dict) -> str:
+    """LLM 이 "나는 이걸 물었다"고 적어둔 칸 이름.
+
+    message 를 읽어서 무엇을 물었는지 알아내는 건 불가능하지만, 이 값은
+    message 와 늘 짝이 맞는다 — 틀릴 때도 같이 틀린다. 그래서 **message 가
+    무엇을 묻는지 알아내는 대역**으로 쓸 수 있다.
+    """
+    return str(raw.get("ask_about") or "").strip()
+
+
 def respond(
     draft: AdBriefDraft,
     utterance: str,
@@ -301,8 +345,9 @@ def respond(
 ) -> ChatTurn:
     """한 턴 처리 — 사장님 말을 듣고 주문서를 갱신한 뒤 다음 질문을 낸다."""
     # 이번 턴에 무엇을 물을지는 코드가 정하고, LLM 은 그걸 말로 옮기기만 한다.
+    chat_client = client or _chat_client()
     asking = draft.next_slot()
-    raw = (client or get_client()).complete_json(_system_prompt(draft, store), utterance)
+    raw = chat_client.complete_json(_system_prompt(draft, store), utterance)
 
     # 슬롯을 채우기 전에 말부터 기록한다. LLM 이 아무것도 못 뽑아내도
     # 사장님이 한 말은 남아서 문구 생성 프롬프트로 넘어간다.
@@ -323,6 +368,35 @@ def respond(
     # 한 줄이라 LLM 이 필요 없고, 코드가 쓰면 이 실패가 아예 불가능해진다.
     if merged.next_slot() is None:
         return ChatTurn(message=DONE_MESSAGE, options=[], draft=merged)
+
+    # 아직 물을 게 남았을 때도 **무엇을 묻는지는 코드가 확인한다.**
+    #
+    # 프롬프트는 이번 말을 듣기 **전** 상태로 쓰인다. 그래서 사장님이 지금
+    # 물어보던 칸에 답하면, LLM 은 그 답을 extracted 에 제대로 넣고도 방금
+    # 받은 답을 다시 묻는다. "extracted 에 넣은 항목은 still_unknown 에서
+    # 빼라"고 세 번 적어도 안 됐다 — 프롬프트에 박힌 목록을 그대로 베낀다
+    # (재현 3/3: situation 을 뽑고도 "광고를 만드는 이유는?" 을 또 물었다).
+    #
+    # 그래서 **이번 말이 물어보던 칸을 채웠을 때**, LLM 이 그다음 칸을 묻고
+    # 있는지 확인한다. 아니면 갱신된 주문서로 질문을 다시 받는다.
+    #
+    # 🪤 "LLM 이 **방금 채운 칸**을 물었으면" 으로 잡으면 안 된다. 모델을 바꾸면
+    #    바로 샌다 — gpt-4o-mini 는 ask_about 에 라벨을 그대로 베끼지만
+    #    gpt-5.4-mini 는 "이유가 뭐예요?" 처럼 말을 바꿔 적는다. 같은 것을 묻고
+    #    있는데 글자가 달라서 통과해 버린다. **물어야 할 칸과 맞는지**로 봐야
+    #    모델과 무관하게 걸린다.
+    #
+    # 🪤 반대로 "다음에 물을 칸과 다르면" 만 보고 채웠는지를 안 보면, 사장님이
+    #    가격에 **답을 안 한** 턴에서 가격 질문이 통째로 사라진다 — 보조 칸은
+    #    답을 못 받아도 물어본 것으로 치고(mark_asked) 다음 칸으로 넘어가기
+    #    때문에, 아직 물어야 할 것을 이미 지난 것으로 봐버린다.
+    if (
+        asking is not None
+        and getattr(merged, asking) is not None
+        and _asked_about(raw) != SLOT_LABEL[merged.next_slot() or asking]
+    ):
+        # 뽑아내기는 이미 끝났다 — 이 호출에서는 message·options 만 쓴다.
+        raw = chat_client.complete_json(_system_prompt(merged, store), utterance)
 
     options = raw.get("options")
     return ChatTurn(

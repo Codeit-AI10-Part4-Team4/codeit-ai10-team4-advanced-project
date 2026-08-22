@@ -17,11 +17,12 @@ from app_core import photo_store, ref_style, sketch_gen
 from app_core.background import remove_background
 from app_core.compose import compose_ad
 from app_core.gen_background import generate_background
-from app_core.image_backend import generate_scene
+from app_core.image_backend import edit_photo, generate_scene
+from app_core.image_backend import profile as image_profile
 from app_core.photo_router import mask_area, remove_crumbs, route_photo
 from app_core.poster import generate_poster
 from app_core.poster_plan import PosterPlan, plan_poster
-from app_core.prompt_builder import build_bg_prompt, build_hero_prompt
+from app_core.prompt_builder import build_bg_prompt, build_hero_prompt, build_scene_prompt
 from app_core.schema import AdBrief, CopyCandidate, Store
 
 Style = Literal["simple", "poster"]
@@ -105,7 +106,22 @@ def _simple_materials(brief: AdBrief, store: Store, product: Image.Image | None)
     올렸을 때 배경에도 제품이 그려지고 누끼도 얹혀 제품이 둘로** 나왔다.
     """
     if product is None:
-        prompt = build_hero_prompt(store.industry_label, brief.product, brief.tone)
+        if brief.sketch_id is not None:
+            # 스케치 생성(sd-turbo+ControlNet)은 CLIP 입력이 짧다 — 긴 촬영 기획
+            # 프롬프트는 잘려서 구도 지시가 약해진다. 스케치 주문은 짧은 주인공
+            # 프롬프트를 유지한다 (제품이 들어 있어 "흐릿한 덩어리"도 안 된다).
+            prompt = build_hero_prompt(store.industry_label, brief.product, brief.tone)
+        else:
+            prompt = build_scene_prompt(
+                shop=store.name,
+                location=store.address,
+                industry=store.industry_label,
+                product=brief.product,
+                situation=brief.situation,
+                tone=brief.tone,
+                extra=brief.extra,
+                transcript=brief.raw_utterance,
+            )
     else:
         prompt = build_bg_prompt(store.industry_label, brief.situation, brief.tone)
 
@@ -187,6 +203,22 @@ def prepare_materials(
         # 🪤 staged 는 False 다: product 가 None 이지만 화면에 나오는 것은
         # **사장님이 찍은 진짜 사진**이다. 여기에 "연출된 이미지" 를 붙이면 거짓말이 된다.
         return SimpleMaterials(product=None, background=photo.convert("RGB"), staged=False)
+
+    # B단계: 보정이 필요한 실제 사진은 GPT가 사진 전체를 정돈한다. 상품을 새로
+    # 그리는 것이 아니므로 staged=False 이며, 실패 폴백도 원본이다. 스케치가
+    # 함께 있으면 "이 구도를 따른다"는 별도 계약을 지키기 위해 기존 합성 경로를 쓴다.
+    if (
+        photo is not None
+        and route in ("cutout", "generate")
+        and brief.sketch_id is None
+        and brief.ref_id is None
+        and image_profile() == "openai"
+    ):
+        return SimpleMaterials(
+            product=None,
+            background=edit_photo(photo, brief.product, brief.tone),
+            staged=False,
+        )
     return _simple_materials(brief, store, cut if route == "cutout" else None)
 
 
