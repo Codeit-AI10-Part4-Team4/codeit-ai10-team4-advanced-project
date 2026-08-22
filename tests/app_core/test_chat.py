@@ -310,3 +310,124 @@ def test_프롬프트에_안_찬_항목이_들어간다(store: Store) -> None:
     chat.respond(draft(product="크로플"), "안녕", store, client)
     assert client.system is not None
     assert "가격" in client.system
+
+
+# ── 방금 답한 것을 또 묻지 않는다 ────────────────────────────
+
+
+class SequenceClient:
+    """호출마다 다른 응답을 준다 — 질문을 다시 받아오는 길을 확인하려고."""
+
+    def __init__(self, *responses: dict) -> None:
+        self.responses = list(responses)
+        self.calls: list[str] = []
+
+    def complete_json(self, system: str, user: str) -> dict:
+        self.calls.append(system)
+        return self.responses[min(len(self.calls) - 1, len(self.responses) - 1)]
+
+
+def test_방금_답을_받은_칸은_다시_묻지_않는다(store: Store) -> None:
+    """프롬프트는 이번 말을 **듣기 전** 상태로 쓰인다.
+
+    그래서 사장님이 물어보던 칸에 답하면, LLM 은 그 답을 extracted 에 제대로
+    넣고도 방금 받은 답을 또 묻는다 (재현 3/3). 코드가 맞춰보고 바로잡는다.
+    """
+    again = {
+        "extracted": {"situation": "2 + 1 이벤트"},
+        "ask_about": "이 광고를 만드는 이유",
+        "message": "이 광고를 만드는 이유는 무엇인가요?",
+    }
+    fixed = {"ask_about": "원하는 느낌", "message": "원하는 느낌은 어떤 건가요?"}
+    client = SequenceClient(again, fixed)
+
+    turn = chat.respond(
+        draft(goal="copy", product="카스", price=2000, asked=["product", "price"]),
+        "2 + 1 이벤트 홍보하려고",
+        store,
+        client,
+    )
+    assert turn.message == "원하는 느낌은 어떤 건가요?"
+    assert turn.draft.situation == "2 + 1 이벤트"
+    assert len(client.calls) == 2
+
+
+def test_제대로_물었으면_다시_부르지_않는다(store: Store) -> None:
+    """멀쩡한 턴까지 두 번 부르면 대화가 매번 두 배로 느려진다."""
+    ok = {"extracted": {}, "ask_about": "가격", "message": "가격은 얼마인가요?"}
+    client = SequenceClient(ok)
+    turn = chat.respond(
+        draft(goal="copy", product="크로플", asked=["product"]), "음...", store, client
+    )
+    assert turn.message == "가격은 얼마인가요?"
+    assert len(client.calls) == 1
+
+
+def test_말을_바꿔_다시_물어도_잡는다(store: Store) -> None:
+    """모델마다 ask_about 을 적는 방식이 다르다.
+
+    gpt-4o-mini 는 라벨을 그대로 베끼지만 gpt-5.4-mini 는 "이유가 뭐예요?" 처럼
+    말을 바꿔 적는다. **방금 채운 칸과 같은지**로 보면 글자가 달라 통과해버리므로,
+    **물어야 할 칸과 맞는지**로 본다.
+    """
+    paraphrased = {
+        "extracted": {"situation": "2 + 1 이벤트"},
+        "ask_about": "이유가 뭐예요?",
+        "message": "이 광고 하시는 이유가 뭐예요?",
+    }
+    fixed = {"ask_about": "원하는 느낌", "message": "원하는 느낌은 어떤 건가요?"}
+    client = SequenceClient(paraphrased, fixed)
+
+    turn = chat.respond(
+        draft(goal="copy", product="카스", price=2000, asked=["product", "price"]),
+        "2 + 1 이벤트 홍보하려고",
+        store,
+        client,
+    )
+    assert turn.message == "원하는 느낌은 어떤 건가요?"
+    assert len(client.calls) == 2
+
+
+# ── 챗봇만 다른 모델로 ───────────────────────────────────────
+
+
+def test_모델을_지정하면_챗봇만_그걸_쓴다(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """문구·패널·사진 판정은 그대로 두고 대화만 올릴 수 있어야 한다."""
+    monkeypatch.setenv("MODEL_PROFILE", "openai")
+    monkeypatch.setenv(chat.CHAT_MODEL_ENV, "gpt-5.4")
+    seen: list[str] = []
+    monkeypatch.setattr(chat.llm, "OpenAIClient", lambda model: seen.append(model))
+    chat._chat_client()
+    assert seen == ["gpt-5.4"]
+
+
+def test_모델을_안_지정하면_기본을_쓴다(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("MODEL_PROFILE", "openai")
+    monkeypatch.delenv(chat.CHAT_MODEL_ENV, raising=False)
+    monkeypatch.setattr(chat.llm, "get_client", lambda: "기본")
+    assert chat._chat_client() == "기본"
+
+
+def test_stub_이면_모델_이름을_무시한다(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """키 없는 팀원 환경과 CI 가 실 API 를 부르면 안 된다 (#18)."""
+    monkeypatch.setenv("MODEL_PROFILE", "stub")
+    monkeypatch.setenv(chat.CHAT_MODEL_ENV, "gpt-5.4")
+    monkeypatch.setattr(chat.llm, "get_client", lambda: "대역")
+    assert chat._chat_client() == "대역"
+
+
+def test_다_물었으면_할_일을_알려준다(store: Store) -> None:
+    """ "이제 만들어드릴게요" 라고만 하면 사장님이 기다리다 멈춘다 — 챗봇은 안 만든다."""
+    full = draft(
+        goal="copy",
+        product="크로플",
+        price=4500,
+        situation="신메뉴",
+        tone="따뜻한",
+        asked=["product", "price", "situation", "tone"],
+    )
+    assert full.next_slot() is None
+    turn = chat.respond(full, "ㅇㅇ", store, FakeClient({}))
+    assert turn.message == chat.DONE_MESSAGE
+    assert "버튼" in turn.message
+    assert turn.options == []
