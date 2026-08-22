@@ -9,12 +9,14 @@ from PIL import Image
 @cache
 def _load_pipe() -> Any:
     """sd-turbo 파이프라인을 한 번만 만들어 재사용한다 (매번 만들면 수십 초씩 걸린다)."""
-    import torch
     from diffusers import AutoPipelineForText2Image
 
-    return AutoPipelineForText2Image.from_pretrained(
-        "stabilityai/sd-turbo", torch_dtype=torch.float16
-    ).to("cuda")
+    from app_core.torch_device import pick
+
+    device, dtype = pick()
+    return AutoPipelineForText2Image.from_pretrained("stabilityai/sd-turbo", torch_dtype=dtype).to(
+        device
+    )
 
 
 def generate_background(prompt: str, size: tuple[int, int] = (1080, 1080)) -> Image.Image:

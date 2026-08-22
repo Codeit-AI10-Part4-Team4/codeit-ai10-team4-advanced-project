@@ -45,16 +45,18 @@ SIZE = 512
 @cache
 def _load_pipe() -> Any:
     """파이프라인을 한 번만 만들어 재사용한다 (매번 만들면 수십 초씩 걸린다)."""
-    import torch
     from diffusers import ControlNetModel, StableDiffusionControlNetPipeline
 
-    controlnet = ControlNetModel.from_pretrained(CONTROLNET, torch_dtype=torch.float16)
+    from app_core.torch_device import pick
+
+    device, dtype = pick()
+    controlnet = ControlNetModel.from_pretrained(CONTROLNET, torch_dtype=dtype)
     return StableDiffusionControlNetPipeline.from_pretrained(
         MODEL,
         controlnet=controlnet,
-        torch_dtype=torch.float16,
+        torch_dtype=dtype,
         safety_checker=None,
-    ).to("cuda")
+    ).to(device)
 
 
 def prepare(sketch: Image.Image) -> Image.Image:
@@ -86,7 +88,12 @@ def generate_from_sketch(
         # 순간까지 import 를 미룬다 — 위 _load_pipe 도 같은 이유로 지연 import.
         import torch
 
-        generator = torch.Generator("cuda").manual_seed(seed)
+        from app_core.torch_device import pick
+
+        # 제너레이터도 파이프라인과 같은 장치여야 한다. 어긋나면 torch 가
+        # "Expected all tensors to be on the same device" 로 막는다.
+        device, _ = pick()
+        generator = torch.Generator(device).manual_seed(seed)
 
     return _load_pipe()(
         prompt=prompt,
