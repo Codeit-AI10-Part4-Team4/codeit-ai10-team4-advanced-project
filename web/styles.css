@@ -9,7 +9,7 @@
 :root {
   --ink:        #14181a;
   --ink-2:      #5a6360;
-  --ink-3:      #8e9793;
+  --ink-3:      #6b736f;
   --line:       #dfe3e0;
   --line-soft:  #ecefec;
   --ground:     #eff1ef;
@@ -20,7 +20,7 @@
   --accent-soft:#e3efe9;
   --on-accent:  #ffffff;
 
-  --flag:       #a8630b;
+  --flag:       #9c5c0a;
   --flag-soft:  #fdf3e3;
 
   --r:    12px;
@@ -39,7 +39,7 @@
   :root {
     --ink:        #eef1ef;
     --ink-2:      #a3aca8;
-    --ink-3:      #757e7a;
+    --ink-3:      #929b96;
     --line:       #2b3230;
     --line-soft:  #232928;
     --ground:     #101413;
@@ -54,13 +54,13 @@
 }
 /* 사용자가 직접 고른 테마는 OS 설정을 이긴다 */
 :root[data-theme="light"] {
-  --ink:#14181a; --ink-2:#5a6360; --ink-3:#8e9793; --line:#dfe3e0;
+  --ink:#14181a; --ink-2:#5a6360; --ink-3:#6b736f; --line:#dfe3e0;
   --line-soft:#ecefec; --ground:#eff1ef; --paper:#fff;
   --accent:#0f5c42; --accent-ink:#0b4632; --accent-soft:#e3efe9; --on-accent:#fff;
-  --flag:#a8630b; --flag-soft:#fdf3e3;
+  --flag:#9c5c0a; --flag-soft:#fdf3e3;
 }
 :root[data-theme="dark"] {
-  --ink:#eef1ef; --ink-2:#a3aca8; --ink-3:#757e7a; --line:#2b3230;
+  --ink:#eef1ef; --ink-2:#a3aca8; --ink-3:#929b96; --line:#2b3230;
   --line-soft:#232928; --ground:#101413; --paper:#181d1c;
   --accent:#4cb98c; --accent-ink:#7fd3ac; --accent-soft:#163026; --on-accent:#06170f;
   --flag:#d99a48; --flag-soft:#2a2113;
@@ -95,6 +95,13 @@ button { font: inherit; color: inherit; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+/* 눈에는 안 보이되 포커스는 갈 수 있게. hidden 을 쓰면 키보드로 닿지 못한다 —
+ * 사진 올리기가 그래서 마우스로만 되던 자리다. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 
 .skip {
@@ -172,10 +179,16 @@ button { font: inherit; color: inherit; }
 }
 .btn:active { transform: scale(.985); }
 .btn--line { background: var(--paper); color: var(--ink-2); border-color: var(--line); }
-.btn--done { background: var(--line-soft); color: var(--ink-3); border-color: transparent; cursor: default; }
+/* "저장됨"은 못 누르는 버튼이지만 사장님이 읽어야 하는 정보다 — ink-3 은 대비가 모자란다 */
+.btn--done { background: var(--line-soft); color: var(--ink-2); border-color: transparent; cursor: default; }
 /* 44px 은 손가락으로 정확히 누를 수 있는 최소 높이다. 작은 버튼도 그 아래로 내리지 않는다. */
 .btn--sm   { min-height: 44px; font-size: 13px; padding: 8px 14px; border-radius: var(--r-sm); }
-.btn--ghost{ background: none; color: var(--accent); border-color: transparent; }
+/* 문장 안에 섞여 있는 글자 버튼. 눌러야 하는 것이니 손가락 목표는 지킨다. */
+.btn--ghost{
+  display: inline-flex; align-items: center; width: auto; min-height: 44px;
+  padding: 4px 8px; background: none; color: var(--accent); border: 0;
+  font-size: inherit; font-weight: 600; cursor: pointer;
+}
 .btn-row { display: flex; gap: 8px; }
 
 .field { display: flex; flex-direction: column; gap: 6px; }
@@ -280,7 +293,8 @@ button { font: inherit; color: inherit; }
 .bubble--me { align-self: flex-end; background: var(--accent); color: var(--on-accent); border-bottom-right-radius: 5px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
-  padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px;
+  display: inline-flex; align-items: center; min-height: 44px;   /* 손가락 목표 */
+  padding: 8px 16px; border: 1px solid var(--line); border-radius: 999px;
   background: var(--paper); color: var(--ink-2); font-size: 13px; cursor: pointer;
 }
 .chip[aria-pressed="true"] {
@@ -300,10 +314,13 @@ button { font: inherit; color: inherit; }
 .slot__drop {
   display: grid; place-items: center; gap: 4px;
   min-height: 108px; border: 1.5px dashed var(--line); border-radius: var(--r);
-  background: var(--line-soft); color: var(--ink-3); cursor: pointer;
+  /* 바탕이 회색이라 ink-3 이면 4.2:1 로 모자란다 */
+  background: var(--line-soft); color: var(--ink-2); cursor: pointer;
   font-size: 13px;
 }
 .slot__drop span:first-child { font-size: 22px; line-height: 1; }
+/* 안의 파일 입력이 sr-only 라 label 자신은 포커스를 못 받는다 — 테두리로 대신 알린다 */
+.slot__drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; border-color: var(--accent); }
 .slot__shot {
   display: grid; place-items: center; height: 160px;
   border: 1px solid var(--line); border-radius: var(--r);
@@ -313,7 +330,8 @@ button { font: inherit; color: inherit; }
 /* ── 광고 이미지 ───────────────────────────────────────────── */
 
 .shot { aspect-ratio: 1 / 1; border-radius: var(--r-sm); background: var(--line-soft);
-        display: grid; place-content: center; justify-items: center; gap: 4px; color: var(--ink-3); }
+        display: grid; place-content: center; justify-items: center; gap: 4px; color: var(--ink-2); }
+.shot .muted, .shot .data { color: inherit; }
 .progress { height: 4px; border-radius: 999px; background: var(--line-soft); overflow: hidden; }
 .progress i { display: block; height: 100%; width: 30%; background: var(--accent); border-radius: 999px;
               animation: slide 1.4s ease-in-out infinite; }

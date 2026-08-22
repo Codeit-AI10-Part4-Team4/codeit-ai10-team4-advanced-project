@@ -34,6 +34,13 @@ const $ = (sel) => document.querySelector(sel);
 /** 사장님이 쓴 값은 화면에 그대로 나가므로 태그를 막는다. */
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
+/** 강조만 살리고 나머지는 막는다.
+ *
+ * suggestions 는 _summarize() 가 **LLM 에게 받아온 문장**이고 contrast_notes 도
+ * 서버가 준 값이다. 그대로 innerHTML 에 꽂으면 API_BASE 를 채우는 순간
+ * 모델 출력이 곧 스크립트가 된다. 전부 escape 한 뒤 <b> 만 되살린다. */
+const rich = (s) => esc(s).replace(/&lt;b&gt;([\s\S]*?)&lt;\/b&gt;/g, '<b>$1</b>');
+
 /** "20261" → "2026년 1분기" */
 const quarter = (q) => (q.length === 5 ? `${q.slice(0, 4)}년 ${q.slice(4)}분기` : q);
 
@@ -83,7 +90,7 @@ function revise({ suggestions = null } = {}) {
         <div class="rule" style="margin-top:20px">
           <p class="eyebrow">손님들의 제안</p>
           <ul class="facts" style="gap:11px">
-            ${suggestions.map((s) => `<li style="border-left-color:var(--accent-soft)">${s}</li>`).join('')}
+            ${suggestions.map((s) => `<li style="border-left-color:var(--accent-soft)">${rich(s)}</li>`).join('')}
           </ul>
           <button class="btn" style="margin-top:16px" data-revise="제안 반영">제안 반영해 다시 만들기</button>
         </div>` : ''}
@@ -114,11 +121,11 @@ const SCREENS = {
         <button class="btn" data-go="stores">로그인</button>
         <p class="muted" style="text-align:center">
           아직 계정이 없으신가요?
-          <button class="btn--ghost" style="border:0;background:none;cursor:pointer;font-weight:600;padding:4px" data-go="signup">가입하기</button>
+          <button class="btn--ghost" data-go="signup">가입하기</button>
         </p>
         <!-- 로그인 화면엔 상단 바가 없어서 화면 목록으로 갈 길이 여기밖에 없다 -->
         <p class="muted rule" style="text-align:center">
-          <button class="btn--ghost" style="border:0;background:none;cursor:pointer;padding:6px;color:var(--ink-3)" data-drawer>전체 화면 목록 보기</button>
+          <button class="btn--ghost" style="color:var(--ink-3);font-weight:400" data-drawer>전체 화면 목록 보기</button>
         </p>
       </div>`,
   },
@@ -264,8 +271,10 @@ const SCREENS = {
              ${read ? `<p class="muted">AI가 읽은 내용 — ${esc(M.photos.product.note)}</p>` : ''}
              <button class="btn btn--line btn--sm" style="width:auto;align-self:flex-start"
                      data-drop="${key}">빼기</button>`
-          : `<label class="slot__drop"><span>＋</span><span>사진 올리기</span>
-               <input type="file" accept="image/png,image/jpeg,image/webp" hidden data-pick="${key}"></label>`;
+          // hidden 이 아니라 sr-only 다 — hidden 이면 키보드로 닿지 못한다
+          : `<label class="slot__drop"><span aria-hidden="true">＋</span><span>${esc(label)} 올리기</span>
+               <input type="file" accept="image/png,image/jpeg,image/webp"
+                      class="sr-only" data-pick="${key}" aria-label="${esc(label)} 올리기"></label>`;
         return `<div class="slot">
             <div><strong style="font-size:15px">${esc(label)}</strong>
               <p class="muted" style="margin:2px 0 0">${esc(hint)}</p></div>
@@ -407,7 +416,7 @@ const SCREENS = {
           <h2 class="h2">동네 숫자와 견줘보면</h2>
           <ul class="facts">
             ${r.contrast_notes.map((n) => `
-              <li class="${n.fit !== null && n.fit < 0.5 ? 'off' : ''}">${n.text}
+              <li class="${n.fit !== null && n.fit < 0.5 ? 'off' : ''}">${rich(n.text)}
                 <span class="src">${esc(n.src)}</span></li>`).join('')}
           </ul>
         </section>
@@ -505,8 +514,11 @@ function route() {
  *  문구 화면에서 "다시 만들기"를 누르면 아무 일도 안 일어나던 이유다. */
 const go = (name) => {
   const next = `#/${name}`;
-  if (location.hash === next) route();
-  else location.hash = next;
+  if (location.hash !== next) { location.hash = next; return; }
+  // 같은 화면이면 hashchange 가 안 뜬다. 직접 다시 그리고, 눌렀던 버튼이
+  // 사라지며 포커스가 body 로 떨어지므로 본문으로 되돌린다.
+  route();
+  $('#main').focus({ preventScroll: true });
 };
 
 // ── 이벤트 ───────────────────────────────────────────────────
@@ -562,6 +574,9 @@ document.addEventListener('submit', (e) => {
     if (!text) return;
     S.said.push({ who: 'me', text });
     route();
+    // 다시 그리면 방금 쓰던 입력칸이 사라져 포커스가 body 로 떨어진다.
+    // 그대로 두면 한 마디 보낼 때마다 입력칸을 다시 눌러야 한다.
+    $('[data-send] input')?.focus();
     return;
   }
 
@@ -589,10 +604,20 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('#drawer').hidden) openDrawer(false);
 });
 
+let drawerOpener = null;
+
 function openDrawer(open) {
   $('#drawer').hidden = !open;
-  $('[data-drawer]').setAttribute('aria-expanded', String(open));
-  if (open) $('#drawer-list').querySelector('button')?.focus();
+  // 시트가 떠 있는 동안 뒤쪽이 탭으로 잡히면 안 보이는 곳으로 포커스가 샌다
+  $('.shell').inert = open;
+  document.querySelectorAll('[data-drawer]').forEach((b) => b.setAttribute('aria-expanded', String(open)));
+  if (open) {
+    drawerOpener = document.activeElement;
+    $('#drawer-list').querySelector('button')?.focus();
+  } else {
+    drawerOpener?.focus?.();   // 열었던 자리로 돌려준다
+    drawerOpener = null;
+  }
 }
 
 function drawList(current) {
