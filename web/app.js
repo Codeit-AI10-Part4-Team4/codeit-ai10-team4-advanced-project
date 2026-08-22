@@ -6,15 +6,24 @@
 
 const API_BASE = ''; // 예: 'https://동네광고-api.onrender.com'
 
-async function api(path, fallback) {
-  if (!API_BASE) return fallback;
+async function api(path) {
   const res = await fetch(API_BASE + path);
   if (!res.ok) throw new Error(`${path} → ${res.status}`);
   return res.json();
 }
 
-const M = window.MOCK;
+// 화면이 읽는 데이터 한 벌. 기본은 목업이고, API_BASE 가 채워지면 boot() 이 갈아끼운다.
+// const 로 두면 갈아끼울 수가 없어서 let 이다 — 화면은 그릴 때 값을 읽으므로 그대로 반영된다.
+let M = window.MOCK;
 const RESIST = window.RESISTANCE_LABEL;
+
+/** 화면을 다시 그려도 남아야 하는 값. 서버가 서면 이 자리가 세션으로 바뀐다. */
+const S = {
+  said: [],          // 사장님이 새로 말한 것
+  tone: null,        // 고른 말투
+  shots: {},         // { 칸: objectURL } — 올린 사진
+  saved: {},         // { 형태: true } — 저장한 이미지
+};
 
 // ── 도구 ─────────────────────────────────────────────────────
 
@@ -117,22 +126,22 @@ const SCREENS = {
             <dt>홍보 대상</dt><dd>${esc(M.brief.product)}</dd>
             <dt>가격</dt><dd>${esc(M.brief.price)}</dd>
             <dt>상황</dt><dd>${esc(M.brief.situation)}</dd>
-            <dt>말투</dt><dd>${esc(M.brief.tone)}</dd>
+            <dt>말투</dt><dd>${esc(S.tone || M.brief.tone)}</dd>
           </dl>
         </div>
 
         <div class="chat">
-          ${M.turns.map((t) => `<div class="bubble bubble--${t.who}">${esc(t.text)}</div>`).join('')}
+          ${[...M.turns, ...S.said].map((t) => `<div class="bubble bubble--${t.who}">${esc(t.text)}</div>`).join('')}
         </div>
 
         <div class="chips">
-          ${M.toneChips.map((c) => `<button class="chip">${esc(c)}</button>`).join('')}
+          ${M.toneChips.map((c) => `<button class="chip"${S.tone === c ? ' aria-pressed="true"' : ''} data-say="${esc(c)}">${esc(c)}</button>`).join('')}
         </div>
 
-        <div class="compose">
-          <div class="field" style="flex:1"><input placeholder="직접 입력" aria-label="답변 입력"></div>
+        <form class="compose" data-send>
+          <div class="field" style="flex:1"><input name="say" placeholder="직접 입력" aria-label="답변 입력" autocomplete="off"></div>
           <button class="btn" style="width:auto;padding:12px 20px">전송</button>
-        </div>
+        </form>
 
         <div class="rule stack--s">
           <button class="btn btn--line" data-go="photos">📷 사진 넣기 — 선택</button>
@@ -145,35 +154,40 @@ const SCREENS = {
   photos: {
     title: '사진 넣기',
     bar: true, back: 'chat',
-    render: () => `
+    render: () => {
+      // PHOTO_SLOTS 그대로. read=true 인 제품 사진만 AI 가 읽는다.
+      const slots = [
+        ['product', '제품 사진', '광고할 제품이 잘 보이도록 찍어주세요', true],
+        ['ref',     '레퍼런스',  '이런 분위기로 만들어주세요',           false],
+        ['sketch',  '스케치',    '이런 배치·구도로 만들어주세요',        false],
+      ];
+      const slot = ([key, label, hint, read]) => {
+        const url = S.shots[key];
+        const body = url
+          ? `<img src="${url}" alt="${esc(label)} 미리보기"
+                  style="width:100%;height:200px;object-fit:cover;border-radius:var(--r);border:1px solid var(--line)">
+             ${read ? `<p class="muted">AI가 읽은 내용 — ${esc(M.photos.product.note)}</p>` : ''}
+             <button class="btn btn--line btn--sm" style="width:auto;align-self:flex-start"
+                     data-drop="${key}">빼기</button>`
+          : `<label class="slot__drop"><span>＋</span><span>사진 올리기</span>
+               <input type="file" accept="image/png,image/jpeg,image/webp" hidden data-pick="${key}"></label>`;
+        return `<div class="slot">
+            <div><strong style="font-size:15px">${esc(label)}</strong>
+              <p class="muted" style="margin:2px 0 0">${esc(hint)}</p></div>
+            ${body}
+          </div>`;
+      };
+
+      return `
       <div class="stack">
         <div class="note">세 칸 모두 선택입니다. 안 올려도 광고는 만들어집니다.</div>
-
-        <div class="slot">
-          <div><strong style="font-size:15px">제품 사진</strong>
-            <p class="muted" style="margin:2px 0 0">광고할 제품이 잘 보이도록 찍어주세요</p></div>
-          <div class="slot__shot">올린 사진</div>
-          <p class="muted">AI가 읽은 내용 — ${esc(M.photos.product.note)}</p>
-          <button class="btn btn--line btn--sm" style="width:auto;align-self:flex-start">빼기</button>
-        </div>
-
-        <div class="rule stack">
-          <div class="slot">
-            <div><strong style="font-size:15px">레퍼런스</strong>
-              <p class="muted" style="margin:2px 0 0">이런 분위기로 만들어주세요</p></div>
-            <button class="slot__drop"><span>＋</span><span>사진 올리기</span></button>
-          </div>
-          <div class="slot">
-            <div><strong style="font-size:15px">스케치</strong>
-              <p class="muted" style="margin:2px 0 0">이런 배치·구도로 만들어주세요</p></div>
-            <button class="slot__drop"><span>＋</span><span>사진 올리기</span></button>
-          </div>
-        </div>
-
+        ${slot(slots[0])}
+        <div class="rule stack">${slot(slots[1])}${slot(slots[2])}</div>
         <p class="muted rule">제품 사진만 AI가 읽어 문구에 반영합니다.
           레퍼런스·스케치는 “어떻게 그릴지”에 대한 지시라 읽지 않습니다.</p>
         <button class="btn" data-go="chat">다 넣었어요</button>
-      </div>`,
+      </div>`;
+    },
   },
 
   panel: {
@@ -300,16 +314,19 @@ const SCREENS = {
         </div>
 
         <div id="shots" class="stack--s rule">
-          ${M.images.map((im) => `
+          ${M.images.map((im) => {
+            const saved = S.saved[im.style] ?? im.saved;
+            return `
             <div class="card">
               <strong style="font-size:15px">${esc(im.label)}</strong>
               <div class="shot"><span class="muted">광고 이미지</span><span class="data">1080 × 1080</span></div>
               <div class="btn-row">
-                <button class="btn ${im.saved ? 'btn--done' : 'btn--line'} btn--sm" ${im.saved ? 'disabled' : ''}>
-                  ${im.saved ? '저장됨' : '저장'}</button>
-                <button class="btn btn--line btn--sm">다운로드</button>
+                <button class="btn ${saved ? 'btn--done' : 'btn--line'} btn--sm"
+                        data-save="${im.style}" ${saved ? 'disabled' : ''}>${saved ? '저장됨' : '저장'}</button>
+                <button class="btn btn--line btn--sm" data-download>다운로드</button>
               </div>
-            </div>`).join('')}
+            </div>`;
+          }).join('')}
         </div>
 
         <p class="muted">GPU를 찾지 못해 CPU로 만들었습니다. 장당 18초쯤 걸립니다.</p>
@@ -339,12 +356,21 @@ function route() {
   bar.hidden = !screen.bar;
   $('#bar-title').textContent = screen.title;
   $('[data-back]').hidden = !screen.back;
-  bar.dataset.back = screen.back || '';
+  // ⚠ data-back 으로 두면 안 된다 — 바 자신이 [data-back] 에 걸려서
+  //   $('[data-back]') 가 뒤로가기 버튼 대신 바를 잡고, 바가 통째로 숨는다.
+  //   클릭도 마찬가지로 바 안 아무 데나 누르면 뒤로 가버린다.
+  bar.dataset.backto = screen.back || '';
 
   const main = $('#main');
   main.innerHTML = screen.render();
-  main.focus({ preventScroll: true });
-  window.scrollTo(0, 0);
+
+  // 화면이 바뀔 때만 맨 위로. 같은 화면을 다시 그리는 것(대화 전송·사진 추가)까지
+  // 위로 올려버리면 방금 쓴 말이 화면 밖으로 사라진다.
+  if (name !== route.last) {
+    main.focus({ preventScroll: true });
+    window.scrollTo(0, 0);
+    route.last = name;
+  }
 
   document.title = screen.title ? `${screen.title} · 동네 광고 만들기` : '동네 광고 만들기';
   drawList(name);
@@ -358,14 +384,47 @@ document.addEventListener('click', (e) => {
   const goEl = e.target.closest('[data-go]');
   if (goEl) { go(goEl.dataset.go); return; }
 
-  if (e.target.closest('[data-back]')) { go($('#bar').dataset.back || 'stores'); return; }
+  if (e.target.closest('[data-back]')) { go($('#bar').dataset.backto || 'stores'); return; }
 
   if (e.target.closest('[data-drawer]')) { openDrawer(true); return; }
   if (e.target.closest('[data-drawer-close]') || e.target.id === 'drawer') { openDrawer(false); return; }
 
+  // 말투 칩 — 고른 말투가 주문서에 바로 반영된다
+  const say = e.target.closest('[data-say]');
+  if (say) { S.tone = say.dataset.say; S.said.push({ who: 'me', text: say.dataset.say }); route(); return; }
+
+  const drop = e.target.closest('[data-drop]');
+  if (drop) {
+    URL.revokeObjectURL(S.shots[drop.dataset.drop]);   // 안 풀면 탭이 닫힐 때까지 메모리에 남는다
+    delete S.shots[drop.dataset.drop];
+    route(); return;
+  }
+
+  const save = e.target.closest('[data-save]');
+  if (save) { S.saved[save.dataset.save] = true; route(); toast('저장했습니다'); return; }
+
+  if (e.target.closest('[data-download]')) { toast('목업이라 아직 내려받을 이미지가 없습니다'); return; }
+
   // 이미지 생성은 서버에서 18초 걸린다. 그동안 화면이 멈춘 것처럼 보이지 않게 한다.
   const make = e.target.closest('[data-make]');
   if (make) fakeMake(make);
+});
+
+document.addEventListener('change', (e) => {
+  const pick = e.target.closest('[data-pick]');
+  if (!pick || !pick.files[0]) return;
+  S.shots[pick.dataset.pick] = URL.createObjectURL(pick.files[0]);
+  route();
+});
+
+document.addEventListener('submit', (e) => {
+  const form = e.target.closest('[data-send]');
+  if (!form) return;
+  e.preventDefault();                       // 새로고침되면 대화가 날아간다
+  const text = form.say.value.trim();
+  if (!text) return;
+  S.said.push({ who: 'me', text });
+  route();
 });
 
 document.addEventListener('keydown', (e) => {
@@ -385,6 +444,23 @@ function drawList(current) {
     </button>`).join('');
 }
 
+/** 눌렀는데 아무 일도 안 일어나면 고장으로 읽힌다. 한 줄로 결과를 말한다. */
+let toastTimer;
+function toast(text) {
+  let el = $('#toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast';
+    el.className = 'toast';
+    el.setAttribute('role', 'status');
+    document.body.append(el);
+  }
+  el.textContent = text;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 2000);
+}
+
 /** 목업이라 실제로 만들지는 않는다. 기다림이 어떻게 보이는지만 보여준다. */
 function fakeMake(btn) {
   const shots = $('#shots');
@@ -400,7 +476,20 @@ function fakeMake(btn) {
   }, 2200);
 }
 
-window.addEventListener('hashchange', route);
 $('#drawer-list').addEventListener('click', () => openDrawer(false));
 
-route();
+/** 서버가 있으면 서버 값으로, 없거나 실패하면 목업으로 그린다.
+ *  화면이 아예 안 뜨는 것보다 목업이라도 뜨는 편이 낫다 — 실패는 콘솔에만 남긴다. */
+async function boot() {
+  if (API_BASE) {
+    try {
+      M = await api('/demo');
+    } catch (e) {
+      console.warn('서버에서 데이터를 못 받아 목업으로 그립니다.', e);
+    }
+  }
+  window.addEventListener('hashchange', route);
+  route();
+}
+
+boot();

@@ -173,7 +173,8 @@ button { font: inherit; color: inherit; }
 .btn:active { transform: scale(.985); }
 .btn--line { background: var(--paper); color: var(--ink-2); border-color: var(--line); }
 .btn--done { background: var(--line-soft); color: var(--ink-3); border-color: transparent; cursor: default; }
-.btn--sm   { min-height: 40px; font-size: 13px; padding: 8px 14px; border-radius: var(--r-sm); }
+/* 44px 은 손가락으로 정확히 누를 수 있는 최소 높이다. 작은 버튼도 그 아래로 내리지 않는다. */
+.btn--sm   { min-height: 44px; font-size: 13px; padding: 8px 14px; border-radius: var(--r-sm); }
 .btn--ghost{ background: none; color: var(--accent); border-color: transparent; }
 .btn-row { display: flex; gap: 8px; }
 
@@ -282,6 +283,10 @@ button { font: inherit; color: inherit; }
   padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px;
   background: var(--paper); color: var(--ink-2); font-size: 13px; cursor: pointer;
 }
+.chip[aria-pressed="true"] {
+  border-color: var(--accent); background: var(--accent-soft);
+  color: var(--accent-ink); font-weight: 600;
+}
 .compose { display: flex; gap: 8px; align-items: flex-end; }
 .compose input { flex: 1; }
 
@@ -313,6 +318,19 @@ button { font: inherit; color: inherit; }
 .progress i { display: block; height: 100%; width: 30%; background: var(--accent); border-radius: 999px;
               animation: slide 1.4s ease-in-out infinite; }
 @keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+
+/* ── 알림 ──────────────────────────────────────────────────── */
+
+.toast {
+  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+  z-index: 50; max-width: min(420px, calc(100vw - 32px));
+  padding: 11px 18px; border-radius: 999px;
+  background: var(--ink); color: var(--ground);
+  font-size: 13.5px; font-weight: 500; text-align: center;
+  box-shadow: 0 6px 20px rgba(0,0,0,.16);
+  animation: toast-in .2s cubic-bezier(.2,.7,.3,1);
+}
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }
 
 /* ── 화면 목록(시연용) ─────────────────────────────────────── */
 
