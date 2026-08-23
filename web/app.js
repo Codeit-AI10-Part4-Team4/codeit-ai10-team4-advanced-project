@@ -468,7 +468,9 @@ const SCREENS = {
 
         <div class="stack--s">
           <button class="btn" data-make>광고 이미지 만들기</button>
-          <p class="muted" style="text-align:center">20~30초 걸립니다</p>
+          <!-- 실측(GPU 없는 노트북): 첫 장 53.8초 · 두 번째 20.1초.
+               첫 장이 오래 걸리는 건 모델을 메모리에 올리기 때문이다. -->
+          <p class="muted" style="text-align:center">첫 장은 1분쯤, 그다음부터는 20초쯤 걸립니다</p>
         </div>
 
         <div id="shots" class="stack--s rule">
@@ -487,7 +489,7 @@ const SCREENS = {
           }).join('')}
         </div>
 
-        <p class="muted">GPU를 찾지 못해 CPU로 만들었습니다. 장당 18초쯤 걸립니다.</p>
+        <p class="muted">GPU를 찾지 못해 CPU로 만들었습니다. GPU가 있으면 훨씬 빠릅니다.</p>
         <button class="btn btn--line" data-make>사진만 다시 만들기</button>
         <p class="muted rule">문구를 바꾸려면 손님 반응 화면에서 다른 것을 고르세요 —
           사진은 그대로 두고 글자만 다시 얹습니다.</p>

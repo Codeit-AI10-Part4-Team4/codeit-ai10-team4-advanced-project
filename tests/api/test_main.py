@@ -4,11 +4,14 @@
 카카오 지오코딩을 건너뛰고, 데이터는 저장소에 있는 data/panel.duckdb 를 읽는다.
 """
 
+import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
+from api import jobs
 from api.main import app
 
 client = TestClient(app)
@@ -69,3 +72,66 @@ def test_좌표는_둘_다_주거나_둘_다_빼야_한다() -> None:
 def test_주소가_비면_거절한다() -> None:
     response = client.get("/trade-area", params={"address": "", "industry": "cafe"})
     assert response.status_code == 422
+
+
+# ── 오래 걸리는 작업 ────────────────────────────────────────────
+# 확산 모델은 부르지 않는다 (한 장에 18초). 폴링 계약만 본다.
+
+
+def _wait(job_id: str, timeout: float = 3.0) -> dict[str, Any]:
+    """끝날 때까지 물어본다 — 화면이 하는 일과 같다."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        body: dict[str, Any] = client.get(f"/jobs/{job_id}").json()
+        if body["status"] != "running":
+            return body
+        time.sleep(0.02)
+    raise AssertionError(f"{timeout}초 안에 안 끝났다")
+
+
+def test_등록하면_바로_번호를_주고_나중에_끝난다() -> None:
+    """느린 작업이라도 등록은 즉시 끝나야 한다. 그게 이 구조의 이유다."""
+    jobs.clear()
+
+    def 느리다() -> str:
+        time.sleep(0.05)
+        return "다 됐다"
+
+    job = jobs.submit(느리다)
+    assert client.get(f"/jobs/{job.id}").json()["status"] in {"running", "done"}
+    assert _wait(job.id)["status"] == "done"
+
+
+def test_작업이_터져도_서버는_살아있고_이유를_말한다() -> None:
+    """스레드에서 삼키지 않으면 화면은 영원히 running 을 본다."""
+    jobs.clear()
+
+    def 터진다() -> None:
+        raise ValueError("모델을 못 찾았습니다")
+
+    body = _wait(jobs.submit(터진다).id)
+    assert body["status"] == "failed"
+    assert body["error"] is not None and "모델을 못 찾았습니다" in body["error"]
+    assert body["image_url"] is None
+
+
+def test_없는_번호는_404() -> None:
+    """서버를 재시작하면 진행 중이던 작업이 날아간다. 화면이 영원히
+    기다리지 않도록 없다고 말해준다."""
+    assert client.get("/jobs/그런건없다").status_code == 404
+    assert client.get("/jobs/그런건없다/image").status_code == 404
+
+
+def test_끝나기_전에는_이미지를_안_준다() -> None:
+    jobs.clear()
+
+    def 아직() -> None:
+        time.sleep(0.3)
+
+    job = jobs.submit(아직)
+    assert client.get(f"/jobs/{job.id}/image").status_code == 404
+
+
+def test_이미지_요청은_필수값이_빠지면_거절한다() -> None:
+    """등록 단계에서 걸러야 한다 — 18초 뒤에 "product 가 없다"고 하면 늦다."""
+    assert client.post("/ads/image", json={"store_name": "가게"}).status_code == 422
