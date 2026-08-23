@@ -22,10 +22,44 @@ const API_BASE = (() => {
     : '';
 })();
 
-async function api(path) {
-  const res = await fetch(API_BASE + path);
-  if (!res.ok) throw new Error(`${path} → ${res.status}`);
-  return res.json();
+/** 로그인 토큰.
+ *
+ * 서버를 다시 띄우면 서명 비밀이 새로 만들어져서 들고 있던 토큰이 401 이 된다.
+ * 그때 그냥 두면 "내 가게"가 이유 없이 빈 화면으로 보인다 — 지우고 로그인으로 보낸다. */
+const TOKEN = {
+  get: () => localStorage.getItem('token'),
+  set: (t) => localStorage.setItem('token', t),
+  clear: () => localStorage.removeItem('token'),
+};
+
+/** 서버 호출 한 곳. body 를 주면 POST 다.
+ *
+ * 실패하면 서버가 준 detail 을 그대로 던진다 — 사장님께 보여줄 문장으로 쓰여 있다.
+ * 다만 422(형식 오류)의 detail 은 배열이라 그대로는 못 보여준다. */
+async function api(path, body) {
+  const token = TOKEN.get();
+  let res;
+  try {
+    res = await fetch(API_BASE + path, {
+      method: body ? 'POST' : 'GET',
+      headers: {
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    // 서버가 꺼져 있거나 CORS 로 막히면 fetch 가 통째로 던진다.
+    // 브라우저가 주는 말은 "Failed to fetch" 라서 사장님 화면에 그대로 못 쓴다.
+    throw new Error('서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해주세요.');
+  }
+  if (res.ok) return res.json();
+
+  if (res.status === 401 && token) { TOKEN.clear(); S.stores = []; S.store = null; }
+  const d = await res.json().catch(() => null);
+  const err = new Error(typeof d?.detail === 'string' ? d.detail : `${path} → ${res.status}`);
+  err.status = res.status;
+  throw err;
 }
 
 // 화면이 읽는 데이터 한 벌. 기본은 목업이고, API_BASE 가 채워지면 boot() 이 갈아끼운다.
@@ -37,13 +71,18 @@ const RESIST = window.RESISTANCE_LABEL;
  *  목업과 실측을 구분 못 하면 데모에서 오해가 생긴다. */
 let LIVE = false;
 
+/** 목업 결과의 원본. loadTradeArea() 가 M.result 를 실측으로 덮어쓰기 때문에,
+ *  가게를 바꿨다가 상권 조회가 실패하면 앞 가게 숫자가 남는다 — 그때 되돌릴 자리다. */
+const MOCK_RESULT = JSON.stringify(window.MOCK.result);
+
 /** 화면을 다시 그려도 남아야 하는 값. 서버가 서면 이 자리가 세션으로 바뀐다. */
 const S = {
   said: [],          // 사장님이 새로 말한 것
   tone: null,        // 고른 말투
   shots: {},         // { 칸: objectURL } — 올린 사진
   saved: {},         // { 형태: true } — 저장한 이미지
-  stores: [],        // 새로 등록한 가게
+  stores: [],        // 내 가게 목록 (로그인했으면 서버에서 받은 것)
+  store: null,       // 고른 가게 — 상권 조회·이미지 요청이 이걸 쓴다
   revised: null,     // 마지막으로 고쳐달라고 한 말
   //: { 형태: { status, jobId, error, url, sec } } — 서버에 맡긴 이미지 작업
   jobs: {},
@@ -139,10 +178,11 @@ function imageCard(im) {
 
 /** 두 형태를 한꺼번에 맡기고 각각 물어본다. 서버가 2개까지 동시에 돌린다. */
 async function startImages() {
-  const store = M.stores[0];
+  const store = picked();
   const body = {
     store_name: store.name,
-    industry: store.industryId,
+    // 목업 가게는 industryId, 서버에서 받은 가게는 industry 가 id 다.
+    industry: store.industryId || store.industry,
     product: M.brief.product,
     price: Number(String(M.brief.price).replace(/[^\d]/g, '')) || 0,
     headline: M.copies[0].headline,
@@ -255,13 +295,17 @@ const SCREENS = {
           <p class="lead">광고를 붙이기 전에, 이 동네에서 실제로 사 먹는 사람들이
             뭐라고 할지 들어보세요.</p>
         </div>
-        <div class="stack--s">
-          <div class="field"><label for="em">이메일</label>
-            <input id="em" type="email" inputmode="email" autocomplete="email" placeholder="sajang@example.com"></div>
-          <div class="field"><label for="pw">비밀번호</label>
-            <input id="pw" type="password" autocomplete="current-password" placeholder="••••••••"></div>
-        </div>
-        <button class="btn" data-go="stores">로그인</button>
+        <!-- 서버가 아이디를 이메일로 강제하지 않는다. type="email" 로 두면
+             이메일이 아닌 아이디로는 폼이 아예 안 넘어간다. -->
+        <form class="stack" data-login>
+          <div class="stack--s">
+            <div class="field"><label for="em">아이디</label>
+              <input id="em" name="username" autocomplete="username" placeholder="sajang@example.com" required></div>
+            <div class="field"><label for="pw">비밀번호</label>
+              <input id="pw" name="password" type="password" autocomplete="current-password" placeholder="••••••••" required></div>
+          </div>
+          <button class="btn">로그인</button>
+        </form>
         <p class="muted" style="text-align:center">
           아직 계정이 없으신가요?
           <button class="btn--ghost" data-go="signup">가입하기</button>
@@ -282,15 +326,17 @@ const SCREENS = {
           <h2 class="h2" style="font-size:21px">가게 하나만 있으면 시작할 수 있어요</h2>
           <p class="muted">가게는 가입한 뒤에 등록합니다.</p>
         </div>
-        <div class="stack--s">
-          <div class="field"><label for="su-em">이메일</label>
-            <input id="su-em" type="email" inputmode="email" autocomplete="email" placeholder="sajang@example.com"></div>
-          <div class="field"><label for="su-pw">비밀번호</label>
-            <input id="su-pw" type="password" autocomplete="new-password" placeholder="8자 이상"></div>
-          <div class="field"><label for="su-pw2">비밀번호 확인</label>
-            <input id="su-pw2" type="password" autocomplete="new-password"></div>
-        </div>
-        <button class="btn" data-go="storeNew">가입하고 가게 등록하기</button>
+        <form class="stack" data-signup>
+          <div class="stack--s">
+            <div class="field"><label for="su-em">아이디</label>
+              <input id="su-em" name="username" autocomplete="username" placeholder="sajang@example.com" required></div>
+            <div class="field"><label for="su-pw">비밀번호</label>
+              <input id="su-pw" name="password" type="password" autocomplete="new-password" placeholder="8자 이상" required></div>
+            <div class="field"><label for="su-pw2">비밀번호 확인</label>
+              <input id="su-pw2" name="password2" type="password" autocomplete="new-password" required></div>
+          </div>
+          <button class="btn">가입하고 가게 등록하기</button>
+        </form>
       </div>`,
   },
 
@@ -304,17 +350,22 @@ const SCREENS = {
           <p class="muted">가게 주소로 그 동네 손님을 부릅니다.</p>
         </div>
         <div class="stack--s">
-          ${[...M.stores, ...S.stores].map((s) => `
-            <button class="card card--tap" data-go="chat">
+          ${storeList().length ? storeList().map((s, i) => `
+            <button class="card card--tap" data-store="${i}">
               <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">
                 <strong style="font-size:16px">${esc(s.name)}</strong>
-                <span class="tag">${esc(s.industry)}</span>
+                <span class="tag">${esc(indLabel(s.industry))}</span>
               </div>
               <span class="muted">${esc(s.address)}</span>
-            </button>`).join('')}
+            </button>`).join('')
+            : '<p class="muted">아직 등록한 가게가 없습니다. 아래에서 가게를 등록해주세요.</p>'}
         </div>
         <button class="btn btn--line" data-go="storeNew">새 가게 등록하기</button>
 
+        <!-- 최근 광고는 목업이다. 실제 계정으로 로그인했을 때까지 보여주면
+             내가 만든 적 없는 광고가 내 기록처럼 보인다 — 서버에 목록 API 가
+             생기기 전까진 로그인 안 했을 때만 띄운다. -->
+        ${TOKEN.get() ? '' : `
         <section class="rule">
           <h2 class="h2">최근에 만든 광고</h2>
           <div class="stack--s">
@@ -324,7 +375,7 @@ const SCREENS = {
                 <strong style="font-size:15px;font-weight:600">${esc(a.headline)}</strong>
               </div>`).join('')}
           </div>
-        </section>
+        </section>`}
       </div>`,
   },
 
@@ -340,7 +391,7 @@ const SCREENS = {
           <label for="sn-ind">업종</label>
           <select id="sn-ind" name="industry" required>
             <option value="" disabled selected>골라주세요</option>
-            ${M.industries.map((i) => `<option value="${esc(i.label)}">${i.emoji} ${esc(i.label)}</option>`).join('')}
+            ${M.industries.map((i) => `<option value="${esc(i.id)}">${i.emoji} ${esc(i.label)}</option>`).join('')}
           </select>
           <!-- 업종은 손님 패널이 그 동네 같은 업종 매출을 찾는 열쇠다.
                맞는 업종이 없으면 동네 전체 평균으로 떨어져 객단가가 통째로 달라진다. -->
@@ -349,11 +400,11 @@ const SCREENS = {
         </div>
 
         <div class="field"><label for="sn-addr">주소</label>
-          <input id="sn-addr" name="address" placeholder="서울시 마포구 망원동 123-4" required>
+          <input id="sn-addr" name="address" placeholder="서울 마포구 망원로 87" required>
           <p class="muted">주소로 상권을 찾습니다. 지번·도로명 다 됩니다.</p></div>
 
         <div class="field"><label for="sn-tel">연락처</label>
-          <input id="sn-tel" name="tel" type="tel" inputmode="tel" placeholder="02-000-0000"></div>
+          <input id="sn-tel" name="phone" type="tel" inputmode="tel" placeholder="02-000-0000"></div>
 
         <button class="btn">등록하고 광고 만들기</button>
       </form>`,
@@ -669,6 +720,26 @@ document.addEventListener('click', (e) => {
 
   if (e.target.closest('[data-back]')) { go($('#bar').dataset.backto || 'stores'); return; }
 
+  // 고른 가게가 상권 조회·이미지 요청의 기준이 된다
+  const card = e.target.closest('[data-store]');
+  if (card) {
+    S.store = storeList()[Number(card.dataset.store)];
+    go('chat');
+    refreshTradeArea().then(route);
+    return;
+  }
+
+  if (e.target.closest('[data-logout]')) {
+    TOKEN.clear();
+    S.stores = [];
+    S.store = null;
+    openDrawer(false);
+    go('login');
+    toast('로그아웃했습니다');
+    refreshTradeArea().then(route);
+    return;
+  }
+
   if (e.target.closest('[data-drawer]')) { openDrawer(true); return; }
   if (e.target.closest('[data-drawer-close]') || e.target.id === 'drawer') { openDrawer(false); return; }
 
@@ -732,15 +803,9 @@ document.addEventListener('submit', (e) => {
     return;
   }
 
-  if (form.matches('[data-store-new]')) {
-    S.stores.push({
-      name: form.name.value.trim(),
-      industry: form.industry.value,
-      address: form.address.value.trim(),
-    });
-    go('chat');
-    toast('가게를 등록했습니다');
-  }
+  if (form.matches('[data-login]') || form.matches('[data-signup]')) { submitAuth(form); return; }
+
+  if (form.matches('[data-store-new]')) { addStore(form); }
 });
 
 document.addEventListener('keydown', (e) => {
@@ -767,7 +832,8 @@ function drawList(current) {
   $('#drawer-list').innerHTML = ORDER.map(([key, label], i) => `
     <button class="drawer__item" data-go="${key}" ${key === current ? 'aria-current="true"' : ''}>
       <span class="drawer__num">${i + 1}</span>${label}
-    </button>`).join('');
+    </button>`).join('') + (TOKEN.get() ? `
+    <button class="drawer__item" data-logout><span class="drawer__num">↩</span>로그아웃</button>` : '');
 }
 
 /** 눌렀는데 아무 일도 안 일어나면 고장으로 읽힌다. 한 줄로 결과를 말한다. */
@@ -797,17 +863,30 @@ const TIME_LABEL = {
 
 const won = (n) => n.toLocaleString('ko-KR');
 
+/** 업종 id → 사장님이 읽는 이름. 서버는 id 만 준다(korean_food).
+ *  목업 가게는 이미 라벨을 들고 있어서 못 찾으면 받은 값을 그대로 쓴다. */
+const indLabel = (v) => M.industries.find((i) => i.id === v)?.label || v;
+
+/** 화면에 보여줄 가게 목록.
+ *  로그인해서 서버에서 받아왔으면 **그것만** — 목업 가게를 섞으면 등록한 적 없는
+ *  가게가 내 목록에 있는 것처럼 보인다. */
+const storeList = () => (TOKEN.get() ? S.stores : [...M.stores, ...S.stores]);
+
+/** 지금 광고를 만들고 있는 가게. 아직 안 골랐으면 목업 첫 가게로 화면을 채운다. */
+const picked = () => S.store || M.stores[0];
+
 /** 상권 실측을 받아 화면 문장으로 바꾼다.
  *
  * 여기서 만드는 세 문장은 **LLM 을 거치지 않는다.** 전부 서울시 원본에서
  * 뺄셈·나눗셈으로 나오므로 같은 입력이면 항상 같은 문장이다. 손님 평가가
  * 흔들려도 이 줄들은 흔들리지 않는다 — 화면에서 신뢰의 바닥을 깔아준다. */
 async function loadTradeArea() {
-  const s = M.stores[0];
-  const t = await api(
-    `/trade-area?address=${encodeURIComponent(s.address)}` +
-    `&industry=${encodeURIComponent(s.industryId)}&lat=${s.lat}&lon=${s.lon}`,
-  );
+  const s = picked();
+  const q = new URLSearchParams({ address: s.address, industry: s.industryId || s.industry });
+  // 좌표를 알면 같이 보낸다 — 카카오 지오코딩(그리고 키)을 건너뛰는 통로다.
+  // 사장님이 직접 등록한 가게는 좌표가 없어서 서버가 주소를 찍어봐야 한다.
+  if (s.lat != null && s.lon != null) { q.set('lat', s.lat); q.set('lon', s.lon); }
+  const t = await api(`/trade-area?${q}`);
 
   const r = M.result;
   r.area_nm = t.area_nm;
@@ -851,17 +930,88 @@ async function loadTradeArea() {
     `이 동네는 <b>${peak}</b>에 가장 많이 팔립니다. 광고에서 그 시간대를 말해보시는 건 어떨까요.`;
 }
 
+/** 고른 가게로 상권 문장을 다시 만든다.
+ *
+ *  실패하면 목업 원본으로 되돌린다 — loadTradeArea 가 M.result 를 제자리에서
+ *  덮어쓰기 때문에, 그냥 두면 앞 가게의 동네 숫자가 이 가게 것처럼 남는다. */
+async function refreshTradeArea() {
+  if (!API_BASE) return;
+  LIVE = false;
+  try {
+    await loadTradeArea();
+    LIVE = true;
+  } catch (e) {
+    M.result = JSON.parse(MOCK_RESULT);
+    console.warn('서버에서 상권을 못 받아 목업으로 그립니다.', e);
+  }
+}
+
+/** 서버에서 내 가게를 받아온다. 토큰이 없거나 서버가 없으면 할 일이 없다. */
+async function loadStores() {
+  if (!API_BASE || !TOKEN.get()) return;
+  S.stores = await api('/stores');
+}
+
+/** 로그인·가입. 서버가 없으면 화면만 넘긴다 — 목업으로도 흐름은 보여야 한다. */
+async function submitAuth(form) {
+  const isSignup = form.matches('[data-signup]');
+  if (!API_BASE) { go(isSignup ? 'storeNew' : 'stores'); return; }
+
+  const username = form.username.value.trim();
+  const password = form.password.value;
+  // 서버도 8자를 검사하지만 그건 422 로 오고 detail 이 배열이라 보여줄 문장이 없다.
+  if (isSignup && password.length < 8) { toast('비밀번호는 8자 이상이어야 합니다'); return; }
+  if (isSignup && password !== form.password2.value) { toast('비밀번호가 서로 다릅니다'); return; }
+
+  try {
+    const ses = await api(isSignup ? '/auth/signup' : '/auth/login', { username, password });
+    TOKEN.set(ses.token);
+    S.store = null;
+    S.stores = [];
+    await loadStores();
+  } catch (e) {
+    toast(e.message);
+    return;
+  }
+  go(isSignup ? 'storeNew' : 'stores');
+  toast(isSignup ? '가입했습니다' : '로그인했습니다');
+}
+
+/** 가게 등록. 로그인해서 서버에 저장하거나, 서버가 없으면 화면 안에만 담는다. */
+async function addStore(form) {
+  const body = {
+    name: form.name.value.trim(),
+    industry: form.industry.value,        // id 다. 서버가 registry 로 검사한다.
+    address: form.address.value.trim(),
+    phone: form.phone.value.trim(),
+  };
+
+  if (!API_BASE || !TOKEN.get()) {
+    S.stores.push(body);
+    S.store = body;
+  } else {
+    try {
+      S.store = await api('/stores', body);
+      await loadStores();
+    } catch (e) { toast(e.message); return; }
+  }
+
+  go('chat');
+  toast('가게를 등록했습니다');
+  // 상권은 늦게 와도 된다. 기다렸다 넘어가면 등록 버튼이 몇 초 멈춘 것처럼 보인다.
+  refreshTradeArea().then(route);
+}
+
 /** 서버가 있으면 서버 값으로, 없거나 실패하면 목업으로 그린다.
  *  화면이 아예 안 뜨는 것보다 목업이라도 뜨는 편이 낫다 — 실패는 콘솔에만 남긴다. */
 async function boot() {
-  if (API_BASE) {
-    try {
-      await loadTradeArea();
-      LIVE = true;
-    } catch (e) {
-      console.warn('서버에서 상권을 못 받아 목업으로 그립니다.', e);
-    }
+  if (API_BASE && TOKEN.get()) {
+    // 토큰이 만료·위조로 걸리면 api() 가 알아서 지운다.
+    try { await loadStores(); } catch (e) { console.warn('내 가게를 못 받았습니다.', e); }
   }
+  await refreshTradeArea();
+  // 이미 로그인해 둔 사람에게 로그인 화면부터 보여줄 이유가 없다.
+  if (!location.hash && TOKEN.get()) location.hash = '#/stores';
   window.addEventListener('hashchange', route);
   route();
 }
