@@ -168,7 +168,10 @@ class JobAccepted(BaseModel):
 class JobStatus(BaseModel):
     job_id: str
     status: jobs.Status
+    #: 실제로 도는 데 걸린 시간 (줄 선 시간 제외)
     elapsed_ms: int
+    #: 등록하고부터 흐른 시간 — 화면이 사장님께 보여주는 숫자
+    waited_ms: int = 0
     #: 실패했을 때만 채워진다
     error: str | None = None
     #: 끝났으면 결과를 어디서 가져가는지
@@ -212,6 +215,7 @@ def job_status(job_id: str) -> JobStatus:
         job_id=job.id,
         status=job.status,
         elapsed_ms=job.elapsed_ms,
+        waited_ms=job.waited_ms,
         error=job.error,
         image_url=f"/jobs/{job.id}/image" if job.status == "done" else None,
     )

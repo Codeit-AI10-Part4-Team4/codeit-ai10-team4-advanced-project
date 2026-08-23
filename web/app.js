@@ -45,6 +45,8 @@ const S = {
   saved: {},         // { 형태: true } — 저장한 이미지
   stores: [],        // 새로 등록한 가게
   revised: null,     // 마지막으로 고쳐달라고 한 말
+  //: { 형태: { status, jobId, error, url, sec } } — 서버에 맡긴 이미지 작업
+  jobs: {},
 };
 
 // ── 도구 ─────────────────────────────────────────────────────
@@ -86,6 +88,127 @@ function band(people, { legend = true } = {}) {
 
   return `<div class="band"><div class="band__dots" role="img"
       aria-label="손님 ${people.length}명. 점 크기는 매출 비중입니다.">${dots}</div>${keys}</div>`;
+}
+
+// ── 광고 이미지 ──────────────────────────────────────────────
+// 한 장에 첫 번째는 54초, 그다음부터는 20초다(실측, GPU 없는 노트북).
+// 그동안 화면이 죽은 것처럼 보이지 않게 경과 시간을 세어 보여준다.
+
+/** 형태 한 칸. 아직 안 만들었으면 빈 자리, 도는 중이면 진행, 끝나면 이미지. */
+function imageCard(im) {
+  const j = S.jobs[im.style];
+  const saved = S.saved[im.style] ?? (j ? false : im.saved);
+
+  let body;
+  if (j?.status === 'queued' || j?.status === 'running') {
+    // 한 번에 하나씩 만든다 — 확산 파이프라인이 스레드 안전하지 않아서다.
+    // 줄 서 있는 걸 "만드는 중"이라고 하면 화면이 거짓말을 하게 된다.
+    const label = j.status === 'queued' ? '차례를 기다리는 중' : '만드는 중';
+    body = `<div class="shot"><span class="muted">${label}</span>
+              <span class="data">${j.sec}초</span></div>
+            <div class="progress"><i></i></div>`;
+  } else if (j?.status === 'failed') {
+    // 한 형태가 실패해도 다른 형태는 남는다 — 실패한 칸에만 안내를 띄운다.
+    body = `<div class="note note--flag">${esc(im.label)}을(를) 만들지 못했습니다.
+              <br><span style="font-size:12px">${esc(j.error || '')}</span></div>`;
+  } else if (j?.status === 'done') {
+    // API_BASE 를 빼면 화면 오리진(8899)으로 붙어서 이미지가 안 뜬다.
+    body = `<img src="${API_BASE}${j.url}" alt="${esc(im.label)} 광고 이미지"
+                 style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:var(--r-sm)">`;
+  } else {
+    body = `<div class="shot"><span class="muted">광고 이미지</span>
+              <span class="data">1080 × 1080</span></div>`;
+  }
+
+  const canSave = !j || j.status === 'done';
+  return `
+    <div class="card">
+      <strong style="font-size:15px">${esc(im.label)}</strong>
+      ${body}
+      ${j?.status === 'failed' ? '' : `
+        <div class="btn-row">
+          <button class="btn ${saved ? 'btn--done' : 'btn--line'} btn--sm"
+                  data-save="${im.style}" ${saved || !canSave ? 'disabled' : ''}>${saved ? '저장됨' : '저장'}</button>
+          ${j?.status === 'done'
+            ? `<a class="btn btn--line btn--sm" style="text-decoration:none"
+                  href="${API_BASE}${j.url}" download="${esc(im.label)}.png">다운로드</a>`
+            : '<button class="btn btn--line btn--sm" data-download disabled>다운로드</button>'}
+        </div>`}
+    </div>`;
+}
+
+/** 두 형태를 한꺼번에 맡기고 각각 물어본다. 서버가 2개까지 동시에 돌린다. */
+async function startImages() {
+  const store = M.stores[0];
+  const body = {
+    store_name: store.name,
+    industry: store.industryId,
+    product: M.brief.product,
+    price: Number(String(M.brief.price).replace(/[^\d]/g, '')) || 0,
+    headline: M.copies[0].headline,
+    sub: M.copies[0].sub,
+    situation: M.brief.situation,
+    tone: S.tone || M.brief.tone,
+  };
+
+  for (const im of M.images) {
+    S.jobs[im.style] = { status: 'queued', sec: 0 };
+    try {
+      const res = await fetch(`${API_BASE}/ads/image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...body, style: im.style }),
+      });
+      if (!res.ok) throw new Error(`등록 실패 ${res.status}`);
+      const { job_id: jobId } = await res.json();
+      S.jobs[im.style].jobId = jobId;
+      pollJob(im.style, jobId);
+    } catch (e) {
+      S.jobs[im.style] = { status: 'failed', error: String(e.message || e) };
+    }
+  }
+  route();
+}
+
+const busy = (j) => j?.status === 'queued' || j?.status === 'running';
+
+/** 끝날 때까지 2초마다 물어본다. 서버를 재시작하면 404 가 오므로 거기서 멈춘다. */
+async function pollJob(style, jobId) {
+  const idx = M.images.findIndex((i) => i.style === style) + 1;
+
+  // 1초마다 초만 고쳐 쓴다. 통째로 다시 그리면 옆 칸 이미지가 깜빡인다.
+  const tick = setInterval(() => {
+    const j = S.jobs[style];
+    if (!busy(j)) { clearInterval(tick); return; }
+    j.sec += 1;
+    const el = document.querySelector(`#shots .card:nth-child(${idx}) .data`);
+    if (el) el.textContent = `${j.sec}초`;
+  }, 1000);
+
+  while (busy(S.jobs[style])) {
+    await new Promise((r) => setTimeout(r, 2000));
+    try {
+      const res = await fetch(`${API_BASE}/jobs/${jobId}`);
+      if (res.status === 404) throw new Error('작업이 사라졌습니다. 다시 만들어주세요.');
+      const st = await res.json();
+      const j = S.jobs[style];
+      if (st.status === 'done') {
+        S.jobs[style] = { status: 'done', url: st.image_url, sec: Math.round(st.elapsed_ms / 1000) };
+        route();
+      } else if (st.status === 'failed') {
+        S.jobs[style] = { status: 'failed', error: st.error };
+        route();
+      } else if (st.status !== j.status) {
+        // 줄에서 빠져나와 실제로 돌기 시작했다 — 문구가 바뀌어야 한다
+        j.status = st.status;
+        route();
+      }
+    } catch (e) {
+      S.jobs[style] = { status: 'failed', error: String(e.message || e) };
+      route();
+    }
+  }
+  clearInterval(tick);
 }
 
 // ── 다시 만들기 ──────────────────────────────────────────────
@@ -474,19 +597,7 @@ const SCREENS = {
         </div>
 
         <div id="shots" class="stack--s rule">
-          ${M.images.map((im) => {
-            const saved = S.saved[im.style] ?? im.saved;
-            return `
-            <div class="card">
-              <strong style="font-size:15px">${esc(im.label)}</strong>
-              <div class="shot"><span class="muted">광고 이미지</span><span class="data">1080 × 1080</span></div>
-              <div class="btn-row">
-                <button class="btn ${saved ? 'btn--done' : 'btn--line'} btn--sm"
-                        data-save="${im.style}" ${saved ? 'disabled' : ''}>${saved ? '저장됨' : '저장'}</button>
-                <button class="btn btn--line btn--sm" data-download>다운로드</button>
-              </div>
-            </div>`;
-          }).join('')}
+          ${M.images.map((im) => imageCard(im)).join('')}
         </div>
 
         <p class="muted">GPU를 찾지 못해 CPU로 만들었습니다. GPU가 있으면 훨씬 빠릅니다.</p>
@@ -581,9 +692,12 @@ document.addEventListener('click', (e) => {
 
   if (e.target.closest('[data-download]')) { toast('목업이라 아직 내려받을 이미지가 없습니다'); return; }
 
-  // 이미지 생성은 서버에서 18초 걸린다. 그동안 화면이 멈춘 것처럼 보이지 않게 한다.
   const make = e.target.closest('[data-make]');
-  if (make) fakeMake(make);
+  if (make) {
+    if (!API_BASE) { toast('서버가 없어 이미지를 만들 수 없습니다'); return; }
+    if (Object.values(S.jobs).some(busy)) return;   // 두 번 눌러도 한 번만
+    startImages();
+  }
 });
 
 document.addEventListener('change', (e) => {
@@ -671,21 +785,6 @@ function toast(text) {
   el.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.hidden = true; }, 2000);
-}
-
-/** 목업이라 실제로 만들지는 않는다. 기다림이 어떻게 보이는지만 보여준다. */
-function fakeMake(btn) {
-  const shots = $('#shots');
-  if (!shots || btn.dataset.busy) return;
-  btn.dataset.busy = '1';
-  const label = btn.textContent.trim();
-  btn.textContent = '만드는 중...';
-  shots.insertAdjacentHTML('beforebegin', '<div class="progress" id="prog"><i></i></div>');
-  setTimeout(() => {
-    $('#prog')?.remove();
-    btn.textContent = label;
-    delete btn.dataset.busy;
-  }, 2200);
 }
 
 $('#drawer-list').addEventListener('click', () => openDrawer(false));

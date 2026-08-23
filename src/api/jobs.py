@@ -23,10 +23,16 @@ from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any, Literal
 
-Status = Literal["running", "done", "failed"]
+Status = Literal["queued", "running", "done", "failed"]
 
-#: 동시에 돌릴 작업 수. 이미지 생성이 CPU 를 다 쓰므로 늘려도 각자 느려질 뿐이다.
-MAX_WORKERS = 2
+#: 동시에 돌릴 작업 수. **1 이어야 한다.**
+#:
+#: 2 로 두고 감성형·포스터형을 같이 맡겼더니 포스터 쪽이 이렇게 터졌다:
+#:     RuntimeError: Already borrowed
+#: HuggingFace 토크나이저(Rust)를 두 스레드가 동시에 쓸 때 나는 오류다 —
+#: 확산 파이프라인이 스레드 안전하지 않다. CPU 에서는 병렬로 돌려도 같은 코어를
+#: 나눠 쓸 뿐이라 빨라지지도 않는다. 줄 세우는 편이 맞다.
+MAX_WORKERS = 1
 
 #: 끝난 작업을 얼마나 들고 있을지(초). 화면이 결과를 가져갈 시간은 줘야 하고,
 #: 무한정 들고 있으면 이미지가 메모리에 쌓인다.
@@ -36,15 +42,27 @@ KEEP_DONE_SEC = 30 * 60
 @dataclass
 class Job:
     id: str
-    status: Status = "running"
+    status: Status = "queued"
     result: Any = None
     error: str | None = None
-    started_at: float = field(default_factory=time.time)
+    #: 등록한 시각. 줄을 서 있는 동안도 여기서부터 흐른다.
+    queued_at: float = field(default_factory=time.time)
+    #: 실제로 돌기 시작한 시각. 한 번에 하나씩 도므로 등록 시각과 다를 수 있다.
+    started_at: float | None = None
     ended_at: float | None = None
 
     @property
     def elapsed_ms(self) -> int:
+        """도는 데 걸린 시간. 기다린 시간은 빼고 센다 —
+        "이미지 한 장에 몇 초"를 알고 싶은 것이지 줄 선 시간이 궁금한 게 아니다."""
+        if self.started_at is None:
+            return 0
         return int(((self.ended_at or time.time()) - self.started_at) * 1000)
+
+    @property
+    def waited_ms(self) -> int:
+        """등록하고부터 흐른 시간. 화면이 사장님께 보여주는 숫자다."""
+        return int(((self.ended_at or time.time()) - self.queued_at) * 1000)
 
 
 _jobs: dict[str, Job] = {}
@@ -60,6 +78,10 @@ def submit(fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Job:
         _jobs[job.id] = job
 
     def run() -> None:
+        # 여기서 running 으로 바꾼다. 등록하자마자 running 이라고 하면 줄 서 있는
+        # 작업까지 "만드는 중"으로 보여서, 화면이 사장님께 거짓말을 하게 된다.
+        job.started_at = time.time()
+        job.status = "running"
         try:
             result = fn(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001 - 무엇이 터지든 작업만 실패시킨다
