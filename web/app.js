@@ -4,7 +4,23 @@
  * 화면 코드는 그대로 두려고 데이터 접근을 api() 하나로 모았다.
  */
 
-const API_BASE = ''; // 예: 'https://동네광고-api.onrender.com'
+/* 서버 주소.
+ *
+ * 같은 기계에서 열면(로컬 개발) 8000 번의 API 를 찾아보고, 아니면 비워 둔다.
+ * 배포된 화면에 서버를 붙일 때는 ?api=https://... 로 한 번 넘겨주면
+ * localStorage 에 남아 다음부터 그대로 쓴다 — 주소를 코드에 박지 않기 위해서다. */
+const API_BASE = (() => {
+  const q = new URLSearchParams(location.search).get('api');
+  if (q !== null) {
+    if (q) localStorage.setItem('apiBase', q);
+    else localStorage.removeItem('apiBase');
+  }
+  const saved = localStorage.getItem('apiBase');
+  if (saved) return saved;
+  return location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+    ? 'http://127.0.0.1:8000'
+    : '';
+})();
 
 async function api(path) {
   const res = await fetch(API_BASE + path);
@@ -16,6 +32,10 @@ async function api(path) {
 // const 로 두면 갈아끼울 수가 없어서 let 이다 — 화면은 그릴 때 값을 읽으므로 그대로 반영된다.
 let M = window.MOCK;
 const RESIST = window.RESISTANCE_LABEL;
+
+/** 상권 숫자가 서버 실측인가. 화면에 표시한다 —
+ *  목업과 실측을 구분 못 하면 데모에서 오해가 생긴다. */
+let LIVE = false;
 
 /** 화면을 다시 그려도 남아야 하는 값. 서버가 서면 이 자리가 세션으로 바뀐다. */
 const S = {
@@ -364,6 +384,10 @@ const SCREENS = {
         </div>
 
         ${band(people)}
+        ${LIVE ? `<div class="note">
+          <b>동네 숫자는 서울시 실측</b>입니다 — 상권·객단가·시간대·점포 수.
+          손님 코멘트와 점수, 문구 후보는 모델을 불러야 해서 <b>아직 예시</b>입니다.
+        </div>` : ''}
         ${badges}
 
         <div class="note note--accent">
@@ -413,7 +437,10 @@ const SCREENS = {
         </section>
 
         <section class="rule">
-          <h2 class="h2">동네 숫자와 견줘보면</h2>
+          <h2 class="h2">동네 숫자와 견줘보면
+            <span class="tag${LIVE ? ' tag--ok' : ' tag--edge'}" style="margin-left:6px;font-weight:500">
+              ${LIVE ? '서울시 실측' : '예시 값'}</span>
+          </h2>
           <ul class="facts">
             ${r.contrast_notes.map((n) => `
               <li class="${n.fit !== null && n.fit < 0.5 ? 'off' : ''}">${rich(n.text)}
@@ -661,14 +688,77 @@ function fakeMake(btn) {
 
 $('#drawer-list').addEventListener('click', () => openDrawer(false));
 
+/** 시간대 코드 → 사장님이 읽는 말. 서울시 원본의 구간 그대로다. */
+const TIME_LABEL = {
+  '00-06': '새벽(0–6시)', '06-11': '아침(6–11시)', '11-14': '점심(11–14시)',
+  '14-17': '오후(14–17시)', '17-21': '저녁(17–21시)', '21-24': '심야(21–24시)',
+};
+
+const won = (n) => n.toLocaleString('ko-KR');
+
+/** 상권 실측을 받아 화면 문장으로 바꾼다.
+ *
+ * 여기서 만드는 세 문장은 **LLM 을 거치지 않는다.** 전부 서울시 원본에서
+ * 뺄셈·나눗셈으로 나오므로 같은 입력이면 항상 같은 문장이다. 손님 평가가
+ * 흔들려도 이 줄들은 흔들리지 않는다 — 화면에서 신뢰의 바닥을 깔아준다. */
+async function loadTradeArea() {
+  const s = M.stores[0];
+  const t = await api(
+    `/trade-area?address=${encodeURIComponent(s.address)}` +
+    `&industry=${encodeURIComponent(s.industryId)}&lat=${s.lat}&lon=${s.lon}`,
+  );
+
+  const r = M.result;
+  r.area_nm = t.area_nm;
+  r.quarter = t.quarter;
+  r.is_fallback = t.is_fallback;
+  r.is_category_fallback = t.is_category_fallback;
+
+  const src = `서울시 ${quarter(t.quarter)}`;
+  const price = Number(String(M.brief.price).replace(/[^\d]/g, ''));
+  const cheaper = price && price < t.avg_ticket;
+
+  r.contrast_notes = [
+    price && {
+      kind: 'price',
+      fit: cheaper ? 0.8 : 0.3,
+      text: `광고에 적힌 <b>${won(price)}원</b>은 이 동네 결제 평균 ` +
+            `<b>${won(t.avg_ticket)}원</b>보다 ${cheaper ? '낮습니다' : '높습니다'}.`,
+      src: `${src} · 객단가`,
+    },
+    {
+      kind: 'timing',
+      fit: 0.3,
+      text: `이 동네는 <b>${TIME_LABEL[t.peak_time] || t.peak_time}</b>에 가장 많이 팔립니다 ` +
+            `— 매출의 ${Math.round(t.peak_share * 100)}%.`,
+      src: `${src} · 시간대별 매출`,
+    },
+    {
+      kind: 'competition',
+      fit: null,
+      text: `같은 업종 가게가 <b>${t.competitor_cnt}곳</b>, 이번 분기에 ` +
+            `<b>${t.open_cnt}곳 열고 ${t.close_cnt}곳 닫았습니다.</b>`,
+      src: `${src} · 점포 수`,
+    },
+  ].filter(Boolean);
+
+  // 제안은 원래 LLM 몫이라 아직 목업이다. 그런데 시간대 제안은 "점심에 가장 많이
+  // 팔린다"고 적혀 있어서, 실측 피크가 저녁인 동네에서는 바로 옆 문장과 어긋난다.
+  // 어긋나는 한 줄만 실측에서 다시 만든다.
+  const peak = TIME_LABEL[t.peak_time] || t.peak_time;
+  r.suggestions[0] =
+    `이 동네는 <b>${peak}</b>에 가장 많이 팔립니다. 광고에서 그 시간대를 말해보시는 건 어떨까요.`;
+}
+
 /** 서버가 있으면 서버 값으로, 없거나 실패하면 목업으로 그린다.
  *  화면이 아예 안 뜨는 것보다 목업이라도 뜨는 편이 낫다 — 실패는 콘솔에만 남긴다. */
 async function boot() {
   if (API_BASE) {
     try {
-      M = await api('/demo');
+      await loadTradeArea();
+      LIVE = true;
     } catch (e) {
-      console.warn('서버에서 데이터를 못 받아 목업으로 그립니다.', e);
+      console.warn('서버에서 상권을 못 받아 목업으로 그립니다.', e);
     }
   }
   window.addEventListener('hashchange', route);

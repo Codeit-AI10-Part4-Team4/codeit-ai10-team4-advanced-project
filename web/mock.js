@@ -8,10 +8,15 @@
 
 window.MOCK = {
 
+  // lat/lon 은 서버에 좌표를 직접 넘겨 카카오 지오코딩(키 필요)을 건너뛰기 위한 것.
+  // 실제 서비스에서는 가게 등록 때 주소를 지오코딩해 저장한다.
   stores: [
-    { id: 1, name: '행복한 순대국', industry: '한식', address: '서울시 은평구 불광동 56-7' },
-    { id: 2, name: '홍길동 분식',   industry: '분식', address: '서울시 마포구 망원동 123-4' },
-    { id: 3, name: '마포 커피숍',   industry: '카페', address: '서울시 마포구 합정동 88-2' },
+    { id: 1, name: '행복한 순대국', industry: '한식음식점', industryId: 'korean_food',
+      address: '서울시 은평구 불광동 56-7',  lat: 37.6106, lon: 126.9296 },
+    { id: 2, name: '홍길동 분식',   industry: '분식·간이음식', industryId: 'snack',
+      address: '서울시 마포구 망원동 123-4', lat: 37.5561, lon: 126.9018 },
+    { id: 3, name: '마포 커피숍',   industry: '카페·디저트', industryId: 'cafe',
+      address: '서울시 마포구 합정동 88-2',  lat: 37.5495, lon: 126.9137 },
   ],
 
   // registry.industry_options() 그대로 32종.
