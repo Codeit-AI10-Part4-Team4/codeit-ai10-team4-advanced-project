@@ -57,9 +57,23 @@ async function api(path, body) {
 
   if (res.status === 401 && token) { TOKEN.clear(); S.stores = []; S.store = null; }
   const d = await res.json().catch(() => null);
-  const err = new Error(typeof d?.detail === 'string' ? d.detail : `${path} → ${res.status}`);
+  const err = new Error(detailText(d, path, res.status));
   err.status = res.status;
   throw err;
+}
+
+/** 서버 오류를 사장님이 읽을 문장으로 바꾼다.
+ *
+ * 400·401·404·409 의 detail 은 문자열이라 그대로 쓴다. 422 만 배열인데, 그 안에서
+ * `type: 'value_error'` 인 것만 고른다 — 그건 app_core 의 검증기가 한국어로 쓴
+ * 문장("지금은 서울 주소만 지원합니다")이고, 나머지(형식·길이)는 pydantic 이 만든
+ * 영어 문장이라 화면에 그대로 내보낼 수 없다. */
+function detailText(d, path, status) {
+  if (typeof d?.detail === 'string') return d.detail;
+  const v = Array.isArray(d?.detail) && d.detail.find((e) => e.type === 'value_error');
+  // pydantic 이 앞에 "Value error, " 를 붙여준다
+  if (v) return String(v.msg).replace(/^Value error,\s*/, '');
+  return `${path} → ${status}`;
 }
 
 // 화면이 읽는 데이터 한 벌. 기본은 목업이고, API_BASE 가 채워지면 boot() 이 갈아끼운다.
@@ -189,6 +203,8 @@ async function startImages() {
     sub: M.copies[0].sub,
     situation: M.brief.situation,
     tone: S.tone || M.brief.tone,
+    // '기타' 업종은 이게 없으면 서버가 Store 를 못 만든다
+    industry_note: store.industry_note || '',
   };
 
   for (const im of M.images) {
@@ -354,7 +370,10 @@ const SCREENS = {
             <button class="card card--tap" data-store="${i}">
               <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">
                 <strong style="font-size:16px">${esc(s.name)}</strong>
-                <span class="tag">${esc(indLabel(s.industry))}</span>
+                <!-- '기타'면 사장님이 직접 적은 이름을 보여준다. 서버의
+                     StoreInput.industry_label 이 같은 일을 하지만 @property 라
+                     JSON 에 안 실린다 — 그대로 두면 '반찬가게'가 '기타'로 보인다. -->
+                <span class="tag">${esc(s.industry_note || indLabel(s.industry))}</span>
               </div>
               <span class="muted">${esc(s.address)}</span>
             </button>`).join('')
@@ -399,9 +418,18 @@ const SCREENS = {
             맞는 게 없으면 동네 전체 평균으로 봅니다.</p>
         </div>
 
+        <!-- '기타'는 서버(StoreInput._other_needs_note)가 industry_note 없이는
+             거절한다. 이 칸이 없으면 '기타 (직접 입력)'을 고른 사장님은 무엇을
+             고쳐야 하는지도 모른 채 등록에 계속 실패한다. -->
+        <div class="field" data-other hidden>
+          <label for="sn-note">업종을 직접 적어주세요</label>
+          <input id="sn-note" name="industry_note" placeholder="예: 반찬가게">
+        </div>
+
         <div class="field"><label for="sn-addr">주소</label>
           <input id="sn-addr" name="address" placeholder="서울 마포구 망원로 87" required>
-          <p class="muted">주소로 상권을 찾습니다. 지번·도로명 다 됩니다.</p></div>
+          <p class="muted">주소로 상권을 찾습니다. 지번·도로명 다 되고,
+            상권 데이터가 서울 기준이라 <b>지금은 서울만</b> 됩니다.</p></div>
 
         <div class="field"><label for="sn-tel">연락처</label>
           <input id="sn-tel" name="phone" type="tel" inputmode="tel" placeholder="02-000-0000"></div>
@@ -418,6 +446,9 @@ const SCREENS = {
         <div class="card" style="gap:12px">
           <p class="eyebrow" style="margin:0">주문서</p>
           <dl class="slip">
+            <!-- 어느 가게 이야기인지 여기 말고는 나오는 데가 없었다.
+                 가게를 잘못 고른 것을 알아챌 방법이 화면에 있어야 한다. -->
+            <dt>가게</dt><dd>${esc(picked().name)}</dd>
             <dt>홍보 대상</dt><dd>${esc(M.brief.product)}</dd>
             <dt>가격</dt><dd>${esc(M.brief.price)}</dd>
             <dt>상황</dt><dd>${esc(M.brief.situation)}</dd>
@@ -557,6 +588,7 @@ const SCREENS = {
           ${r.excluded_cnt ? `<p class="muted">근거를 못 댄 ${r.excluded_cnt}명은 빼고 셈했습니다.</p>` : ''}
         </div>
 
+        <p class="eyebrow" style="margin:0"><b>${esc(picked().name)}</b> · ${esc(picked().address)}</p>
         ${band(people)}
         ${LIVE ? `<div class="note">
           <b>동네 숫자는 서울시 실측</b>입니다 — 상권·객단가·시간대·점포 수.
@@ -724,8 +756,9 @@ document.addEventListener('click', (e) => {
   const card = e.target.closest('[data-store]');
   if (card) {
     S.store = storeList()[Number(card.dataset.store)];
+    rememberStore(S.store);
     go('chat');
-    refreshTradeArea().then(route);
+    refreshPanel();
     return;
   }
 
@@ -733,10 +766,11 @@ document.addEventListener('click', (e) => {
     TOKEN.clear();
     S.stores = [];
     S.store = null;
+    rememberStore(null);
     openDrawer(false);
     go('login');
     toast('로그아웃했습니다');
-    refreshTradeArea().then(route);
+    refreshPanel();
     return;
   }
 
@@ -772,6 +806,15 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('change', (e) => {
+  const ind = e.target.closest('#sn-ind');
+  if (ind) {
+    const note = $('[data-other]');
+    note.hidden = ind.value !== 'other';
+    // hidden 인 채로 required 를 두면 브라우저가 "focusable 하지 않다"며 제출을 막는다
+    note.querySelector('input').required = !note.hidden;
+    return;
+  }
+
   const pick = e.target.closest('[data-pick]');
   if (!pick || !pick.files[0]) return;
   S.shots[pick.dataset.pick] = URL.createObjectURL(pick.files[0]);
@@ -875,6 +918,16 @@ const storeList = () => (TOKEN.get() ? S.stores : [...M.stores, ...S.stores]);
 /** 지금 광고를 만들고 있는 가게. 아직 안 골랐으면 목업 첫 가게로 화면을 채운다. */
 const picked = () => S.store || M.stores[0];
 
+/** 고른 가게를 새로고침 뒤에도 기억한다.
+ *
+ * 안 그러면 손님 반응 화면에서 새로고침한 순간 목업 첫 가게로 조용히 되돌아가서,
+ * **다른 가게의 동네 숫자**를 이 가게 것처럼 보여준다. 가게 하나를 통째로 넣는다 —
+ * id 만 넣으면 목업 가게(1,2,3)와 서버 가게(1,2)의 번호가 겹친다. */
+const rememberStore = (s) => {
+  if (s) localStorage.setItem('store', JSON.stringify(s));
+  else localStorage.removeItem('store');
+};
+
 /** 상권 실측을 받아 화면 문장으로 바꾼다.
  *
  * 여기서 만드는 세 문장은 **LLM 을 거치지 않는다.** 전부 서울시 원본에서
@@ -902,9 +955,12 @@ async function loadTradeArea() {
     price && {
       kind: 'price',
       fit: cheaper ? 0.8 : 0.3,
-      text: `광고에 적힌 <b>${won(price)}원</b>은 이 동네 결제 평균 ` +
+      // 업종 폴백이면 이 숫자는 '전체 업종' 평균이라 그 가게와 견줄 값이 아니다.
+      // 그냥 "이 동네 결제 평균"이라고만 하면 반찬가게 객단가가 17만원인 줄 안다.
+      text: `광고에 적힌 <b>${won(price)}원</b>은 이 동네 ` +
+            `<b>${esc(t.category_nm)}</b> 결제 평균 ` +
             `<b>${won(t.avg_ticket)}원</b>보다 ${cheaper ? '낮습니다' : '높습니다'}.`,
-      src: `${src} · 객단가`,
+      src: `${src} · ${t.category_nm} 객단가`,
     },
     {
       kind: 'timing',
@@ -946,6 +1002,15 @@ async function refreshTradeArea() {
   }
 }
 
+/** 상권을 다시 받아오고, **손님 반응 화면일 때만** 다시 그린다.
+ *
+ * M.result·LIVE 를 읽는 화면이 거기 하나뿐이다. 그냥 route() 를 부르면 조회가
+ * 끝나는 1~2초 뒤에 지금 화면이 통째로 다시 그려지는데, 가게를 고르고 대화
+ * 화면에서 답을 쓰고 있었다면 **쓰던 말이 날아가고 포커스도 잃는다.** */
+const refreshPanel = () => refreshTradeArea().then(() => {
+  if (location.hash === '#/panel') route();
+});
+
 /** 서버에서 내 가게를 받아온다. 토큰이 없거나 서버가 없으면 할 일이 없다. */
 async function loadStores() {
   if (!API_BASE || !TOKEN.get()) return;
@@ -967,6 +1032,7 @@ async function submitAuth(form) {
     const ses = await api(isSignup ? '/auth/signup' : '/auth/login', { username, password });
     TOKEN.set(ses.token);
     S.store = null;
+    rememberStore(null);
     S.stores = [];
     await loadStores();
   } catch (e) {
@@ -984,6 +1050,7 @@ async function addStore(form) {
     industry: form.industry.value,        // id 다. 서버가 registry 로 검사한다.
     address: form.address.value.trim(),
     phone: form.phone.value.trim(),
+    industry_note: form.industry_note.value.trim(),
   };
 
   if (!API_BASE || !TOKEN.get()) {
@@ -995,16 +1062,18 @@ async function addStore(form) {
       await loadStores();
     } catch (e) { toast(e.message); return; }
   }
+  rememberStore(S.store);
 
   go('chat');
   toast('가게를 등록했습니다');
   // 상권은 늦게 와도 된다. 기다렸다 넘어가면 등록 버튼이 몇 초 멈춘 것처럼 보인다.
-  refreshTradeArea().then(route);
+  refreshPanel();
 }
 
 /** 서버가 있으면 서버 값으로, 없거나 실패하면 목업으로 그린다.
  *  화면이 아예 안 뜨는 것보다 목업이라도 뜨는 편이 낫다 — 실패는 콘솔에만 남긴다. */
 async function boot() {
+  try { S.store = JSON.parse(localStorage.getItem('store')); } catch { S.store = null; }
   if (API_BASE && TOKEN.get()) {
     // 토큰이 만료·위조로 걸리면 api() 가 알아서 지운다.
     try { await loadStores(); } catch (e) { console.warn('내 가게를 못 받았습니다.', e); }

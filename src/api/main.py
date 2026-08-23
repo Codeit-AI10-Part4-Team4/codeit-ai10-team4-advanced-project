@@ -15,7 +15,7 @@ from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from api import jobs, session
 from app_core import auth, registry, stores
@@ -157,6 +157,17 @@ class ImageRequest(BaseModel):
     situation: str = ""
     tone: str = ""
     style: Literal["simple", "poster"] = "simple"
+    #: 업종이 other 일 때 사장님이 직접 적은 업종명
+    industry_note: str = ""
+
+    @model_validator(mode="after")
+    def _other_needs_note(self) -> ImageRequest:
+        # _render 가 만드는 Store 에 같은 규칙이 있다. 여기서 안 막으면 등록은
+        # 통과하고 **작업 스레드 안에서** ValidationError 로 죽어서, 사장님은
+        # 한참 기다린 끝에 pydantic 오류 문장을 보게 된다.
+        if self.industry == "other" and not self.industry_note.strip():
+            raise ValueError("기타를 고르셨으면 업종을 직접 적어주세요")
+        return self
 
 
 class JobAccepted(BaseModel):
@@ -191,7 +202,13 @@ def _render(req: ImageRequest) -> Any:
             situation=req.situation,
             tone=req.tone,
         ),
-        Store(id=0, user_id=0, name=req.store_name, industry=req.industry),
+        Store(
+            id=0,
+            user_id=0,
+            name=req.store_name,
+            industry=req.industry,
+            industry_note=req.industry_note,
+        ),
         CopyCandidate(headline=req.headline, sub=req.sub),
         style=req.style,
     )

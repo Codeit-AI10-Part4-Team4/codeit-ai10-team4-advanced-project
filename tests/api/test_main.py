@@ -137,6 +137,20 @@ def test_이미지_요청은_필수값이_빠지면_거절한다() -> None:
     assert client.post("/ads/image", json={"store_name": "가게"}).status_code == 422
 
 
+def test_기타_업종은_직접_적은_이름_없이는_등록도_안_된다() -> None:
+    """Store 가 같은 규칙을 갖고 있어서, 여기서 안 막으면 작업 스레드 안에서
+    ValidationError 로 죽는다 — 사장님은 한참 기다린 끝에 그걸 본다."""
+    body = {
+        "store_name": "엄마손 반찬",
+        "industry": "other",
+        "product": "모둠 반찬",
+        "price": 8000,
+        "headline": "오늘 반찬 다 됐습니다",
+    }
+    assert client.post("/ads/image", json=body).status_code == 422
+    assert client.post("/ads/image", json={**body, "industry_note": "반찬가게"}).status_code == 202
+
+
 # ── 로그인 · 내 가게 ────────────────────────────────────────────
 
 
