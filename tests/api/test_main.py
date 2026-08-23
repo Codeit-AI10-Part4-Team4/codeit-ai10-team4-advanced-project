@@ -135,3 +135,79 @@ def test_끝나기_전에는_이미지를_안_준다() -> None:
 def test_이미지_요청은_필수값이_빠지면_거절한다() -> None:
     """등록 단계에서 걸러야 한다 — 18초 뒤에 "product 가 없다"고 하면 늦다."""
     assert client.post("/ads/image", json={"store_name": "가게"}).status_code == 422
+
+
+# ── 로그인 · 내 가게 ────────────────────────────────────────────
+
+
+def _signup(username: str) -> str:
+    """가입하고 토큰을 돌려준다."""
+    res = client.post("/auth/signup", json={"username": username, "password": "비밀번호12345"})
+    assert res.status_code == 201, res.text
+    return str(res.json()["token"])
+
+
+def _bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_토큰_없이는_내_가게를_못_본다() -> None:
+    assert client.get("/stores").status_code == 401
+
+
+def test_가입하고_가게를_넣으면_내_목록에_보인다() -> None:
+    token = _signup("사장님1")
+    assert client.get("/stores", headers=_bearer(token)).json() == []
+
+    res = client.post(
+        "/stores",
+        headers=_bearer(token),
+        json={
+            "name": "행복한 순대국",
+            "industry": "korean_food",
+            "address": "서울시 은평구 불광동 56-7",
+        },
+    )
+    assert res.status_code == 201
+    assert client.get("/stores", headers=_bearer(token)).json()[0]["name"] == "행복한 순대국"
+
+
+def test_남의_가게는_안_보인다() -> None:
+    """가게 번호를 알아도 남의 것은 못 연다 — stores.get 이 user_id 로 거른다."""
+    mine = _signup("사장님2")
+    other = _signup("사장님3")
+    store_id = client.post(
+        "/stores", headers=_bearer(mine), json={"name": "내 가게", "industry": "cafe"}
+    ).json()["id"]
+
+    assert client.get(f"/stores/{store_id}", headers=_bearer(mine)).status_code == 200
+    assert client.get(f"/stores/{store_id}", headers=_bearer(other)).status_code == 404
+
+
+def test_토큰을_손대면_거절한다() -> None:
+    """user_id 를 그대로 주고받으면 아무나 남의 번호를 적어 보낼 수 있다.
+    서명이 그걸 막는다."""
+    token = _signup("사장님4")
+    user_id, _, sig = token.partition(".")
+    위조 = f"{int(user_id) + 1}.{sig}"  # 번호만 바꿔치기
+    assert client.get("/stores", headers=_bearer(위조)).status_code == 401
+    # HTTP 헤더는 latin-1 이라 한글을 못 담는다 — 아무 말이나 ASCII 로 넣는다
+    assert client.get("/stores", headers=_bearer("nonsense")).status_code == 401
+    # Bearer 를 빼고 토큰만 보낸 경우
+    assert client.get("/stores", headers={"Authorization": token}).status_code == 401
+
+
+def test_로그인_실패는_어느_쪽이_틀렸는지_말하지_않는다() -> None:
+    """구분해서 알려주면 어떤 아이디가 있는지 훑어볼 수 있다."""
+    _signup("사장님5")
+    없는_사람 = client.post(
+        "/auth/login", json={"username": "없는사람", "password": "비밀번호12345"}
+    )
+    틀린_비번 = client.post("/auth/login", json={"username": "사장님5", "password": "틀린비밀번호"})
+    assert 없는_사람.status_code == 틀린_비번.status_code == 401
+    assert 없는_사람.json()["detail"] == 틀린_비번.json()["detail"]
+
+
+def test_짧은_비밀번호는_거절한다() -> None:
+    res = client.post("/auth/signup", json={"username": "짧은비번", "password": "1234"})
+    assert res.status_code == 422

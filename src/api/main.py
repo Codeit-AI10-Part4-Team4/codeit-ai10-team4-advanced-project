@@ -13,14 +13,14 @@ import io
 import os
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from api import jobs
-from app_core import registry
+from api import jobs, session
+from app_core import auth, registry, stores
 from app_core.panel.features import NoTradeAreaError, build_features
-from app_core.schema import AdBrief, CopyCandidate, Store
+from app_core.schema import AdBrief, CopyCandidate, Store, StoreInput
 
 app = FastAPI(title="codeit-ai10-team4-advanced-project")
 
@@ -219,6 +219,82 @@ def job_status(job_id: str) -> JobStatus:
         error=job.error,
         image_url=f"/jobs/{job.id}/image" if job.status == "done" else None,
     )
+
+
+# ── 로그인 · 내 가게 ────────────────────────────────────────────
+# 화면은 로그인하고 받은 토큰을 Authorization 헤더에 담아 보낸다.
+# user_id 를 그대로 주고받으면 아무나 남의 번호를 적어 남의 가게를 열 수 있다.
+
+
+def current_user(authorization: str = Header(default="")) -> int:
+    """`Authorization: Bearer <토큰>` 에서 user_id 를 꺼낸다."""
+    scheme, _, token = authorization.partition(" ")
+    user_id = session.read(token) if scheme.lower() == "bearer" else None
+    if user_id is None:
+        raise HTTPException(401, "로그인이 필요합니다.")
+    return user_id
+
+
+class SignupBody(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    #: 저장은 app_core.auth 가 scrypt 로 해시한다. 여기서 평문을 남기지 않는다.
+    password: str = Field(min_length=8, max_length=200)
+
+
+class LoginBody(BaseModel):
+    """로그인은 길이를 검사하지 않는다.
+
+    가입 기준(8자)을 로그인에도 걸면 두 가지가 망가진다 — 기준이 바뀌기 전에
+    만든 짧은 비밀번호로는 아예 못 들어오고, 422 와 401 이 갈려서 밖에서
+    "이 비밀번호는 길이는 맞았다"를 알 수 있다.
+    """
+
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class Session(BaseModel):
+    user_id: int
+    token: str
+
+
+@app.post("/auth/signup", status_code=201)
+def signup(body: SignupBody) -> Session:
+    try:
+        user_id = auth.signup(body.username, body.password)
+    except ValueError as exc:
+        # 이미 있는 아이디 등 — 사장님이 고칠 수 있는 문제라 그대로 전한다.
+        raise HTTPException(409, str(exc)) from exc
+    return Session(user_id=user_id, token=session.issue(user_id))
+
+
+@app.post("/auth/login")
+def login(body: LoginBody) -> Session:
+    user_id = auth.login(body.username, body.password)
+    if user_id is None:
+        # 아이디가 없는 건지 비밀번호가 틀린 건지 구분해 말하지 않는다 —
+        # 구분해주면 어떤 아이디가 있는지 훑어볼 수 있다.
+        raise HTTPException(401, "아이디나 비밀번호가 맞지 않습니다.")
+    return Session(user_id=user_id, token=session.issue(user_id))
+
+
+@app.get("/stores")
+def my_stores(user_id: int = Depends(current_user)) -> list[Store]:
+    return stores.list_stores(user_id)
+
+
+@app.post("/stores", status_code=201)
+def add_store(body: StoreInput, user_id: int = Depends(current_user)) -> Store:
+    return stores.add(user_id, body)
+
+
+@app.get("/stores/{store_id}")
+def one_store(store_id: int, user_id: int = Depends(current_user)) -> Store:
+    # stores.get 이 user_id 로 걸러준다 — 남의 가게 번호를 넣으면 None 이 온다.
+    store = stores.get(user_id, store_id)
+    if store is None:
+        raise HTTPException(404, "그런 가게가 없습니다.")
+    return store
 
 
 @app.get("/jobs/{job_id}/image")
