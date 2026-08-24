@@ -18,6 +18,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageOps, ImageStat
 # 글꼴 후보는 `fonts.py` 한 곳에서만 관리한다. 여기 따로 두면 새 OS 를 지원할 때
 # 한쪽만 고치게 되고, 그 한쪽은 반드시 잊힌다.
 from app_core import fonts
+from app_core.photo_enhance import fit_photo_canvas
 
 Zone = Literal["top", "bottom"]
 
@@ -57,6 +58,17 @@ _NOTICE_MARGIN = 0.025
 _NOTICE_PAD = 0.013
 _NOTICE_BG = (0, 0, 0, 130)
 _NOTICE_FG = (255, 255, 255, 235)
+
+# 사장님이 올린 사진은 상품을 다시 배치하지 않고 사진 자체가 화면의 주인공이 된다.
+# 생성 배경/누끼 조판과 같은 큰 중앙 제목을 쓰면 상품을 가리므로 별도 계약으로 둔다.
+_PHOTO_PANEL_H = 0.37
+_PHOTO_PANEL_ALPHA = 170
+_PHOTO_X = 0.067
+_PHOTO_HEAD_SIZE = 0.058
+_PHOTO_HEAD_FLOOR = 0.041
+_PHOTO_SUB_SIZE = 0.028
+_PHOTO_WARM_WHITE = (250, 248, 244)
+_PHOTO_ACCENT = (245, 194, 105)
 
 
 def draw_staged_notice(canvas: Image.Image, corner: Zone = "bottom") -> None:
@@ -185,6 +197,108 @@ def _draw_panel(canvas: Image.Image, zone: Zone) -> None:
     canvas.alpha_composite(panel, (0, 0 if zone == "top" else h - ph))
 
 
+def _draw_preserved_photo_text(
+    canvas: Image.Image,
+    shop: str,
+    headline: str,
+    sub: str,
+) -> int:
+    """실사진 위에 작은 좌측 정렬 문구를 그린다.
+
+    사진의 상품 픽셀을 살리는 경로다. 항상 같은 상단 그라데이션과 따뜻한 흰색을
+    사용해 사진마다 조판이 요동하지 않으며, 중앙 제품 영역을 비워 둔다.
+    """
+    w, h = canvas.size
+    panel_h = max(1, int(h * _PHOTO_PANEL_H))
+    panel = Image.new("RGBA", (w, panel_h), (0, 0, 0, 0))
+    panel_draw = ImageDraw.Draw(panel)
+    for py in range(panel_h):
+        ratio = py / max(1, panel_h - 1)
+        alpha = int(_PHOTO_PANEL_ALPHA * (1 - ratio) ** 0.8)
+        panel_draw.line((0, py, w, py), fill=(11, 13, 16, alpha))
+    canvas.alpha_composite(panel, (0, 0))
+
+    d = ImageDraw.Draw(canvas, "RGBA")
+    x = int(w * _PHOTO_X)
+    max_w = int(w * (1 - _PHOTO_X * 2))
+    y = int(h * 0.057)
+
+    if shop:
+        shop_font = fonts.fit(
+            shop,
+            max_w,
+            max(12, int(w * 0.027)),
+            "body_light",
+            floor=max(11, int(w * 0.020)),
+        )
+        text_h = sum(shop_font.getmetrics())
+        pad_x = max(8, int(w * 0.016))
+        pad_y = max(5, int(h * 0.008))
+        pill_w = int(shop_font.getlength(shop)) + pad_x * 2
+        pill_h = text_h + pad_y * 2
+        d.rounded_rectangle(
+            (x, y, x + pill_w, y + pill_h),
+            radius=pill_h // 2,
+            fill=(0, 0, 0, 112),
+        )
+        d.text(
+            (x + pad_x, y + pill_h // 2),
+            shop,
+            font=shop_font,
+            fill=(*_PHOTO_WARM_WHITE, 255),
+            anchor="lm",
+        )
+        y += pill_h + int(h * 0.027)
+
+    head_font, head_lines = wrap_to_fit(
+        headline,
+        max_w,
+        "body",
+        max(20, int(w * _PHOTO_HEAD_SIZE)),
+        max(16, int(w * _PHOTO_HEAD_FLOOR)),
+    )
+    shadow_offset = max(1, int(w * 0.002))
+    head_h = sum(head_font.getmetrics())
+    for line in head_lines:
+        d.text(
+            (x + shadow_offset, y + shadow_offset),
+            line,
+            font=head_font,
+            fill=(0, 0, 0, 105),
+        )
+        d.text((x, y), line, font=head_font, fill=(*_PHOTO_WARM_WHITE, 255))
+        y += head_h
+
+    y += max(7, int(h * 0.010))
+    d.rounded_rectangle(
+        (x, y, x + int(w * 0.070), y + max(3, int(h * 0.004))),
+        radius=2,
+        fill=(*_PHOTO_ACCENT, 255),
+    )
+    y += max(16, int(h * 0.028))
+
+    if sub:
+        sub_start = max(14, int(w * _PHOTO_SUB_SIZE))
+        sub_font, sub_lines = wrap_to_fit(
+            sub,
+            max_w,
+            "body_light",
+            sub_start,
+            max(12, int(w * 0.021)),
+        )
+        sub_h = sum(sub_font.getmetrics())
+        for line in sub_lines:
+            d.text(
+                (x + shadow_offset, y + shadow_offset),
+                line,
+                font=sub_font,
+                fill=(0, 0, 0, 105),
+            )
+            d.text((x, y), line, font=sub_font, fill=(*_PHOTO_WARM_WHITE, 245))
+            y += sub_h
+    return y
+
+
 def _draw_text(canvas: Image.Image, bg: Image.Image, zone: Zone, headline: str, sub: str) -> int:
     """제목·부제를 글자 영역에 그린다. 반환: 글자 블록의 마지막 y (제품 상자 계산용)."""
     w, h = canvas.size
@@ -266,6 +380,22 @@ def _place_product(canvas: Image.Image, product: Image.Image, text_bottom: int) 
 # ── 조립 ─────────────────────────────────────────────────────
 
 
+def compose_no_text(
+    product: Image.Image | None,
+    *,
+    size: tuple[int, int] = (1080, 1080),
+    background: Image.Image | None = None,
+) -> Image.Image:
+    """배경과 선택적 상품 누끼만 합성하고 어떤 글자도 그리지 않는다."""
+    bg = (
+        fit_photo_canvas(background, size) if background else make_gradient_background(size)
+    ).convert("RGB")
+    canvas = bg.convert("RGBA")
+    if product is not None:
+        _place_product(canvas, product, text_bottom=0)
+    return canvas.convert("RGB")
+
+
 def compose_ad(
     product: Image.Image | None,
     headline: str,
@@ -273,6 +403,8 @@ def compose_ad(
     size: tuple[int, int] = (1080, 1080),
     background: Image.Image | None = None,
     staged: bool = False,
+    shop: str = "",
+    preserved_photo: bool = False,
 ) -> Image.Image:
     """배경 위에 문구(와 제품)를 레퍼런스 규칙대로 얹어 광고 이미지를 만든다.
 
@@ -282,14 +414,20 @@ def compose_ad(
     상단·하단 중 덜 복잡한 쪽에.
 
     `staged` 는 **상품 이미지를 AI 가 그렸는지**다. 부르는 쪽(pipeline)이 정해서 준다 —
-    위 입력 계약대로 compose 는 keep(사장님 사진)과 hero/generate(AI 그림)를 구분하지
-    못한다. `product is None` 으로 짐작하면 keep 갈래의 **진짜 사진에 연출 딱지**가 붙는다.
+    위 입력 계약대로 compose 는 안전 보정 실사진과 hero/generate(AI 그림)를 구분하지
+    못한다. `product is None` 으로 짐작하면 **사장님이 찍은 진짜 사진에 연출 딱지**가 붙는다.
     """
-    bg = (background.resize(size) if background else make_gradient_background(size)).convert("RGB")
+    bg = (
+        fit_photo_canvas(background, size) if background else make_gradient_background(size)
+    ).convert("RGB")
     canvas = bg.convert("RGBA")
 
-    zone = pick_zone(bg, product)
-    text_bottom = _draw_text(canvas, bg, zone, headline, sub)
+    if preserved_photo:
+        zone: Zone = "top"
+        text_bottom = _draw_preserved_photo_text(canvas, shop, headline, sub)
+    else:
+        zone = pick_zone(bg, product)
+        text_bottom = _draw_text(canvas, bg, zone, headline, sub)
     if product is not None:
         _place_product(canvas, product, text_bottom)
     if staged:

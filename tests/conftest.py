@@ -41,6 +41,26 @@ def clean_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def no_real_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """대역을 빼먹은 테스트의 실제 LLM 호출을 차단한다.
+
+    `tests/test_app_image_flow.py` 와 `tests/test_app_panel_source.py` 가 app.py 를
+    import 하는데, app.py 는 최상단에서 `config.load_env()` 를 부른다. 그래서
+    **수집 단계에서** .env 의 MODEL_PROFILE=openai 와 OPENAI_API_KEY 가 프로세스
+    전체에 실린다. 대역 없이 생성 경로를 타는 테스트가 하나라도 생기면 그대로
+    유료 호출이 나간다 — 2026-08-24에 /ads/copies 테스트가 실제로 문구 세 건을
+    받아왔다(AGENTS.md 위반).
+
+    아래 no_real_image_backends 와 같은 이유·같은 모양이다. 특정 프로필이
+    필요한 테스트는 자기 monkeypatch 로 덮으면 된다(이 픽스처보다 나중에 돈다).
+    """
+    monkeypatch.setenv("MODEL_PROFILE", "stub")
+    # 프로필을 덮어쓰는 테스트가 실수로 실호출을 내지 않도록 키까지 없앤다.
+    # 키가 없으면 OpenAI() 생성 자체가 터져서 조용히 과금되는 길이 사라진다.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def no_real_image_backends(monkeypatch: pytest.MonkeyPatch) -> None:
     """대역을 빼먹은 테스트의 실제 sd-turbo·OpenAI 호출을 차단한다.
 
@@ -51,12 +71,15 @@ def no_real_image_backends(monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(*_a: object, **_k: object) -> object:
         raise AssertionError("테스트가 실제 이미지 모델/API를 부르려 했습니다 — 대역을 씌우세요")
 
-    # 개발 셸에 openai 프로필이 남아 있어도 기존 테스트가 유료 경로로 새지 않는다.
+    # 개발 셸이나 앞서 import 된 app.py가 .env의 openai 프로필을 올려도 기존
+    # 테스트가 유료 경로로 새지 않는다.
+    monkeypatch.delenv("MODEL_PROFILE", raising=False)
     monkeypatch.delenv("IMAGE_PROFILE", raising=False)
     monkeypatch.setattr(gen_background, "_load_pipe", _boom)
     monkeypatch.setattr(image_backend, "_openai_scene", _boom)
     monkeypatch.setattr(image_backend, "_openai_edit", _boom)
-    image_backend._notices.clear()
+    monkeypatch.setattr(image_backend, "_openai_restage", _boom)
+    image_backend.pop_notices()
 
 
 @pytest.fixture

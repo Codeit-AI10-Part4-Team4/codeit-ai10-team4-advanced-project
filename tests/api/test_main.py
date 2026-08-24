@@ -78,12 +78,17 @@ def test_주소가_비면_거절한다() -> None:
 # 확산 모델은 부르지 않는다 (한 장에 18초). 폴링 계약만 본다.
 
 
+#: 아직 끝나지 않은 상태. 한 번에 하나씩 돌리므로(MAX_WORKERS=1) 줄을 서는
+#: 시간이 있고, queued 를 끝난 것으로 읽으면 앞 작업이 도는 동안 그냥 통과한다.
+_BUSY = {"queued", "running"}
+
+
 def _wait(job_id: str, timeout: float = 3.0) -> dict[str, Any]:
     """끝날 때까지 물어본다 — 화면이 하는 일과 같다."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         body: dict[str, Any] = client.get(f"/jobs/{job_id}").json()
-        if body["status"] != "running":
+        if body["status"] not in _BUSY:
             return body
         time.sleep(0.02)
     raise AssertionError(f"{timeout}초 안에 안 끝났다")
@@ -98,7 +103,7 @@ def test_등록하면_바로_번호를_주고_나중에_끝난다() -> None:
         return "다 됐다"
 
     job = jobs.submit(느리다)
-    assert client.get(f"/jobs/{job.id}").json()["status"] in {"running", "done"}
+    assert client.get(f"/jobs/{job.id}").json()["status"] in {"queued", "running", "done"}
     assert _wait(job.id)["status"] == "done"
 
 
@@ -225,3 +230,102 @@ def test_로그인_실패는_어느_쪽이_틀렸는지_말하지_않는다() ->
 def test_짧은_비밀번호는_거절한다() -> None:
     res = client.post("/auth/signup", json={"username": "짧은비번", "password": "1234"})
     assert res.status_code == 422
+
+
+# ── 문구 · 손님 반응 ────────────────────────────────────────────
+# 실제 LLM 은 부르지 않는다 (AGENTS.md). MODEL_PROFILE 기본값이 stub 이라
+# 빈 결과 경로는 그대로 돌려볼 수 있고, 나머지는 등록 단계에서 걸린다.
+
+
+def _store_of(token: str, industry: str = "korean_food") -> int:
+    res = client.post(
+        "/stores",
+        headers=_bearer(token),
+        json={
+            "name": "행복한 순대국",
+            "industry": industry,
+            "address": "서울시 은평구 불광동 56-7",
+        },
+    )
+    assert res.status_code == 201, res.text
+    return int(res.json()["id"])
+
+
+_BRIEF = {"product": "순대국", "price": 8000, "situation": "퇴근길", "tone": "따뜻하게"}
+
+
+def test_문구와_평가는_로그인해야_한다() -> None:
+    assert client.post("/ads/copies", json={"store_id": 1, **_BRIEF}).status_code == 401
+    assert client.post("/ads/review", json={"store_id": 1, "ad_id": 1, **_BRIEF}).status_code == 401
+
+
+def test_남의_가게로는_문구를_못_만든다() -> None:
+    """가게 번호만 바꿔 남의 가게 이름으로 광고를 만들 수 있으면 안 된다."""
+    mine, other = _signup("사장님6"), _signup("사장님7")
+    store_id = _store_of(mine)
+    res = client.post("/ads/copies", headers=_bearer(other), json={"store_id": store_id, **_BRIEF})
+    assert res.status_code == 404
+
+
+def test_문구를_못_만들면_이유를_말한다() -> None:
+    """빈 목록을 조용히 돌려주면 화면은 고장인지 느린 건지 알 수 없다.
+
+    MODEL_PROFILE 이 stub 이면 항상 빈 결과다 — 그 사실을 오류에 담아야
+    ".env 를 보라"까지 갈 수 있다.
+    """
+    jobs.clear()
+    token = _signup("사장님8")
+    res = client.post(
+        "/ads/copies", headers=_bearer(token), json={"store_id": _store_of(token), **_BRIEF}
+    )
+    assert res.status_code == 202
+
+    body = _wait(res.json()["job_id"], timeout=10.0)
+    assert body["status"] == "failed"
+    assert body["error"] is not None
+    # 타입 이름이 붙으면 사장님 화면에 "ValueError: ..." 가 그대로 뜬다
+    assert not body["error"].startswith("ValueError")
+    assert "stub" in body["error"]
+
+
+def test_문구가_없으면_평가하지_않는다() -> None:
+    """LLM 을 부르기 전에 걸러야 한다 — 1분 뒤에 "문구가 없다"고 하면 늦다."""
+    jobs.clear()
+    token = _signup("사장님9")
+    res = client.post(
+        "/ads/review",
+        headers=_bearer(token),
+        json={"store_id": _store_of(token), "ad_id": 999, **_BRIEF},
+    )
+    assert res.status_code == 202
+    body = _wait(res.json()["job_id"], timeout=10.0)
+    assert body["status"] == "failed"
+    assert "문구를 먼저" in (body["error"] or "")
+
+
+def test_json_결과는_폴링에_실려_온다() -> None:
+    """이미지는 /jobs/{id}/image 로 따로 가져가지만 문구·평가는 JSON 이라
+    상태와 함께 온다. 두 종류가 섞이지 않아야 한다."""
+    jobs.clear()
+    job = jobs.submit(lambda: {"ad_id": 7, "copies": []}, kind="json")
+    body = _wait(job.id)
+    assert body["status"] == "done"
+    assert body["result"] == {"ad_id": 7, "copies": []}
+    assert body["image_url"] is None
+
+
+def test_json_작업의_이미지_주소는_404() -> None:
+    """번호만 알면 누구나 부를 수 있는 주소다. 문구 작업의 결과는 dict 라
+    그대로 흘려보내면 dict.save() 에서 500 이 난다 (귀한님 #66 리뷰)."""
+    jobs.clear()
+    job = jobs.submit(lambda: {"ad_id": 1, "copies": []}, kind="json")
+    assert _wait(job.id)["status"] == "done"
+    assert client.get(f"/jobs/{job.id}/image").status_code == 404
+
+
+def test_이미지_작업은_json_결과를_싣지_않는다() -> None:
+    jobs.clear()
+    job = jobs.submit(lambda: "이미지인 척", kind="image")
+    body = _wait(job.id)
+    assert body["result"] is None
+    assert body["image_url"] == f"/jobs/{job.id}/image"

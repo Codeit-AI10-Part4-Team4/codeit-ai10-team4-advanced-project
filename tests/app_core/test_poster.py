@@ -6,7 +6,7 @@ from PIL import Image, ImageFont
 from app_core import fonts, poster
 
 
-def _fake_font(role: str, size: int) -> ImageFont.FreeTypeFont:
+def _fake_font(role: str, size: int) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
     return ImageFont.load_default(size)
 
 
@@ -39,6 +39,32 @@ def test_generate_poster_minimal(monkeypatch):
     """빈 블록은 그리지 않는다 — 없는 정보를 지어내지 않기 위해서다."""
     monkeypatch.setattr(fonts, "load", _fake_font)
     ad = poster.generate_poster(None, "가게이름")
+    assert ad.mode == "RGB"
+
+
+def test_업로드_포스터는_누끼가_아닌_사진_전체를_카드에_맞춘다(monkeypatch):
+    monkeypatch.setattr(fonts, "load", _fake_font)
+    source = Image.new("RGB", (100, 60), (10, 20, 30))
+    source.paste((200, 10, 10), (0, 0, 20, 20))
+    seen = {}
+
+    def _fit(photo, size):
+        seen["same"] = photo.tobytes() == source.tobytes()
+        seen["size"] = size
+        return Image.new("RGB", size, (40, 50, 60))
+
+    monkeypatch.setattr(poster, "fit_photo_canvas", _fit)
+    ad = poster.generate_uploaded_photo_poster(
+        source,
+        "가게이름",
+        headline="선택한 문구",
+        product_name="대표 상품",
+        sub="상품 설명",
+        info="서울 마포구",
+    )
+
+    assert seen == {"same": True, "size": (952, 500)}
+    assert ad.size == (1080, 1080)
     assert ad.mode == "RGB"
 
 

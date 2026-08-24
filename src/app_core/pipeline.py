@@ -4,23 +4,24 @@
 문구(CopyCandidate)는 "이미지에 얹을 글"이다. 셋이 모여야 광고 한 장이 나온다.
 
 형태는 두 가지다.
-  simple  AI 생성 사진 배경 + 문구 — 분위기가 주인공. 배경 생성에 GPU 를 쓴다
-  poster  종이 배경 + 정보 블록   — 정보가 주인공. 확산 모델을 쓰지 않아 빠르고 싸다
+  simple  업로드 사진 AI 재촬영/안전 보정 또는 사진 없는 AI 생성 + 문구 — 분위기가 주인공
+  poster  광고 사진 카드 + 종이 정보 블록 — 정보가 주인공
 """
 
 from dataclasses import dataclass
 from typing import Literal
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from app_core import photo_store, ref_style, sketch_gen
 from app_core.background import remove_background
-from app_core.compose import compose_ad
+from app_core.compose import compose_ad, compose_no_text
 from app_core.gen_background import generate_background
-from app_core.image_backend import edit_photo, generate_scene
+from app_core.image_backend import generate_scene, restage_photo
 from app_core.image_backend import profile as image_profile
-from app_core.photo_router import mask_area, remove_crumbs, route_photo
-from app_core.poster import generate_poster
+from app_core.photo_enhance import enhance_uploaded_photo
+from app_core.photo_router import mask_area, remove_crumbs
+from app_core.poster import generate_poster, generate_uploaded_photo_poster
 from app_core.poster_plan import PosterPlan, plan_poster
 from app_core.prompt_builder import build_bg_prompt, build_hero_prompt, build_scene_prompt
 from app_core.schema import AdBrief, CopyCandidate, Store
@@ -32,8 +33,10 @@ Style = Literal["simple", "poster"]
 class SimpleMaterials:
     """감성 피드형 재료 — 문구를 얹기 전까지의 전부."""
 
-    product: Image.Image | None  #: 누끼. keep·통생성이면 None
-    background: Image.Image  #: keep 이면 원본, 아니면 생성 배경
+    product: Image.Image | None  #: 누끼. 실사진 보정·통생성이면 None
+    background: Image.Image  #: 안전 보정 실사진 또는 생성 배경
+    shop: str = ""  #: 실사진 전용 조판에 표시할 상호
+    preserved_photo: bool = False  #: 누끼 없는 사진 전체에 고정 상단 조판을 쓸지
     staged: bool = False  #: 상품 이미지를 AI 가 그렸는지 → "연출된 이미지" 표기
 
 
@@ -48,13 +51,55 @@ class PosterMaterials:
     staged: bool = False  #: 상품 이미지를 AI 가 그렸는지 → "연출된 이미지" 표기
 
 
+@dataclass(frozen=True)
+class UploadedPhotoPosterMaterials:
+    """업로드 사진 포스터 재료 — 재촬영 또는 안전 보정한 사진 전체를 쓴다."""
+
+    photo: Image.Image
+    shop: str
+    info: str
+    product_name: str
+    staged: bool = False
+
+
 #: 문구를 모르는 재료 상자 — 문구가 바뀌어도 이건 재사용하고 조판만 다시 한다
-AdMaterials = SimpleMaterials | PosterMaterials
+AdMaterials = SimpleMaterials | PosterMaterials | UploadedPhotoPosterMaterials
 
 
 def _info_line(store: Store) -> str:
     """포스터 하단 한 줄 — 없는 항목은 빼고 이어 붙인다."""
     return "  ·  ".join(part for part in (store.address, store.phone) if part)
+
+
+def _safe_uploaded_photo(photo: Image.Image) -> Image.Image:
+    """생성 모델 없이 픽셀 좌표를 유지한 채 색감만 보수적으로 다듬는다."""
+    try:
+        return enhance_uploaded_photo(photo)
+    except (OSError, ValueError):
+        return photo.convert("RGB")
+
+
+def _uploaded_ad_photo(
+    photo: Image.Image,
+    brief: AdBrief,
+    store: Store,
+    style: Style,
+) -> tuple[Image.Image, bool]:
+    """OpenAI면 스타일별 광고 재촬영, 로컬이면 비용 없는 안전 보정."""
+    if image_profile() == "openai":
+        result = restage_photo(
+            photo,
+            product=brief.product,
+            industry=store.industry_label,
+            situation=brief.situation,
+            tone=brief.tone,
+            extra=brief.extra,
+            transcript=brief.raw_utterance,
+            style=style,
+            size=(1080, 1080) if style == "simple" else (1080, 720),
+        )
+        return result.image, result.staged
+    return _safe_uploaded_photo(photo), False
 
 
 def _with_reference(brief: AdBrief, prompt: str) -> str:
@@ -128,7 +173,11 @@ def _simple_materials(brief: AdBrief, store: Store, product: Image.Image | None)
     prompt = _with_reference(brief, prompt)
     # product 가 없으면 상품까지 AI 가 그린 것이다 → "연출된 이미지" 표기.
     return SimpleMaterials(
-        product=product, background=_background(brief, prompt), staged=product is None
+        product=product,
+        background=_background(brief, prompt),
+        shop=store.name,
+        preserved_photo=False,
+        staged=product is None,
     )
 
 
@@ -158,11 +207,12 @@ def _poster_materials(brief: AdBrief, store: Store, product: Image.Image | None)
         transcript=brief.raw_utterance,
     )
     return PosterMaterials(
-        product=product, plan=plan, shop=store.name, info=_info_line(store), staged=staged
+        product=product,
+        plan=plan,
+        shop=store.name,
+        info=_info_line(store),
+        staged=staged,
     )
-
-
-_MIME = {".png": "image/png", ".webp": "image/webp"}
 
 
 def prepare_materials(
@@ -170,56 +220,77 @@ def prepare_materials(
     store: Store,
     style: Style = "simple",
 ) -> AdMaterials:
-    """비싼 단계 전부 ─ 사진 분석·배경 생성·포스터 기획. **문구를 모른다.**
+    """비싼 단계 전부 ─ 사진 보정·배경 생성·포스터 기획. **문구를 모른다.**
 
-    사진이 있으면 갈래 판정(photo_router)이 사용법을 정한다 —
-      keep      원본을 배경으로 그대로 쓴다 (확산 모델도 안 부른다)
-      cutout    청소한 누끼를 새 배경에 얹는다
-      generate  사진을 참고하지 않고 새로 그린다
-    포스터형은 원본을 배경으로 쓸 수 없는 형태라 갈래와 무관하게 누끼를 쓰고,
-    누끼가 빈손이면 주인공을 생성해 채운다.
+    일반 업로드 사진은 IMAGE_PROFILE=openai일 때 감성형·포스터형 목적에 맞춰 각각
+    광고 촬영본으로 재연출한다. 실패하거나 local 프로필이면 좌표를 유지한 안전
+    색보정으로 끝낸다. 레퍼런스·스케치를 명시한 감성형은 기존 누끼 계약을 지킨다.
     """
-    photo = cut = route = None
+    photo = cut = None
     if brief.photo_id is not None:
         path = photo_store.path_of(brief.photo_id)
         if path is None:
             raise FileNotFoundError(f"보관함에 {brief.photo_id}번 사진이 없습니다")
         with Image.open(path) as f:
-            photo = f.copy()  # 파일과 분리해 담는다 ─ 재료는 화면 세션에 오래 산다
-        # 판정은 **청소 전** 누끼로 한다 — 먼저 청소하면 라우터가 보기도 전에 상품이 사라진다
-        raw_cut = remove_background(photo)
-        if style == "simple":
-            mime = _MIME.get(path.suffix.lower(), "image/jpeg")
-            route = route_photo(path.read_bytes(), mime, raw_cut)
-        cut = remove_crumbs(raw_cut)
+            photo = ImageOps.exif_transpose(f).copy()
+
+    if style == "simple" and photo is not None and brief.ref_id is None and brief.sketch_id is None:
+        background, staged = _uploaded_ad_photo(photo, brief, store, "simple")
+        return SimpleMaterials(
+            product=None,
+            background=background,
+            shop=store.name,
+            preserved_photo=True,
+            staged=staged,
+        )
+
+    if style == "poster" and photo is not None:
+        poster_photo, staged = _uploaded_ad_photo(photo, brief, store, "poster")
+        return UploadedPhotoPosterMaterials(
+            photo=poster_photo,
+            shop=store.name,
+            info=_info_line(store),
+            product_name=brief.product,
+            staged=staged,
+        )
+
+    if photo is not None:
+        # 레퍼런스·스케치는 실제 상품을 따로 얹어야 하므로 이때만 누끼를 딴다.
+        cut = remove_crumbs(remove_background(photo))
 
     if style == "poster":
         # 누끼가 빈손(전경 5% 미만)이면 없는 셈 친다 — 실오라기가 제품 자리에 앉는 것 방지
         product = cut if cut is not None and mask_area(cut) >= 0.05 else None
         return _poster_materials(brief, store, product)
 
-    if route == "keep" and photo is not None:
-        # 사진이 이미 광고 배경감 — 확산 모델 없이 원본 위에 문구만 얹는다.
-        # 🪤 staged 는 False 다: product 가 None 이지만 화면에 나오는 것은
-        # **사장님이 찍은 진짜 사진**이다. 여기에 "연출된 이미지" 를 붙이면 거짓말이 된다.
-        return SimpleMaterials(product=None, background=photo.convert("RGB"), staged=False)
+    if photo is not None:
+        # 레퍼런스·스케치를 함께 준 경우에는 실제 상품 누끼를 보존하고, 명시한
+        # 분위기·구도만 배경 생성에 반영한다. 누끼가 비면 생성 주인공으로 폴백한다.
+        product = cut if cut is not None and mask_area(cut) >= 0.05 else None
+        return _simple_materials(brief, store, product)
 
-    # B단계: 보정이 필요한 실제 사진은 GPT가 사진 전체를 정돈한다. 상품을 새로
-    # 그리는 것이 아니므로 staged=False 이며, 실패 폴백도 원본이다. 스케치가
-    # 함께 있으면 "이 구도를 따른다"는 별도 계약을 지키기 위해 기존 합성 경로를 쓴다.
-    if (
-        photo is not None
-        and route in ("cutout", "generate")
-        and brief.sketch_id is None
-        and brief.ref_id is None
-        and image_profile() == "openai"
-    ):
-        return SimpleMaterials(
-            product=None,
-            background=edit_photo(photo, brief.product, brief.tone),
-            staged=False,
-        )
-    return _simple_materials(brief, store, cut if route == "cutout" else None)
+    return _simple_materials(brief, store, None)
+
+
+def render_no_text_ad(materials: SimpleMaterials) -> Image.Image:
+    """감성형 재료를 광고 문구 없이 사진 한 장으로 완성한다.
+
+    사진 전체나 통생성 장면은 이미 상품을 포함하므로 그대로 규격만 맞춘다.
+    레퍼런스·스케치 주문처럼 상품 누끼와 배경이 분리된 경우에는 글자 없는
+    전용 합성기로 상품을 얹어 사라지지 않게 한다.
+    """
+    return compose_no_text(
+        materials.product,
+        background=materials.background,
+    )
+
+
+def generate_no_text_ad(brief: AdBrief, store: Store) -> Image.Image:
+    """주문서와 가게를 받아 글자 없는 감성 사진 한 장을 돌려준다."""
+    materials = prepare_materials(brief, store, "simple")
+    if not isinstance(materials, SimpleMaterials):
+        raise TypeError("글자 없는 결과물은 감성형 재료만 사용할 수 있습니다")
+    return render_no_text_ad(materials)
 
 
 def render_ad(materials: AdMaterials, copy: CopyCandidate) -> Image.Image:
@@ -228,6 +299,16 @@ def render_ad(materials: AdMaterials, copy: CopyCandidate) -> Image.Image:
     싼 단계(글자 그리기)만 있다. 문구를 바꾸면 여기만 다시 부르면 되고,
     비싼 재료(GPU 배경·LLM 기획·비전 판정)는 그대로 재사용된다 (광고완성흐름 §4-1).
     """
+    if isinstance(materials, UploadedPhotoPosterMaterials):
+        return generate_uploaded_photo_poster(
+            materials.photo,
+            materials.shop,
+            headline=copy.headline,
+            product_name=materials.product_name,
+            sub=copy.sub,
+            info=materials.info,
+            staged=materials.staged,
+        )
     if isinstance(materials, PosterMaterials):
         plan = materials.plan
         return generate_poster(
@@ -249,6 +330,8 @@ def render_ad(materials: AdMaterials, copy: CopyCandidate) -> Image.Image:
         copy.sub,
         background=materials.background,
         staged=materials.staged,
+        shop=materials.shop,
+        preserved_photo=materials.preserved_photo,
     )
 
 
