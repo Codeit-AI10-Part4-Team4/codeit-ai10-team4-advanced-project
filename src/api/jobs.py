@@ -19,6 +19,7 @@ import time
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import Context
 from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any, Literal
@@ -104,7 +105,9 @@ def submit(
         finally:
             job.ended_at = time.time()
 
-    _pool.submit(run)
+    # 재사용되는 작업 스레드에 이전 사용자의 ContextVar 값이 남지 않도록
+    # 작업마다 빈 실행 문맥에서 시작한다.
+    _pool.submit(Context().run, run)
     return job
 
 
