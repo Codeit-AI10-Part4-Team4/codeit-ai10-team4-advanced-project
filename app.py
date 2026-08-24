@@ -51,6 +51,41 @@ PHOTO_TYPES = ["png", "jpg", "jpeg", "webp"]
 STYLES: tuple[tuple[Style, str], ...] = (("simple", "감성 피드형"), ("poster", "정보 포스터형"))
 
 
+class OutputCard(NamedTuple):
+    """STEP 1 에서 사장님이 고르는 결과물 카드 하나."""
+
+    value: str  #: pipeline.OutputType
+    title: str
+    blurb: str  #: 무엇에 좋은지 한 줄
+    steps: str  #: 이 유형을 고르면 이후 단계가 어떻게 되는지
+
+
+#: 결과물 3종 — **대화보다 먼저** 고른다 (PDF STEP 1).
+#:
+#: 카드 그림은 매번 생성하는 것이 아니라 **고정 예시**다. 여기서 진짜를 만들면
+#: 고르기도 전에 돈과 시간이 나간다.
+OUTPUT_CARDS = (
+    OutputCard(
+        "emotional_no_text",
+        "감성 사진 · 글자 없음",
+        "문구 없이 사진에 집중",
+        "문구·손님 반응을 건너뜁니다",
+    ),
+    OutputCard(
+        "emotional_text",
+        "감성 사진 · 글자 있음",
+        "짧은 문구로 분위기 전달",
+        "문구 3개 + 손님 반응을 봅니다",
+    ),
+    OutputCard(
+        "poster",
+        "포스터형 · 글자 필수",
+        "상품과 가격을 명확하게",
+        "문구 3개 + 손님 반응을 봅니다",
+    ),
+)
+
+
 class PhotoSlot(NamedTuple):
     field: str  #: AdBriefDraft 의 어느 칸에 번호를 넣을지
     label: str
@@ -98,6 +133,10 @@ def _reset_chat() -> None:
     st.session_state.pop("mat_errors", None)
     st.session_state.pop("backend_notes", None)
     st.session_state.pop("saved", None)
+    # STEP 1·2 선택도 지운다 — 안 지우면 "다시 고르기" 가 대화만 지우고 같은
+    # 유형으로 되돌아와서, 사장님은 버튼이 안 먹은 줄 안다.
+    st.session_state.pop("output_type", None)
+    st.session_state.pop("has_photo", None)
     for slot in PHOTO_SLOTS:
         _clear_uploader(slot.field)
 
@@ -236,21 +275,43 @@ def _photo_slot(draft: AdBriefDraft, slot: PhotoSlot) -> None:
 
 
 def photo_panel(draft: AdBriefDraft) -> None:
-    """사진 칸 셋 — 전부 선택이다.
+    """사진 칸 — **사진 유무 갈래에 맞는 것만** 보여준다 (PDF STEP 2).
 
     제품 사진만 비전 모델로 읽어서 문구에 반영한다. 그 사진이 곧 홍보 대상이라
     생김새·분위기가 문구의 근거가 되기 때문이다. 레퍼런스·스케치는 "어떻게
     그릴지"에 대한 지시라 문구와 상관없어서 읽지 않는다 — 호출비만 든다.
 
     읽는 건 올릴 때 한 번뿐이다. 다시 만들 때마다 부르면 같은 답에 돈만 든다.
+
+    셋을 한꺼번에 늘어놓지 않는 이유: 레퍼런스는 **실물 사진을 다듬는** 지시고
+    스케치는 **없는 장면을 그리는** 지시라, 사장님이 고른 갈래에 안 맞는 칸은
+    올려도 쓸 데가 없다. 화면에 있으면 올리게 되고, 올리면 반영될 줄 안다.
     """
-    filled = [s.label for s in PHOTO_SLOTS if getattr(draft, s.field) is not None]
+    slots = _slots_for(_has_photo(draft))
+    filled = [s.label for s in slots if getattr(draft, s.field) is not None]
     title = "📷 사진 — " + (", ".join(filled) if filled else "선택")
 
     with st.expander(title, expanded=not filled):
-        for col, slot in zip(st.columns(len(PHOTO_SLOTS)), PHOTO_SLOTS, strict=True):
+        for col, slot in zip(st.columns(len(slots)), slots, strict=True):
             with col:
                 _photo_slot(draft, slot)
+
+
+def _has_photo(draft: AdBriefDraft) -> bool:
+    """사장님이 STEP 2 에서 "사진 있어요" 를 골랐는지."""
+    return bool(st.session_state.get("has_photo"))
+
+
+def _slots_for(has_photo: bool) -> tuple[PhotoSlot, ...]:
+    """그 갈래에서 열어줄 사진 칸.
+
+    사진 있음   제품 사진(3번) + 레퍼런스(2번)   실물을 살리고 분위기를 얹는다
+    사진 없음   스케치(4번)                     안 올리면 통생성(1번)
+    """
+    by_field = {s.field: s for s in PHOTO_SLOTS}
+    if has_photo:
+        return (by_field["photo_id"], by_field["ref_id"])
+    return (by_field["sketch_id"],)
 
 
 def brief_panel(draft: AdBriefDraft) -> None:
@@ -527,14 +588,17 @@ def _prepare_materials(store: Store, brief: AdBrief) -> bool:
     # 확산 모델 의존이라 지연 import ─ 문구만 쓰는 환경에서도 앱이 뜨게 한다
     from app_core import pipeline
 
+    output_type = st.session_state.output_type
+    label = next(c.title for c in OUTPUT_CARDS if c.value == output_type)
     materials: dict[str, pipeline.AdMaterials] = {}
     errors: dict[str, str] = {}
-    for style, label in STYLES:
-        try:
-            with st.spinner(f"{label} 재료 준비 중... (20~30초)"):
-                materials[style] = pipeline.prepare_materials(brief, store, style)
-        except (OSError, ValueError, RuntimeError, ImportError) as e:
-            errors[style] = str(e)
+    # 사장님이 고른 **한 형태만** 만든다. 전에는 감성형·포스터형을 늘 둘 다
+    # 만들어서, 안 고른 쪽에 GPU·API 비용과 20~30초가 그대로 나갔다.
+    try:
+        with st.spinner(f"{label} 재료 준비 중... (20~30초)"):
+            materials[output_type] = pipeline.prepare_output(brief, store, output_type)
+    except (OSError, ValueError, RuntimeError, ImportError) as e:
+        errors[output_type] = str(e)
     st.session_state.materials = materials
     st.session_state.mat_errors = errors
     st.session_state.materials_brief = brief
@@ -544,32 +608,36 @@ def _prepare_materials(store: Store, brief: AdBrief) -> bool:
     return bool(materials)
 
 
-def _render_images(picked: CopyCandidate) -> None:
-    """준비된 재료에 고른 문구를 얹는다 — 싼 단계라 문구를 바꿔도 여기만 다시 돈다."""
+def _render_images(picked: CopyCandidate | None) -> None:
+    """준비된 재료를 결과물 유형에 맞게 마무리한다 — 싼 단계라 문구만 바꿔도 여기만 돈다.
+
+    글자 없는 유형은 `picked` 가 None 이다. 문구를 고르는 화면 자체를 안 거친다.
+    """
     from app_core import pipeline
 
+    output_type = st.session_state.output_type
     images = {}
-    for style, _label in STYLES:
-        materials = st.session_state.materials.get(style)
-        if materials is None:
-            continue  # 재료 단계에서 실패한 형태 — mat_errors 가 화면에서 안내한다
+    materials = st.session_state.materials.get(output_type)
+    if materials is not None:  # None 이면 재료 단계에서 실패 — mat_errors 가 안내한다
         try:
-            images[style] = pipeline.render_ad(materials, picked)
-        except (OSError, ValueError, RuntimeError) as e:
-            st.session_state.mat_errors[style] = str(e)
+            images[output_type] = pipeline.render_output(materials, output_type, picked)
+        except (OSError, ValueError, RuntimeError, TypeError) as e:
+            st.session_state.mat_errors[output_type] = str(e)
     st.session_state.images = images
     # 새로 조판했으니 이전 저장 표시는 더 이상 이 이미지의 것이 아니다
     st.session_state.pop("saved", None)
 
 
 def _make_images(store: Store, brief: AdBrief) -> bool:
-    """사장님이 고른 문구(picked)로 이미지 두 형태를 만들어 화면 상태에 담는다.
+    """고른 결과물 유형으로 이미지 한 장을 만들어 화면 상태에 담는다.
 
     재료 준비(비쌈)와 조판(쌈)이 나뉘어 있어(#37), 같은 주문서면 재료를 재사용하고
     조판만 다시 한다 — 문구를 바꿔 다시 눌러도 20~30초를 다시 기다리지 않는다.
     """
+    from app_core import pipeline
+
     picked: CopyCandidate | None = st.session_state.get("picked")
-    if picked is None:
+    if pipeline.needs_copy(st.session_state.output_type) and picked is None:
         st.info("먼저 문구를 하나 골라주세요 — 위 후보에서 '이걸로 할게요'를 누르면 됩니다.")
         return False
 
@@ -622,71 +690,138 @@ def _save_and_download(
 
 
 def image_view(store: Store, draft: AdBriefDraft) -> None:
-    """광고 이미지 ─ 문구를 고른 뒤 감성 피드형과 정보 포스터형을 나란히 만든다.
+    """광고 이미지 ─ 사장님이 고른 결과물 **한 형태만** 만든다.
 
-    문구 후보·패널·선택은 문구 갈래와 **같은 부품**(copy_view)을 그대로 쓴다 ─
-    따로 만들면 두 화면이 서로 다르게 늙는다 (docs/08 §2 ③④)
+    문구가 필요한 유형은 문구 후보·패널·선택을 문구 갈래와 **같은 부품**(copy_view)
+    으로 거친다 ─ 따로 만들면 두 화면이 서로 다르게 늙는다 (docs/08 §2 ③④).
+
+    글자 없는 유형은 그 단계를 통째로 건너뛴다 (PDF STEP 3). 고른 문구가 결과에
+    한 글자도 안 나오는데 문구를 고르게 하면 사장님을 헛수고시키는 것이다.
     """
-    copy_view(store, draft)
-    if st.session_state.get("picked") is None:
-        return  # 고르기 전엔 이미지 버튼도 안 보인다 ─ 누르고 안내받는 것보다 낫다
-    picked: CopyCandidate = st.session_state.picked
+    from app_core import pipeline
+
+    output_type = st.session_state.output_type
+    label = next(c.title for c in OUTPUT_CARDS if c.value == output_type)
+    wants_copy = pipeline.needs_copy(output_type)
+
+    if wants_copy:
+        copy_view(store, draft)
+        if st.session_state.get("picked") is None:
+            return  # 고르기 전엔 이미지 버튼도 안 보인다 ─ 누르고 안내받는 것보다 낫다
+    picked: CopyCandidate | None = st.session_state.get("picked") if wants_copy else None
+
     # 문구만 바꾼 경우 — 재료가 있으면 조판만 자동으로 다시 한다 (1~2초).
     # 다른 문구의 "이걸로 할게요"를 누르는 순간 이미지가 그 문구로 바뀐다.
     same_brief = st.session_state.get("materials_brief") == draft.to_brief()
     if same_brief and st.session_state.get("materials") and not st.session_state.get("images"):
         _render_images(picked)
 
-    if st.button("광고 이미지 만들기", type="primary"):
+    if st.button(f"{label} 만들기", type="primary"):
         _make_images(store, draft.to_brief())
 
     images = st.session_state.get("images") or {}
     errors = st.session_state.get("mat_errors") or {}
     if not images and not errors:
         return
-    for col, (style, label) in zip(st.columns(2), STYLES, strict=True):
-        with col, st.container(border=True):
-            st.markdown(f"**{label}**")
-            img = images.get(style)
-            if img is None:
-                # 한 형태의 실패가 다른 형태를 지우지 않는다 (docs/08 §7-1)
-                st.error(f"{label}을(를) 만들지 못했습니다. {errors.get(style, '')}")
-                continue
+
+    img = images.get(output_type)
+    with st.container(border=True):
+        st.markdown(f"**{label}**")
+        if img is None:
+            st.error(f"{label}을(를) 만들지 못했습니다. {errors.get(output_type, '')}")
+        else:
             st.image(img, use_container_width=True)
-            _save_and_download(store, draft.product or "광고", style, label, img)
+            _save_and_download(store, draft.product or "광고", output_type, label, img)
 
     for note in st.session_state.get("backend_notes") or []:
         st.caption(f"ℹ️ {note}")
 
-    if images and st.button("사진만 다시 만들기"):
+    if img is not None and st.button("사진만 다시 만들기"):
         # 문구는 그대로 두고 재료(배경·상품)만 새로 뽑는다 — 생성은 매번 다르게 나온다
         if _prepare_materials(store, draft.to_brief()):
             _render_images(picked)
             st.rerun()
         else:
             st.error("새 사진을 만들지 못했습니다. 이전 결과를 유지합니다.")
-    st.caption(
-        "문구를 바꾸려면 위 후보에서 다른 것을 고르세요 — 사진은 그대로 두고 글자만 다시 얹습니다."
-    )
+    if wants_copy:
+        st.caption(
+            "문구를 바꾸려면 위 후보에서 다른 것을 고르세요 — "
+            "사진은 그대로 두고 글자만 다시 얹습니다."
+        )
+
+
+def _chosen_banner() -> None:
+    """고른 것을 계속 보여주고 되돌아갈 길을 준다.
+
+    안 보이면 사장님이 무엇을 고른 채 대화 중인지 잊는다 — 특히 글자 없는 유형은
+    문구 화면이 안 나와서 "왜 문구를 안 물어보지" 가 된다.
+    """
+    card = next(c for c in OUTPUT_CARDS if c.value == st.session_state.output_type)
+    photo = "사진 있음" if st.session_state.has_photo else "사진 없음"
+    left, right = st.columns([4, 1])
+    left.caption(f"**{card.title}** · {photo}")
+    if right.button("다시 고르기", use_container_width=True):
+        _reset_chat()
+        st.rerun()
+
+
+def output_type_view() -> None:
+    """STEP 1 — 만들고 싶은 결과를 **눈으로** 먼저 고른다.
+
+    카드 그림은 고정 예시다. 여기서 진짜를 만들면 고르기도 전에 돈과 시간이 나간다.
+    """
+    st.subheader("어떤 결과물을 만들까요?")
+    st.caption("먼저 만들고 싶은 형태를 고르시면, 그에 필요한 것만 여쭤봅니다.")
+    for col, card in zip(st.columns(len(OUTPUT_CARDS)), OUTPUT_CARDS, strict=True):
+        with col, st.container(border=True):
+            st.markdown(f"**{card.title}**")
+            st.caption(card.blurb)
+            st.caption(f"→ {card.steps}")
+            if st.button("이걸로 만들기", key=f"out_{card.value}", use_container_width=True):
+                st.session_state.output_type = card.value
+                st.rerun()
+
+
+def photo_choice_view() -> None:
+    """STEP 2 — 상품 사진이 있는지만 묻는다. 같은 결과물이어도 생성 경로가 갈린다."""
+    st.subheader("상품 사진이 있나요?")
+    st.caption("실제 상품 사진은 0장 또는 1장이면 됩니다 — 여러 장은 필요 없습니다.")
+    left, right = st.columns(2)
+    with left, st.container(border=True):
+        st.markdown("**사진이 있어요**")
+        st.caption("실제 상품의 형태와 용기를 유지하고 조명·색감·배경만 자연스럽게 개선합니다.")
+        if st.button("사진 올릴게요", key="has_photo_yes", use_container_width=True):
+            st.session_state.has_photo = True
+            st.rerun()
+    with right, st.container(border=True):
+        st.markdown("**사진이 없어요**")
+        st.caption("대화에서 받은 상품 정보로 AI가 장면을 새로 연출하고 표시를 붙입니다.")
+        if st.button("사진 없이 만들게요", key="has_photo_no", use_container_width=True):
+            st.session_state.has_photo = False
+            st.rerun()
 
 
 def chat_view(store: Store) -> None:
     st.title(f"{store.name} 사장님, 어떤 광고를 만들까요?")
 
-    # 갈래 선택을 없앴다 ─ 문구 → 이미지가 한 흐름이 되어(#44) 입구도 하나다 (건오님 합의 8/20)
-    # 문구만 필요한 사장님은 문구를 고른 뒤 이미지 버튼을 안 누르면 된다.
+    # 입구가 셋이다 — 결과물 선택 → 사진 유무 → 대화 (PDF STEP 1~3).
+    #
+    # 순서가 중요하다. 결과물을 먼저 골라야 **문구·손님 반응을 거칠지**가 정해지고,
+    # 사진 유무를 먼저 물어야 **어느 사진 칸을 열지**가 정해진다. 대화를 먼저 시키면
+    # 다 끝난 뒤에 "사실 이건 글자 없는 거였어요" 가 되어 문구 고른 게 버려진다.
+    #
     # goal 필드와 ads.goal 컬럼은 그대로 둔다 ─ NLU·DB 계약 정리는 별건.
     draft: AdBriefDraft = st.session_state.setdefault("draft", AdBriefDraft(goal="image"))
     history: list[tuple[str, str]] = st.session_state.setdefault("history", [])
 
-    if draft.goal is None:
-        cols = st.columns(len(GOALS))
-        for col, (goal, label) in zip(cols, GOALS.items(), strict=True):
-            if col.button(label, use_container_width=True):
-                st.session_state.draft = draft.model_copy(update={"goal": goal})
-                st.rerun()
+    if st.session_state.get("output_type") is None:
+        output_type_view()
+        return
+    if st.session_state.get("has_photo") is None:
+        photo_choice_view()
         return
 
+    _chosen_banner()
     col_chat, col_brief = st.columns([3, 2])
 
     with col_chat:
