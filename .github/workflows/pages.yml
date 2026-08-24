@@ -1,0 +1,43 @@
+# web/ 를 GitHub Pages 로 올린다.
+#
+# 정적 파일만 서빙한다 — 파이썬은 안 돈다. 그래서 지금 화면은 목업으로 움직이고,
+# 실제 평가·생성은 백엔드가 따로 서야 붙는다 (web/app.js 의 API_BASE).
+#
+# Pages 를 처음 쓰는 저장소라면 Settings → Pages → Source 를 "GitHub Actions" 로
+# 한 번 바꿔줘야 이 워크플로가 배포까지 간다.
+
+name: Deploy web to Pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['web/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 배포는 한 번에 하나만. 밀린 것은 최신 하나만 남긴다.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
