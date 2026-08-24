@@ -2,7 +2,7 @@
 
 from PIL import Image, ImageFont
 
-from app_core import fonts, photo_router, pipeline
+from app_core import fonts, image_backend, photo_router, pipeline
 from app_core.poster_plan import PosterPlan
 from app_core.schema import AdBrief, CopyCandidate, Store
 
@@ -246,147 +246,75 @@ def _photo(tmp_path):
     return p
 
 
-def test_keep_갈래는_원본을_배경으로_쓰고_생성하지_않는다(tmp_path, monkeypatch):
-    seen = {}
-    monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: _photo(tmp_path))
-    monkeypatch.setattr(
-        pipeline, "remove_background", lambda im: Image.new("RGBA", (64, 64), (0, 0, 0, 255))
-    )
-    monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, cut: "keep")
-
-    def _boom(prompt):
-        raise AssertionError("keep 갈래는 확산 모델을 부르면 안 된다")
-
-    _both_backends(monkeypatch, _boom)
-
-    def _spy(product, headline, sub="", background=None, **kwargs):
-        seen["product"] = product
-        seen["background"] = background
-        return Image.new("RGB", (1080, 1080))
-
-    monkeypatch.setattr(pipeline, "compose_ad", _spy)
-    brief = AdBrief(goal="image", product="크로플", price=0, photo_id=7)
-    pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
-    assert seen["product"] is None
-    assert seen["background"] is not None
-    assert seen["background"].size == (64, 64)  # 원본 사진 크기 그대로
-
-
-def test_cutout_갈래는_청소된_누끼가_그대로_전달된다(tmp_path, monkeypatch):
-    seen = {}
-    cleaned = Image.new("RGBA", (10, 10))  # keep_largest 가 돌려준 표식
-    monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: _photo(tmp_path))
-    monkeypatch.setattr(
-        pipeline, "remove_background", lambda im: Image.new("RGBA", (64, 64), (255, 255, 255, 255))
-    )
-    monkeypatch.setattr(pipeline, "remove_crumbs", lambda cut: cleaned)
-    monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, cut: "cutout")
-    monkeypatch.setattr(pipeline, "build_bg_prompt", lambda *a, **k: "bg")
-    _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (256, 256)))
-
-    def _spy(product, headline, sub="", **kwargs):
-        seen["product"] = product
-        return Image.new("RGB", (1080, 1080))
-
-    monkeypatch.setattr(pipeline, "compose_ad", _spy)
-    brief = AdBrief(goal="image", product="크로플", price=0, photo_id=7)
-    pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
-    assert seen["product"] is cleaned
-
-
-def test_generate_갈래는_제품이_든_장면을_그린다(tmp_path, monkeypatch):
-    seen = {}
-    monkeypatch.setattr(fonts, "load", _fake_font)
-    monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: _photo(tmp_path))
-    monkeypatch.setattr(
-        pipeline, "remove_background", lambda im: Image.new("RGBA", (64, 64), (255, 255, 255, 255))
-    )
-    monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, cut: "generate")
-
-    def _scene(**kwargs):
-        seen["product"] = kwargs["product"]
-        return "scene prompt"
-
-    monkeypatch.setattr(pipeline, "build_scene_prompt", _scene)
-
-    def _gen(prompt):
-        seen["prompt"] = prompt
-        return Image.new("RGB", (256, 256))
-
-    _both_backends(monkeypatch, _gen)
-    brief = AdBrief(goal="image", product="크로플", price=0, photo_id=7)
-    pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
-    assert seen["product"] == "크로플"
-    assert seen["prompt"] == "scene prompt"
-
-
-def test_openai_cutout_갈래는_원본_전체를_보정한다(tmp_path, monkeypatch):
-    """누끼+배경 합성 대신 원본 전체를 편집해 공중부양 경로를 없앤다."""
-    seen = {}
+def test_사진을_올린_감성형은_OpenAI에서_광고_재촬영한다(tmp_path, monkeypatch):
+    """감성형은 전용 연출로 한 번 재촬영하고 이후 Pillow가 문구를 얹는다."""
     source = _photo(tmp_path)
-    edited = Image.new("RGB", (1080, 1080), (9, 9, 9))
+    restaged = Image.new("RGB", (1080, 1080), (121, 81, 41))
+    seen: dict[str, object] = {}
     monkeypatch.setenv("IMAGE_PROFILE", "openai")
     monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: source)
-    monkeypatch.setattr(
-        pipeline, "remove_background", lambda im: Image.new("RGBA", (64, 64), (255, 255, 255, 255))
-    )
-    monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, cut: "cutout")
 
-    def _edit(photo, product, tone="", size=(1080, 1080)):
-        seen.update(photo=photo, product=product, tone=tone)
-        return edited
+    def _restage(photo, **kwargs):
+        seen.update(photo=photo, kwargs=kwargs)
+        return image_backend.RestageResult(restaged, staged=True)
 
-    monkeypatch.setattr(pipeline, "edit_photo", _edit)
-    monkeypatch.setattr(
-        pipeline,
-        "generate_scene",
-        lambda prompt: (_ for _ in ()).throw(AssertionError("배경 생성 금지")),
-    )
+    def _forbidden(*args, **kwargs):
+        raise AssertionError("업로드 사진 재촬영에서 누끼·별도 장면 생성을 호출하면 안 된다")
+
+    monkeypatch.setattr(pipeline, "restage_photo", _restage)
+    monkeypatch.setattr(pipeline, "remove_background", _forbidden)
+    monkeypatch.setattr(pipeline, "generate_scene", _forbidden)
+    monkeypatch.setattr(pipeline, "generate_background", _forbidden)
+    monkeypatch.setattr(photo_router, "route_photo", _forbidden)
 
     materials = pipeline.prepare_materials(
-        AdBrief(goal="image", product="크로플", price=0, photo_id=7, tone="차분"),
+        AdBrief(
+            goal="image",
+            product="크로플",
+            price=0,
+            photo_id=7,
+            situation="신메뉴",
+            tone="따뜻하게",
+        ),
         _store(),
         "simple",
     )
 
     assert isinstance(materials, pipeline.SimpleMaterials)
+    assert seen["photo"] is not None
+    assert seen["kwargs"]["style"] == "simple"
+    assert seen["kwargs"]["product"] == "크로플"
+    assert seen["kwargs"]["situation"] == "신메뉴"
     assert materials.product is None
-    assert materials.background is edited
-    assert materials.staged is False
-    assert seen["product"] == "크로플"
-    assert seen["tone"] == "차분"
+    assert materials.background is restaged
+    assert materials.preserved_photo is True
+    assert materials.staged is True
 
 
-def test_openai_generate_갈래도_사진을_버리지_않고_보정한다(tmp_path, monkeypatch):
+def test_실사진_AI재촬영이_실패하면_안전보정_결과를_쓴다(tmp_path, monkeypatch):
     source = _photo(tmp_path)
-    edited = Image.new("RGB", (1080, 1080), (9, 9, 9))
+    enhanced = Image.new("RGB", (64, 64), (122, 82, 42))
     monkeypatch.setenv("IMAGE_PROFILE", "openai")
     monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: source)
     monkeypatch.setattr(
-        pipeline, "remove_background", lambda im: Image.new("RGBA", (64, 64), (255, 255, 255, 255))
+        pipeline,
+        "restage_photo",
+        lambda *args, **kwargs: image_backend.RestageResult(enhanced, staged=False),
     )
-    monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, cut: "generate")
-    monkeypatch.setattr(pipeline, "edit_photo", lambda *a, **k: edited)
 
     materials = pipeline.prepare_materials(
         AdBrief(goal="image", product="크로플", price=0, photo_id=7), _store(), "simple"
     )
 
     assert isinstance(materials, pipeline.SimpleMaterials)
-    assert materials.background is edited
-    assert materials.product is None
+    assert materials.background is enhanced
     assert materials.staged is False
 
 
 def test_openai여도_사진과_스케치가_같이_있으면_기존_합성을_유지한다(tmp_path, monkeypatch):
-    """B단계가 스케치의 구도 계약을 조용히 버리면 안 된다."""
+    """OpenAI 프로필도 스케치의 구도·실상품 누끼 계약을 바꾸지 않는다."""
     _cutout_ready(tmp_path, monkeypatch)
     monkeypatch.setenv("IMAGE_PROFILE", "openai")
-    monkeypatch.setattr(
-        pipeline,
-        "edit_photo",
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError("사진 편집 금지")),
-    )
     seen = _watch(monkeypatch)
 
     brief = _brief().model_copy(update={"photo_id": 1, "sketch_id": _put()})
@@ -397,50 +325,67 @@ def test_openai여도_사진과_스케치가_같이_있으면_기존_합성을_�
     assert seen["누끼"] is True
 
 
-def test_라우터는_청소_전_누끼를_받는다(tmp_path, monkeypatch):
-    """청소를 먼저 하면 라우터가 보기 전에 상품이 사라진다 — 순서를 고정한다."""
-    seen = {}
+def test_사진과_레퍼런스는_청소된_누끼를_배경에_얹는다(tmp_path, monkeypatch):
+    """명시한 레퍼런스가 있으면 상품 누끼를 보존하고 분위기만 생성한다."""
     raw = Image.new("RGBA", (64, 64), (255, 255, 255, 255))
-    monkeypatch.setattr(fonts, "load", _fake_font)
+    cleaned = Image.new("RGBA", (10, 10), (1, 2, 3, 255))
+    _simple_ready(monkeypatch)
     monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: _photo(tmp_path))
     monkeypatch.setattr(pipeline, "remove_background", lambda im: raw)
-    monkeypatch.setattr(pipeline, "remove_crumbs", lambda cut: Image.new("RGBA", (64, 64)))
+    monkeypatch.setattr(pipeline, "remove_crumbs", lambda cut: cleaned)
+    monkeypatch.setattr(pipeline.ref_style, "describe_style", lambda *a, **k: "warm light")
+    _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (1080, 1080)))
 
-    def _route(data, mime, cut):
-        seen["cut"] = cut
-        return "keep"
-
-    monkeypatch.setattr(pipeline, "route_photo", _route)
-    brief = AdBrief(goal="image", product="크로플", price=0, photo_id=7)
-    pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
-    assert seen["cut"] is raw  # 청소 전 누끼여야 한다
-
-
-def test_poster는_다제품을_하나로_줄이지_않는다(tmp_path, monkeypatch):
-    """포스터 제품 이미지까지 두 조각이 살아서 간다 — 가장 큰 것만 남기기 금지."""
-    seen = {}
-    two = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-    two.paste((255, 255, 255, 255), (8, 8, 40, 40))  # 큰 상품 25%
-    two.paste((255, 255, 255, 255), (48, 48, 56, 56))  # 작은 상품 1.6%
-    monkeypatch.setattr(fonts, "load", _fake_font)
-    monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: _photo(tmp_path))
-    monkeypatch.setattr(pipeline, "remove_background", lambda im: two)
-    monkeypatch.setattr(
-        pipeline,
-        "plan_poster",
-        lambda **kwargs: PosterPlan(
-            tagline="t", badge="b", date_line="", features=["a|b"], event="", palette="fresh_mint"
-        ),
+    materials = pipeline.prepare_materials(
+        AdBrief(goal="image", product="크로플", price=0, photo_id=7, ref_id=8),
+        _store(),
+        "simple",
     )
 
-    def _spy(product, shop, **kwargs):
-        seen["pieces"] = photo_router.significant_pieces(product)
+    assert isinstance(materials, pipeline.SimpleMaterials)
+    assert materials.product is cleaned
+
+
+def test_사진_있는_포스터는_누끼_없이_사진_전체를_카드로_쓴다(tmp_path, monkeypatch):
+    """포스터 전용 재촬영본을 사진 카드로 넘기고 연출 표기도 전달한다."""
+    source = _photo(tmp_path)
+    restaged = Image.new("RGB", (1080, 1080), (12, 34, 56))
+    seen = {}
+    monkeypatch.setenv("IMAGE_PROFILE", "openai")
+    monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: source)
+
+    def _restage(photo, **kwargs):
+        seen["restage_kwargs"] = kwargs
+        return image_backend.RestageResult(restaged, staged=True)
+
+    monkeypatch.setattr(pipeline, "restage_photo", _restage)
+
+    def _forbidden(*args, **kwargs):
+        raise AssertionError("사진 있는 포스터에서 누끼·별도 포스터 기획을 부르면 안 된다")
+
+    monkeypatch.setattr(pipeline, "remove_background", _forbidden)
+    monkeypatch.setattr(pipeline, "plan_poster", _forbidden)
+    monkeypatch.setattr(pipeline, "generate_poster", _forbidden)
+
+    def _spy(photo, shop, **kwargs):
+        seen.update(photo=photo, shop=shop, kwargs=kwargs)
         return Image.new("RGB", (1080, 1080))
 
-    monkeypatch.setattr(pipeline, "generate_poster", _spy)
-    brief = AdBrief(goal="image", product="크로플", price=0, photo_id=7)
-    pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "poster")
-    assert seen["pieces"] == 2  # 두 상품이 그대로 포스터로 간다
+    monkeypatch.setattr(pipeline, "generate_uploaded_photo_poster", _spy)
+    brief = AdBrief(goal="image", product="골드 커플링", price=0, photo_id=7)
+    pipeline.generate_ad(
+        brief,
+        _store(),
+        CopyCandidate(headline="영원한 사랑의 상징", sub="두 사람의 특별한 순간"),
+        "poster",
+    )
+
+    assert seen["restage_kwargs"]["style"] == "poster"
+    assert seen["photo"] is restaged
+    assert seen["shop"] == _store().name
+    assert seen["kwargs"]["product_name"] == "골드 커플링"
+    assert seen["kwargs"]["sub"] == "두 사람의 특별한 순간"
+    assert seen["kwargs"]["staged"] is True
 
 
 # ── 제품 사진 + 스케치 조합 ──────────────────────────────────
@@ -450,7 +395,7 @@ def test_poster는_다제품을_하나로_줄이지_않는다(tmp_path, monkeypa
 
 
 def _cutout_ready(tmp_path, monkeypatch):
-    """사진이 있는 경로. 누끼·갈래 판정을 대역으로 세운다."""
+    """레퍼런스·스케치·포스터가 있는 사진 경로의 누끼 부품을 대역으로 세운다."""
     _simple_ready(monkeypatch)
     photo = tmp_path / "제품.png"
     Image.new("RGB", (64, 64), (120, 80, 40)).save(photo)
@@ -459,7 +404,6 @@ def _cutout_ready(tmp_path, monkeypatch):
         pipeline, "remove_background", lambda im: Image.new("RGBA", (64, 64), (255, 255, 255, 255))
     )
     monkeypatch.setattr(pipeline, "remove_crumbs", lambda cut: cut)
-    monkeypatch.setattr(pipeline, "route_photo", lambda d, m, c: "cutout")
 
 
 def _watch(monkeypatch):
@@ -502,17 +446,13 @@ def test_사진과_스케치를_같이_올려도_제품이_하나다(tmp_path, m
     assert seen["누끼"] is True  # 제품은 누끼 한 번만
 
 
-def test_레퍼런스를_같이_주면_보정_대신_기존_경로로_간다(tmp_path, monkeypatch):
-    """레퍼런스도 명시 지시다 — edit 프롬프트가 분위기를 전달할 수 없어 기존 경로를 지킨다."""
+def test_레퍼런스를_같이_주면_실상품_누끼와_분위기를_함께_쓴다(tmp_path, monkeypatch):
+    """레퍼런스는 생성 배경에만 반영하고 실제 상품 누끼는 그대로 보존한다."""
     _cutout_ready(tmp_path, monkeypatch)
     monkeypatch.setenv("IMAGE_PROFILE", "openai")
     monkeypatch.setattr(pipeline.photo_store, "load", lambda pid: (b"x", "image/png"))
     monkeypatch.setattr(pipeline.ref_style, "describe_style", lambda *a, **k: "warm light")
 
-    def _no_edit(*a, **k):
-        raise AssertionError("레퍼런스 주문인데 보정으로 갔다")
-
-    monkeypatch.setattr(pipeline, "edit_photo", _no_edit)
     seen = {}
 
     def _bg(prompt):
@@ -540,16 +480,20 @@ def test_스케치만_있으면_스케치가_제품을_그린다(tmp_path, monke
     assert seen["누끼"] is False
 
 
-def test_사진만_있으면_빈_무대에_누끼를_얹는다(tmp_path, monkeypatch):
-    _cutout_ready(tmp_path, monkeypatch)
-    seen = _watch(monkeypatch)
+def test_로컬에서_사진만_있으면_비용없이_안전_보정한다(tmp_path, monkeypatch):
+    source = _photo(tmp_path)
+    enhanced = Image.new("RGB", (64, 64), (121, 81, 41))
+    monkeypatch.setenv("IMAGE_PROFILE", "local")
+    monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: source)
+    monkeypatch.setattr(pipeline, "enhance_uploaded_photo", lambda photo: enhanced)
 
-    brief = _brief().model_copy(update={"photo_id": 1})
-    pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
+    materials = pipeline.prepare_materials(
+        _brief().model_copy(update={"photo_id": 1}), _store(), "simple"
+    )
 
-    assert "스케치로" not in seen
-    assert seen["prompt"] == "base prompt"
-    assert seen["누끼"] is True
+    assert isinstance(materials, pipeline.SimpleMaterials)
+    assert materials.background is enhanced
+    assert materials.product is None
 
 
 def test_사진과_레퍼런스와_스케치를_다_올려도_제품이_하나다(tmp_path, monkeypatch):
@@ -626,20 +570,35 @@ def test_사진_없이_만든_포스터에도_연출_표기가_붙는다(monkeyp
 
 
 def test_사장님_사진을_그대로_쓰면_표기하지_않는다(tmp_path, monkeypatch):
-    """🪤 keep 갈래는 compose_ad(product=None) 으로 부르지만 화면에 나오는 것은
-    **사장님이 찍은 진짜 사진**이다. product 유무로 짐작하면 여기에 딱지가 붙는다."""
+    """안전 보정본은 **사장님이 찍은 진짜 사진**이므로 연출 표기를 붙이지 않는다."""
     _photo_dir(tmp_path, monkeypatch)
     _simple_ready(monkeypatch)
     calls = _notice_spy(monkeypatch)
-    monkeypatch.setattr(
-        pipeline, "remove_background", lambda im: Image.new("RGBA", (64, 64), (0, 0, 0, 255))
-    )
-    monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, cut: "keep")
 
     brief = _brief().model_copy(update={"photo_id": _put()})
     pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
 
     assert not calls, "진짜 사진에 '연출된 이미지' 를 붙이면 그것이 거짓말이다"
+
+
+def test_사장님_사진을_AI로_재촬영하면_연출_표기가_붙는다(tmp_path, monkeypatch):
+    """원본을 참고했어도 AI가 새 광고 사진을 그렸다면 사실대로 표시한다."""
+    _photo_dir(tmp_path, monkeypatch)
+    _simple_ready(monkeypatch)
+    monkeypatch.setenv("IMAGE_PROFILE", "openai")
+    calls = _notice_spy(monkeypatch)
+    monkeypatch.setattr(
+        pipeline,
+        "restage_photo",
+        lambda *args, **kwargs: image_backend.RestageResult(
+            Image.new("RGB", (1080, 1080), (10, 20, 30)), staged=True
+        ),
+    )
+
+    brief = _brief().model_copy(update={"photo_id": _put()})
+    pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
+
+    assert calls, "AI 재촬영 사진인데 연출 표기가 붙지 않았다"
 
 
 def test_누끼를_얹으면_표기하지_않는다(tmp_path, monkeypatch):
@@ -650,10 +609,10 @@ def test_누끼를_얹으면_표기하지_않는다(tmp_path, monkeypatch):
     cut = Image.new("RGBA", (64, 64), (255, 255, 255, 255))
     monkeypatch.setattr(pipeline, "remove_background", lambda im: cut)
     monkeypatch.setattr(pipeline, "remove_crumbs", lambda c: cut)
-    monkeypatch.setattr(pipeline, "route_photo", lambda data, mime, c: "cutout")
+    monkeypatch.setattr(pipeline.ref_style, "describe_style", lambda *a, **k: "warm light")
     _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (1080, 1080), (10, 20, 30)))
 
-    brief = _brief().model_copy(update={"photo_id": _put()})
+    brief = _brief().model_copy(update={"photo_id": _put(), "ref_id": _put()})
     pipeline.generate_ad(brief, _store(), CopyCandidate(headline="크로플"), "simple")
 
     assert not calls
@@ -688,7 +647,16 @@ def test_바뀐_문구가_조판에_그대로_전달된다(monkeypatch):
     _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (1080, 1080)))
     seen: list[str] = []
 
-    def _compose(product, headline, sub="", size=(1080, 1080), background=None, staged=False):
+    def _compose(
+        product,
+        headline,
+        sub="",
+        size=(1080, 1080),
+        background=None,
+        staged=False,
+        shop="",
+        preserved_photo=False,
+    ):
         seen.append(headline)
         return Image.new("RGB", size)
 
