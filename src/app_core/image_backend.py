@@ -55,8 +55,9 @@ _RESTAGE_DIRECTION: Final = {
 feel. Make the advertised subject desirable and believable, use warm dimensional light and a
 realistic neighborhood-shop setting, and leave a calm area near the upper left for Korean copy
 that will be added later. For food or drink, make it naturally appetizing; for other categories,
-use category-appropriate commercial styling. The result should feel like a skilled photographer
-shot it, not like a glossy 3D render.""",
+use category-appropriate commercial styling. Show only the advertised offering and non-human,
+category-appropriate props. The result should feel like a skilled photographer shot it, not like
+a glossy 3D render.""",
     "poster": """Create a premium commercial product photograph for an information poster. Use a
 clean, controlled set, strong subject focus, balanced centered grouping, realistic depth and
 lighting, and enough uncluttered space around the hero subject for a poster layout added later.
@@ -197,8 +198,12 @@ or new logos. If the source packaging contains text, preserve the package's over
 identity but turn, crop, or soften it so the lettering is unreadable instead of inventing or
 changing words.
 Do not invent a specific ingredient, certification, discount, award, origin, or factual claim
-that the owner did not provide. Avoid plastic-looking surfaces, impossible geometry, excessive
-gloss, fake bokeh, duplicated objects, and over-saturated colors."""
+that the owner did not provide.
+No people or human body parts anywhere in the frame: no faces, heads, torsos, hands, arms,
+fingers, legs, feet, human reflections, human silhouettes, or someone holding, reaching for, or
+serving the product. Keep every edge of the frame free of cropped human body parts.
+Avoid plastic-looking surfaces, impossible geometry, excessive gloss, fake bokeh, duplicated
+objects, and over-saturated colors."""
 
 
 def _openai_restage(

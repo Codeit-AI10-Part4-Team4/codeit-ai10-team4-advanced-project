@@ -48,6 +48,8 @@ class PosterMaterials:
     plan: PosterPlan  #: 포스터 기획 결과
     shop: str  #: 가게 이름
     info: str  #: 하단 한 줄 (주소·전화)
+    product_name: str  #: 주문서의 홍보 대상
+    price_text: str  #: 주문서 가격. 0원이면 빈 문자열
     staged: bool = False  #: 상품 이미지를 AI 가 그렸는지 → "연출된 이미지" 표기
 
 
@@ -59,6 +61,7 @@ class UploadedPhotoPosterMaterials:
     shop: str
     info: str
     product_name: str
+    price_text: str
     staged: bool = False
 
 
@@ -69,6 +72,11 @@ AdMaterials = SimpleMaterials | PosterMaterials | UploadedPhotoPosterMaterials
 def _info_line(store: Store) -> str:
     """포스터 하단 한 줄 — 없는 항목은 빼고 이어 붙인다."""
     return "  ·  ".join(part for part in (store.address, store.phone) if part)
+
+
+def _price_text(brief: AdBrief) -> str:
+    """가격 0원은 '표시 안 함'이고, 실제 가격만 원 단위로 조판한다."""
+    return f"{brief.price:,}원" if brief.show_price else ""
 
 
 def _safe_uploaded_photo(photo: Image.Image) -> Image.Image:
@@ -211,6 +219,8 @@ def _poster_materials(brief: AdBrief, store: Store, product: Image.Image | None)
         plan=plan,
         shop=store.name,
         info=_info_line(store),
+        product_name=brief.product,
+        price_text=_price_text(brief),
         staged=staged,
     )
 
@@ -251,6 +261,7 @@ def prepare_materials(
             shop=store.name,
             info=_info_line(store),
             product_name=brief.product,
+            price_text=_price_text(brief),
             staged=staged,
         )
 
@@ -306,6 +317,7 @@ def render_ad(materials: AdMaterials, copy: CopyCandidate) -> Image.Image:
             headline=copy.headline,
             product_name=materials.product_name,
             sub=copy.sub,
+            price_text=materials.price_text,
             info=materials.info,
             staged=materials.staged,
         )
@@ -320,8 +332,12 @@ def render_ad(materials: AdMaterials, copy: CopyCandidate) -> Image.Image:
             features=plan.features,
             event=plan.event,
             headline=copy.headline,
+            product_name=materials.product_name,
+            sub=copy.sub,
+            price_text=materials.price_text,
             info=materials.info,
-            palette=plan.palette,
+            # 포스터형은 업종과 사진 유무에 관계없이 같은 따뜻한 종이 광고 틀을 쓴다.
+            palette="warm_bakery",
             staged=materials.staged,
         )
     return compose_ad(

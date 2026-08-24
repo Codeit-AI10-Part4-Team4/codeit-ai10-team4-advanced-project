@@ -372,7 +372,7 @@ def test_사진_있는_포스터는_누끼_없이_사진_전체를_카드로_쓴
         return Image.new("RGB", (1080, 1080))
 
     monkeypatch.setattr(pipeline, "generate_uploaded_photo_poster", _spy)
-    brief = AdBrief(goal="image", product="골드 커플링", price=0, photo_id=7)
+    brief = AdBrief(goal="image", product="골드 커플링", price=199000, photo_id=7)
     pipeline.generate_ad(
         brief,
         _store(),
@@ -385,6 +385,7 @@ def test_사진_있는_포스터는_누끼_없이_사진_전체를_카드로_쓴
     assert seen["shop"] == _store().name
     assert seen["kwargs"]["product_name"] == "골드 커플링"
     assert seen["kwargs"]["sub"] == "두 사람의 특별한 순간"
+    assert seen["kwargs"]["price_text"] == "199,000원"
     assert seen["kwargs"]["staged"] is True
 
 
@@ -692,6 +693,33 @@ def test_문구만_바꾸면_포스터_기획은_재사용된다(monkeypatch):
     pipeline.render_ad(materials, CopyCandidate(headline="다른 문구"))
     assert calls["plan"] == 1
     assert heads == ["첫 문구", "다른 문구"]
+
+
+def test_사진_없는_포스터에도_주문서_가격을_전달한다(monkeypatch):
+    """가격은 문구 생성 여부와 무관한 주문 사실이므로 포스터 조판에 직접 전달한다."""
+    monkeypatch.setattr(pipeline, "build_hero_prompt", lambda *a, **k: "hero")
+    _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (512, 512)))
+    monkeypatch.setattr(
+        pipeline,
+        "plan_poster",
+        lambda **kwargs: PosterPlan(
+            tagline="t", badge="", date_line="", features=[], event="", palette="warm_bakery"
+        ),
+    )
+    seen = {}
+
+    def _poster(product, shop, **kwargs):
+        seen.update(kwargs)
+        return Image.new("RGB", (1080, 1080))
+
+    monkeypatch.setattr(pipeline, "generate_poster", _poster)
+    brief = _brief().model_copy(update={"price": 6500})
+    materials = pipeline.prepare_materials(brief, _store(), "poster")
+    pipeline.render_ad(materials, CopyCandidate(headline="여름 한 잔"))
+
+    assert seen["price_text"] == "6,500원"
+    assert seen["product_name"] == brief.product
+    assert seen["palette"] == "warm_bakery"
 
 
 def test_바뀐_주문서로_재료를_다시_만들면_기획에_전달된다(monkeypatch):

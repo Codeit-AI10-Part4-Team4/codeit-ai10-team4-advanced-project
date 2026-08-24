@@ -211,7 +211,9 @@ def test_AI_광고_재촬영이_성공하면_연출_결과로_표시한다(
     assert result.image is GPT
     assert result.staged is True
     assert seen["photo"] is source
-    assert seen["kwargs"]["style"] == "simple"
+    kwargs = seen["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["style"] == "simple"
 
 
 def test_AI_재촬영은_고품질과_스타일별_연출을_API에_전달한다(
@@ -256,6 +258,9 @@ def test_AI_재촬영은_고품질과_스타일별_연출을_API에_전달한다
     assert "Do not render any visible or legible typography anywhere" in prompt
     assert "signs, menus, price tags, labels" in prompt
     assert "lettering is unreadable" in prompt
+    assert "No people or human body parts anywhere" in prompt
+    assert "hands, arms" in prompt
+    assert "cropped human body parts" in prompt
     assert "Preserve every visible product exactly" not in prompt
 
     poster_prompt = image_backend._restage_prompt(
@@ -268,6 +273,8 @@ def test_AI_재촬영은_고품질과_스타일별_연출을_API에_전달한다
         style="poster",
     )
     assert "information poster" in poster_prompt
+    assert "No people or human body parts anywhere" in poster_prompt
+    assert "hands, arms" in poster_prompt
     assert poster_prompt != prompt
 
     image_backend._openai_restage(
