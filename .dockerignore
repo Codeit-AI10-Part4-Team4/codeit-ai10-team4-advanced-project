@@ -18,9 +18,14 @@ venv/
 .vscode/
 .idea/
 
-# 모델·데이터는 볼륨으로 마운트한다
+# 모델·원본 CSV 는 볼륨으로 마운트한다.
+# 다만 상권 DB 는 이미지에 넣는다 — 이게 없으면 /trade-area 가 통째로 죽는데,
+# Cloud Run 같은 컨테이너 호스트는 로컬 볼륨을 붙일 수가 없다. 17MB 고 이미 커밋돼 있다.
+# `data/` 가 아니라 `data/*` 인 이유는 .gitignore 와 같다 — 디렉터리를 통째로
+# 빼면 안쪽 파일을 예외로 되살릴 수 없다.
 models/
-data/
+data/*
+!data/panel.duckdb
 outputs/
 *.safetensors
 *.ckpt

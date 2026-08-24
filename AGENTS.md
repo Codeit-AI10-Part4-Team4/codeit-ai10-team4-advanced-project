@@ -23,7 +23,11 @@ Claude Code용 `CLAUDE.md`는 이 파일을 import하는 포인터이므로, 내
   - import는 **`import app_core` / `from api import ...`** (⚠️ `src.` 접두어 없음).
   - 무거운 의존성(torch 계열 등)은 core가 아닌 **별도 extra**에 둘 것 — CI/기본 설치를
     가볍게 유지하는 장치이므로 core로 되돌리지 말 것.
-- **API 서버 실행**: `uvicorn api.main:app --reload` → http://127.0.0.1:8000/docs
+- **API 서버 실행**: `python -m api` → http://127.0.0.1:8000/docs (`HOST`/`PORT` 로 바꾼다)
+  - ⚠️ `uvicorn api.main:app` 로 직접 띄우지 말 것. `config.load_env()` 를 안 거쳐서
+    **서버만 `.env` 를 못 본다** — KAKAO_REST_KEY 가 비어 주소→좌표 변환이 죽고,
+    MODEL_PROFILE·SESSION_SECRET 도 같이 사라진다. `api/__main__.py` 가 그걸 먼저 읽는다.
+  - 화면(`web/`)이 다른 오리진에서 뜨면 `WEB_ORIGINS` 에 그 주소를 넣어야 CORS 가 열린다.
 - **품질 게이트 (커밋/PR 전 반드시 통과)** — CI와 동일:
   - `ruff check src tests` / `ruff format src tests` / `mypy` / `pytest`
 - **pre-commit**: `pre-commit install && pre-commit install --hook-type pre-push`
