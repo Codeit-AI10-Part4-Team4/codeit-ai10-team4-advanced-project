@@ -47,6 +47,33 @@ def test_compose_ad_uses_given_background(monkeypatch):
     assert _px(ad, 5, 250) == (0, 0, 255)
 
 
+def test_글자_없는_사진은_배경에_가림막이나_문구를_그리지_않는다(monkeypatch):
+    background = Image.new("RGB", (100, 100), (17, 34, 51))
+    draw = ImageDraw.Draw(background)
+    for x in range(0, 100, 4):
+        draw.rectangle((x, 0, x + 1, 49), fill=(255, 255, 255))
+    monkeypatch.setattr(
+        fonts,
+        "load",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("글자 없는 사진인데 글꼴을 불렀다")
+        ),
+    )
+
+    result = compose.compose_no_text(None, size=(100, 100), background=background)
+
+    assert result.tobytes() == background.tobytes()
+
+
+def test_글자_없는_사진도_분리된_상품은_배경에_합성한다():
+    background = Image.new("RGB", (100, 100), (0, 0, 255))
+    product = Image.new("RGBA", (30, 30), (255, 0, 0, 255))
+
+    result = compose.compose_no_text(product, size=(100, 100), background=background)
+
+    assert any(red > 200 and blue < 50 for red, _green, blue in _pixels(result))
+
+
 def test_compose_ad는_세로_배경을_찌그러뜨리지_않는다(monkeypatch):
     source = Image.new("RGB", (40, 80), (10, 20, 30))
     source.paste((200, 100, 50), (10, 20, 30, 60))

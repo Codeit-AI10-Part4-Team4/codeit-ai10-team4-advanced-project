@@ -380,6 +380,22 @@ def _place_product(canvas: Image.Image, product: Image.Image, text_bottom: int) 
 # ── 조립 ─────────────────────────────────────────────────────
 
 
+def compose_no_text(
+    product: Image.Image | None,
+    *,
+    size: tuple[int, int] = (1080, 1080),
+    background: Image.Image | None = None,
+) -> Image.Image:
+    """배경과 선택적 상품 누끼만 합성하고 어떤 글자도 그리지 않는다."""
+    bg = (
+        fit_photo_canvas(background, size) if background else make_gradient_background(size)
+    ).convert("RGB")
+    canvas = bg.convert("RGBA")
+    if product is not None:
+        _place_product(canvas, product, text_bottom=0)
+    return canvas.convert("RGB")
+
+
 def compose_ad(
     product: Image.Image | None,
     headline: str,
