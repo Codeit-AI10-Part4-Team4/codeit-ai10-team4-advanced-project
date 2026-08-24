@@ -1,6 +1,7 @@
 """compose 부품 테스트 — 폰트·GPU 없이 돌도록 작은 이미지와 기본 폰트를 쓴다."""
 
 from itertools import pairwise
+from typing import Literal
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -44,6 +45,43 @@ def test_compose_ad_uses_given_background(monkeypatch):
     blue = Image.new("RGB", (64, 64), (0, 0, 255))
     ad = compose.compose_ad(product, "제목", size=(256, 256), background=blue)
     assert _px(ad, 5, 250) == (0, 0, 255)
+
+
+def test_compose_ad는_세로_배경을_찌그러뜨리지_않는다(monkeypatch):
+    source = Image.new("RGB", (40, 80), (10, 20, 30))
+    source.paste((200, 100, 50), (10, 20, 30, 60))
+    monkeypatch.setattr(compose, "pick_zone", lambda *args: "top")
+    monkeypatch.setattr(compose, "_draw_text", lambda *args: 0)
+
+    ad = compose.compose_ad(None, "", size=(100, 100), background=source)
+    expected = compose.fit_photo_canvas(source, (100, 100))
+
+    assert ad.tobytes() == expected.tobytes()
+
+
+def test_보존_실사진은_상호와_작은_좌측문구를_상단에_고정한다(monkeypatch):
+    """사진마다 조판이 요동하거나 중앙 상품을 가리지 않는 별도 계약이다."""
+    monkeypatch.setattr(fonts, "load", _fake_font)
+    monkeypatch.setattr(
+        compose,
+        "pick_zone",
+        lambda *args: (_ for _ in ()).throw(AssertionError("실사진 고정 조판은 영역 판정 금지")),
+    )
+    background = Image.new("RGB", (256, 256), (180, 170, 160))
+
+    ad = compose.compose_ad(
+        None,
+        "여름의 시원함을 담다",
+        "아이스라떼와 케이크로",
+        size=(256, 256),
+        background=background,
+        shop="온실카페",
+        preserved_photo=True,
+    )
+
+    assert ad.tobytes() != background.tobytes()
+    assert _px(ad, 128, 250) == (180, 170, 160)  # 중앙·하단 상품 영역은 손대지 않는다
+    assert min(p[0] for p in _pixels(ad.crop((0, 0, 256, 96)))) < 100
 
 
 def test_compose_ad_without_product(monkeypatch):
@@ -261,7 +299,7 @@ def test_표기는_지정한_구석에_그려진다(monkeypatch):
     monkeypatch.setattr(fonts, "load", _fake_font)
     size = 400
 
-    def inked_rows(corner: str) -> set[int]:
+    def inked_rows(corner: Literal["top", "bottom"]) -> set[int]:
         base = Image.new("RGBA", (size, size), (128, 128, 128, 255))
         after = base.copy()
         compose.draw_staged_notice(after, corner)
@@ -287,10 +325,5 @@ def test_표기는_왼쪽에_그려진다(monkeypatch):
     compose.draw_staged_notice(after, "bottom")
 
     before_px, after_px = base.load(), after.load()
-    cols = {
-        x
-        for x in range(size)
-        for y in range(size)
-        if before_px[x, y] != after_px[x, y]  # type: ignore[index]
-    }
+    cols = {x for x in range(size) for y in range(size) if before_px[x, y] != after_px[x, y]}
     assert max(cols) < size / 2

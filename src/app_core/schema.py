@@ -148,7 +148,9 @@ class AdBrief(BaseModel):
     # 알 수 없다. 나눠두면 각자 자기 칸만 보면 되고, "내 상품은 살리되 분위기는
     # 이 레퍼런스로" 같은 조합도 그냥 된다.
     photo_id: int | None = Field(
-        default=None, ge=1, description="제품 사진 — 이 상품을 **그대로 살린다**(누끼)"
+        default=None,
+        ge=1,
+        description="제품 사진 — 광고 재촬영의 참고 또는 레퍼런스·스케치 조합의 실제 상품 누끼",
     )
     ref_id: int | None = Field(
         default=None, ge=1, description="레퍼런스 — 분위기만 **참고한다**. 상품을 베끼지 않는다"
