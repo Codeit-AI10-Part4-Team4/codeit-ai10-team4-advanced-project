@@ -15,7 +15,7 @@ from PIL import Image, ImageOps
 
 from app_core import photo_store, ref_style, sketch_gen
 from app_core.background import remove_background
-from app_core.compose import compose_ad
+from app_core.compose import compose_ad, compose_no_text
 from app_core.gen_background import generate_background
 from app_core.image_backend import generate_scene, restage_photo
 from app_core.image_backend import profile as image_profile
@@ -270,6 +270,27 @@ def prepare_materials(
         return _simple_materials(brief, store, product)
 
     return _simple_materials(brief, store, None)
+
+
+def render_no_text_ad(materials: SimpleMaterials) -> Image.Image:
+    """감성형 재료를 광고 문구 없이 사진 한 장으로 완성한다.
+
+    사진 전체나 통생성 장면은 이미 상품을 포함하므로 그대로 규격만 맞춘다.
+    레퍼런스·스케치 주문처럼 상품 누끼와 배경이 분리된 경우에는 글자 없는
+    전용 합성기로 상품을 얹어 사라지지 않게 한다.
+    """
+    return compose_no_text(
+        materials.product,
+        background=materials.background,
+    )
+
+
+def generate_no_text_ad(brief: AdBrief, store: Store) -> Image.Image:
+    """주문서와 가게를 받아 글자 없는 감성 사진 한 장을 돌려준다."""
+    materials = prepare_materials(brief, store, "simple")
+    if not isinstance(materials, SimpleMaterials):
+        raise TypeError("글자 없는 결과물은 감성형 재료만 사용할 수 있습니다")
+    return render_no_text_ad(materials)
 
 
 def render_ad(materials: AdMaterials, copy: CopyCandidate) -> Image.Image:

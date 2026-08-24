@@ -15,6 +15,7 @@ import base64
 import io
 import logging
 import os
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Final, Literal
 
@@ -33,10 +34,9 @@ _RESTAGE_QUALITY: Final = "high"
 
 _PROFILES: Final = ("local", "openai")
 
-#: 폴백 안내 — pop_notices 가 꺼내며 비운다.
-#: ⚠️ 프로세스 전역이라 다중 세션이면 안내가 섞인다. 단일 사용자 시험까지만
-#: 허용 — **배포 전에 세션별 전달로 바꿔야 한다** (후속 PR, docs/09 v1 노트).
-_notices: list[str] = []
+#: 폴백 안내 — 실행 문맥별로 쌓고 pop_notices 가 꺼내며 비운다.
+#: ContextVar 라서 동시에 요청한 사용자끼리 안내가 섞이지 않는다.
+_notices: ContextVar[tuple[str, ...]] = ContextVar("image_backend_notices", default=())
 
 
 _EDIT_PROMPT = """Turn this customer-taken photo of {product} into a polished, photorealistic
@@ -93,9 +93,17 @@ def profile() -> str:
 
 def pop_notices() -> list[str]:
     """쌓인 안내를 꺼내고 비운다. 화면이 재료 준비 직후 한 번 읽는다."""
-    notes = list(_notices)
-    _notices.clear()
+    notes = list(_notices.get())
+    _notices.set(())
     return notes
+
+
+def _add_notice(message: str, *, unique: bool = False) -> None:
+    """현재 사용자 실행 문맥에만 폴백 안내를 남긴다."""
+    notices = _notices.get()
+    if unique and message in notices:
+        return
+    _notices.set((*notices, message))
 
 
 def _openai_scene(prompt: str, size: tuple[int, int]) -> Image.Image:
@@ -266,8 +274,7 @@ def restage_photo(
     except Exception:  # noqa: BLE001 — 외부 편집 실패가 광고 전체를 막으면 안 된다
         _log.warning("GPT 광고 재촬영 실패 — 안전 보정으로 폴백합니다", exc_info=True)
         message = "AI 광고 촬영에 실패해 원본 사진을 안전 보정해 사용했습니다."
-        if message not in _notices:
-            _notices.append(message)
+        _add_notice(message, unique=True)
 
     try:
         fallback = enhance_uploaded_photo(photo)
@@ -292,7 +299,7 @@ def edit_photo(
         return _openai_edit(photo, product, tone, size)
     except Exception:  # noqa: BLE001 — 편집 실패가 광고 전체를 막으면 안 된다
         _log.warning("GPT 사진 보정 실패 — 원본을 사용합니다", exc_info=True)
-        _notices.append("사진 보정에 실패해 원본 사진으로 만들었습니다.")
+        _add_notice("사진 보정에 실패해 원본 사진으로 만들었습니다.")
         return photo.convert("RGB").resize(size)
 
 
@@ -311,6 +318,6 @@ def generate_scene(
             return _openai_scene(prompt, size)
         except Exception:  # noqa: BLE001 — 어떤 실패든 로컬 폴백으로 광고는 만든다
             _log.warning("GPT 이미지 생성 실패 — 로컬로 폴백합니다", exc_info=True)
-            _notices.append("GPT 이미지 연결이 실패해 로컬 모델로 만들었습니다.")
+            _add_notice("GPT 이미지 연결이 실패해 로컬 모델로 만들었습니다.")
 
     return gen_background.generate_background(prompt, size)
