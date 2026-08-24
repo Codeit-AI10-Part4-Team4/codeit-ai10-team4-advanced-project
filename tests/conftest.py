@@ -51,11 +51,14 @@ def no_real_image_backends(monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(*_a: object, **_k: object) -> object:
         raise AssertionError("테스트가 실제 이미지 모델/API를 부르려 했습니다 — 대역을 씌우세요")
 
-    # 개발 셸에 openai 프로필이 남아 있어도 기존 테스트가 유료 경로로 새지 않는다.
+    # 개발 셸이나 앞서 import 된 app.py가 .env의 openai 프로필을 올려도 기존
+    # 테스트가 유료 경로로 새지 않는다.
+    monkeypatch.delenv("MODEL_PROFILE", raising=False)
     monkeypatch.delenv("IMAGE_PROFILE", raising=False)
     monkeypatch.setattr(gen_background, "_load_pipe", _boom)
     monkeypatch.setattr(image_backend, "_openai_scene", _boom)
     monkeypatch.setattr(image_backend, "_openai_edit", _boom)
+    monkeypatch.setattr(image_backend, "_openai_restage", _boom)
     image_backend._notices.clear()
 
 

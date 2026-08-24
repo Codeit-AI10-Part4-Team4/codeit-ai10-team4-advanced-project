@@ -18,6 +18,7 @@ from app_core import image_backend
 LOCAL = Image.new("RGB", (1080, 1080), (1, 2, 3))
 GPT = Image.new("RGB", (1080, 1080), (9, 9, 9))
 _REAL_OPENAI_EDIT = image_backend._openai_edit
+_REAL_OPENAI_RESTAGE = image_backend._openai_restage
 
 
 @pytest.fixture
@@ -153,6 +154,147 @@ def test_GPT_사진_보정이_실패하면_원본과_안내를_쓴다(
     notes = image_backend.pop_notices()
     assert notes == ["사진 보정에 실패해 원본 사진으로 만들었습니다."]
     assert "비밀 외부 오류" not in notes[0]
+
+
+def test_AI_광고_재촬영이_성공하면_연출_결과로_표시한다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = Image.new("RGB", (64, 32), (1, 2, 3))
+    seen: dict[str, object] = {}
+
+    def _restage(photo, **kwargs):
+        seen.update(photo=photo, kwargs=kwargs)
+        return GPT
+
+    monkeypatch.setattr(image_backend, "_openai_restage", _restage)
+
+    result = image_backend.restage_photo(
+        source,
+        product="크로플",
+        industry="카페",
+        situation="신메뉴",
+        tone="따뜻하게",
+        style="simple",
+    )
+
+    assert result.image is GPT
+    assert result.staged is True
+    assert seen["photo"] is source
+    assert seen["kwargs"]["style"] == "simple"
+
+
+def test_AI_재촬영은_고품질과_스타일별_연출을_API에_전달한다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = io.BytesIO()
+    Image.new("RGB", (16, 16), (9, 8, 7)).save(output, format="PNG")
+    encoded = base64.b64encode(output.getvalue()).decode()
+    seen: dict[str, object] = {}
+
+    class _Images:
+        def edit(self, **kwargs):
+            seen.update(kwargs)
+            return type("Response", (), {"data": [type("Datum", (), {"b64_json": encoded})()]})()
+
+    class _Client:
+        images = _Images()
+
+    fake_openai = ModuleType("openai")
+    fake_openai.__dict__["OpenAI"] = _Client
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+    monkeypatch.setattr(image_backend, "_openai_restage", _REAL_OPENAI_RESTAGE)
+
+    result = image_backend._openai_restage(
+        Image.new("RGB", (64, 32), (1, 2, 3)),
+        product="크로플",
+        industry="카페",
+        situation="신메뉴",
+        tone="따뜻하게",
+        extra="",
+        transcript="",
+        style="simple",
+        size=(32, 32),
+    )
+
+    assert result.size == (32, 32)
+    assert seen["model"] == "gpt-image-2"
+    assert seen["quality"] == "high"
+    prompt = str(seen["prompt"])
+    assert "creative commercial reshoot" in prompt
+    assert "upper left" in prompt
+    assert "Do not render any visible or legible typography anywhere" in prompt
+    assert "signs, menus, price tags, labels" in prompt
+    assert "lettering is unreadable" in prompt
+    assert "Preserve every visible product exactly" not in prompt
+
+    poster_prompt = image_backend._restage_prompt(
+        product="크로플",
+        industry="카페",
+        situation="신메뉴",
+        tone="따뜻하게",
+        extra="",
+        transcript="",
+        style="poster",
+    )
+    assert "information poster" in poster_prompt
+    assert poster_prompt != prompt
+
+    image_backend._openai_restage(
+        Image.new("RGB", (64, 32), (1, 2, 3)),
+        product="크로플",
+        industry="카페",
+        situation="신메뉴",
+        tone="따뜻하게",
+        extra="",
+        transcript="",
+        style="poster",
+        size=(30, 20),
+    )
+    assert seen["size"] == "1536x1024"
+
+
+def test_AI_재촬영이_실패하면_안전보정하고_연출표시하지_않는다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = Image.new("RGB", (64, 32), (1, 2, 3))
+    enhanced = Image.new("RGB", (64, 32), (4, 5, 6))
+    monkeypatch.setattr(
+        image_backend,
+        "_openai_restage",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("비밀 외부 오류")),
+    )
+    monkeypatch.setattr(image_backend, "enhance_uploaded_photo", lambda photo: enhanced)
+
+    result = image_backend.restage_photo(source, product="크로플")
+
+    assert result.image is enhanced
+    assert result.staged is False
+    assert image_backend.pop_notices() == [
+        "AI 광고 촬영에 실패해 원본 사진을 안전 보정해 사용했습니다."
+    ]
+
+
+def test_AI와_안전보정이_모두_실패하면_RGB_원본을_쓴다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = Image.new("RGBA", (8, 4), (1, 2, 3, 99))
+    monkeypatch.setattr(
+        image_backend,
+        "_openai_restage",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("API 실패")),
+    )
+    monkeypatch.setattr(
+        image_backend,
+        "enhance_uploaded_photo",
+        lambda photo: (_ for _ in ()).throw(OSError("보정 실패")),
+    )
+
+    result = image_backend.restage_photo(source, product="크로플")
+
+    assert result.staged is False
+    assert result.image.mode == "RGB"
+    assert result.image.size == source.size
+    assert result.image.getpixel((0, 0)) == (1, 2, 3)
 
 
 def test_모르는_프로필이면_조용히_넘어가지_않는다(
