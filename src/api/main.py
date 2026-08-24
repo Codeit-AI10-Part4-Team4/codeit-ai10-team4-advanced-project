@@ -18,8 +18,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, model_validator
 
 from api import jobs, session
-from app_core import auth, registry, stores
+from app_core import ads, auth, copy_gen, llm, registry, stores
+from app_core.panel.aggregate import AggregationError
 from app_core.panel.features import NoTradeAreaError, build_features
+from app_core.panel.review import CLEAR_MARGIN, rank
 from app_core.schema import AdBrief, CopyCandidate, Store, StoreInput
 
 app = FastAPI(title="codeit-ai10-team4-advanced-project")
@@ -185,8 +187,10 @@ class JobStatus(BaseModel):
     waited_ms: int = 0
     #: 실패했을 때만 채워진다
     error: str | None = None
-    #: 끝났으면 결과를 어디서 가져가는지
+    #: 이미지 작업이 끝났을 때만. PIL 이미지는 JSON 에 못 실어서 따로 내려준다.
     image_url: str | None = None
+    #: 그 밖의 작업(문구·손님 반응)이 끝났을 때 결과를 그대로 싣는다.
+    result: Any | None = None
 
 
 def _render(req: ImageRequest) -> Any:
@@ -217,7 +221,7 @@ def _render(req: ImageRequest) -> Any:
 @app.post("/ads/image", status_code=202)
 def make_image(req: ImageRequest) -> JobAccepted:
     """광고 이미지 만들기를 **등록만** 한다. 진행 상태는 /jobs/{id} 로 물어본다."""
-    job = jobs.submit(_render, req)
+    job = jobs.submit(_render, req, kind="image")
     return JobAccepted(job_id=job.id)
 
 
@@ -228,13 +232,15 @@ def job_status(job_id: str) -> JobStatus:
         # 서버를 재시작하면 진행 중이던 작업이 날아간다. 404 를 받으면 화면은
         # 영원히 기다리지 말고 다시 등록해야 한다.
         raise HTTPException(404, "그런 작업이 없습니다. 다시 만들어주세요.")
+    done = job.status == "done"
     return JobStatus(
         job_id=job.id,
         status=job.status,
         elapsed_ms=job.elapsed_ms,
         waited_ms=job.waited_ms,
         error=job.error,
-        image_url=f"/jobs/{job.id}/image" if job.status == "done" else None,
+        image_url=f"/jobs/{job.id}/image" if done and job.kind == "image" else None,
+        result=job.result if done and job.kind == "json" else None,
     )
 
 
@@ -308,10 +314,117 @@ def add_store(body: StoreInput, user_id: int = Depends(current_user)) -> Store:
 @app.get("/stores/{store_id}")
 def one_store(store_id: int, user_id: int = Depends(current_user)) -> Store:
     # stores.get 이 user_id 로 걸러준다 — 남의 가게 번호를 넣으면 None 이 온다.
+    return _my_store(user_id, store_id)
+
+
+# ── 문구 · 손님 반응 ────────────────────────────────────────────
+# 둘 다 LLM 을 부른다. 문구는 몇 초, 손님 반응은 1분쯤 걸려서(후보 셋 × 손님 12명)
+# 이미지와 같은 등록-폴링 통로를 쓴다. 결과는 JSON 이라 /jobs/{id} 가 그대로 싣는다.
+
+
+class BriefBody(BaseModel):
+    """주문서 — 화면이 대화로 채운 값. AdBrief 의 필수 슬롯만 받는다."""
+
+    store_id: int
+    product: str = Field(min_length=1, description="홍보 대상")
+    price: int = Field(ge=0, description="원 단위. 0 이면 광고에 가격을 넣지 않는다")
+    situation: str = ""
+    tone: str = ""
+    extra: str = ""
+
+
+class CopyRequest(BriefBody):
+    #: 다시 만들기면 직전 광고를 가리킨다 — 덮어쓰지 않아야 "아까 그게 나았는데"가 된다
+    parent_id: int | None = None
+
+
+class ReviewRequest(BriefBody):
+    #: 어떤 광고의 문구를 평가할지. /ads/copies 가 돌려준 값.
+    ad_id: int
+    #: 좌표를 주면 카카오 지오코딩을 건너뛴다 (/trade-area 와 같은 이유)
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+
+
+def _brief(body: BriefBody, goal: Literal["copy", "image"]) -> AdBrief:
+    return AdBrief(
+        goal=goal,
+        product=body.product,
+        price=body.price,
+        situation=body.situation,
+        tone=body.tone,
+        extra=body.extra,
+    )
+
+
+def _my_store(user_id: int, store_id: int) -> Store:
     store = stores.get(user_id, store_id)
     if store is None:
         raise HTTPException(404, "그런 가게가 없습니다.")
     return store
+
+
+def _make_copies(store: Store, body: CopyRequest) -> dict[str, Any]:
+    """작업 스레드에서 도는 부분."""
+    brief = _brief(body, "copy")
+    # recent 를 넣는 이유: 이 가게가 최근에 만든 광고를 프롬프트에 넣어야
+    # 같은 헤드라인이 또 나오지 않는다 (app.py 와 같은 인자).
+    copies = copy_gen.generate(brief, store, ads.recent(store.id))
+    if not copies:
+        # 빈 목록이 나오는 길은 셋이고 증상이 똑같다 — MODEL_PROFILE 이 stub /
+        # LLM 이 candidates 를 빠뜨림 / 후보 전부가 검증 탈락. 조용히 빈 목록을
+        # 돌려주면 화면은 "고장인지 느린 건지" 알 수 없다.
+        hint = " (MODEL_PROFILE 이 stub 이라 항상 빈 결과입니다)" if llm.profile() == "stub" else ""
+        raise ValueError(f"문구를 만들지 못했습니다. 다시 눌러주세요.{hint}")
+
+    ad_id = ads.save(store.id, brief, copies, parent_id=body.parent_id)
+    # DB 가 붙인 id 를 실어 다시 꺼낸다 — 화면이 문자열이 아니라 id 로 문구를 짚는다
+    return {"ad_id": ad_id, "copies": [c.model_dump() for c in ads.copies_of(store.id, ad_id)]}
+
+
+def _review(store: Store, body: ReviewRequest) -> dict[str, Any]:
+    """작업 스레드에서 도는 부분. 후보 전부를 손님들에게 보여주고 순위를 매긴다."""
+    copies = ads.copies_of(store.id, body.ad_id)
+    if not copies:
+        raise ValueError("평가할 문구가 없습니다. 문구를 먼저 만들어주세요.")
+
+    coord = (body.lon, body.lat) if body.lat is not None and body.lon is not None else None
+    try:
+        ranked = rank(store, _brief(body, "copy"), copies, ad_id=str(body.ad_id), coord=coord)
+    except NoTradeAreaError as exc:
+        # 원문에는 "coord 를 직접 넘기세요" 같은 개발자 문장이 섞여 있다.
+        # 사장님이 할 수 있는 말만 남기고 원문은 로그로 보낸다.
+        raise ValueError("이 주소로는 동네 손님을 불러오지 못했습니다.") from exc
+    except AggregationError as exc:
+        raise ValueError(f"손님 반응을 모으지 못했습니다. 다시 눌러주세요. ({exc})") from exc
+
+    return {
+        # 이 값보다 벌어져야 "1등이 낫다"고 말한다. 화면이 같은 기준으로 문장을
+        # 고르도록 서버가 준다 — 양쪽에 숫자를 따로 두면 서로 다르게 늙는다.
+        "clear_margin": CLEAR_MARGIN,
+        "ranked": [
+            {
+                "copy": r.copy.model_dump(),
+                "result": r.result.model_dump(),
+                "defects": [d._asdict() for d in r.defects],
+            }
+            for r in ranked
+        ],
+    }
+
+
+@app.post("/ads/copies", status_code=202)
+def make_copies_job(body: CopyRequest, user_id: int = Depends(current_user)) -> JobAccepted:
+    """문구 후보 만들기를 **등록만** 한다. 몇 초 걸린다."""
+    store = _my_store(user_id, body.store_id)
+    return JobAccepted(job_id=jobs.submit(_make_copies, store, body).id, poll_after_ms=1500)
+
+
+@app.post("/ads/review", status_code=202)
+def review_job(body: ReviewRequest, user_id: int = Depends(current_user)) -> JobAccepted:
+    """손님 평가를 **등록만** 한다. 후보 셋 × 손님 12명이라 1분쯤 걸린다."""
+    store = _my_store(user_id, body.store_id)
+    return JobAccepted(job_id=jobs.submit(_review, store, body).id, poll_after_ms=3000)
 
 
 @app.get("/jobs/{job_id}/image")

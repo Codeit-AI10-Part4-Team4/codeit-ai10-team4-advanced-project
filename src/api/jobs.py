@@ -42,6 +42,9 @@ KEEP_DONE_SEC = 30 * 60
 @dataclass
 class Job:
     id: str
+    #: 결과를 어떻게 건네줄지. "image" 는 PIL 이미지라 JSON 에 못 실어서
+    #: /jobs/{id}/image 로 따로 내려주고, "json" 은 상태와 함께 그대로 실어준다.
+    kind: Literal["image", "json"] = "json"
     status: Status = "queued"
     result: Any = None
     error: str | None = None
@@ -70,10 +73,12 @@ _lock = Lock()
 _pool = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="job")
 
 
-def submit(fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Job:
+def submit(
+    fn: Callable[..., Any], /, *args: Any, kind: Literal["image", "json"] = "json", **kwargs: Any
+) -> Job:
     """작업을 등록하고 바로 돌려준다. 결과는 `get()` 으로 물어본다."""
     _sweep()
-    job = Job(id=uuid.uuid4().hex)
+    job = Job(id=uuid.uuid4().hex, kind=kind)
     with _lock:
         _jobs[job.id] = job
 
@@ -86,7 +91,12 @@ def submit(fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Job:
             result = fn(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001 - 무엇이 터지든 작업만 실패시킨다
             # 여기서 삼키지 않으면 스레드가 조용히 죽고 화면은 영원히 running 을 본다.
-            job.error = f"{type(exc).__name__}: {exc}"
+            #
+            # ValueError 는 저장소 관례상 **사장님이 읽을 문장**이다 (auth.signup 이
+            # 그렇고, main.py 가 그걸 409 로 그대로 내보낸다). 거기에 타입 이름을
+            # 붙이면 화면에 "ValueError: 문구를 만들지 못했습니다"가 뜬다.
+            # 그 밖의 예외는 예상 못 한 것이라 타입을 남겨야 원인을 찾는다.
+            job.error = str(exc) if isinstance(exc, ValueError) else f"{type(exc).__name__}: {exc}"
             job.status = "failed"
         else:
             job.result = result
