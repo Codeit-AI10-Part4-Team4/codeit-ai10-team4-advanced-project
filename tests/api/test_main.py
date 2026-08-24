@@ -314,6 +314,15 @@ def test_json_결과는_폴링에_실려_온다() -> None:
     assert body["image_url"] is None
 
 
+def test_json_작업의_이미지_주소는_404() -> None:
+    """번호만 알면 누구나 부를 수 있는 주소다. 문구 작업의 결과는 dict 라
+    그대로 흘려보내면 dict.save() 에서 500 이 난다 (귀한님 #66 리뷰)."""
+    jobs.clear()
+    job = jobs.submit(lambda: {"ad_id": 1, "copies": []}, kind="json")
+    assert _wait(job.id)["status"] == "done"
+    assert client.get(f"/jobs/{job.id}/image").status_code == 404
+
+
 def test_이미지_작업은_json_결과를_싣지_않는다() -> None:
     jobs.clear()
     job = jobs.submit(lambda: "이미지인 척", kind="image")

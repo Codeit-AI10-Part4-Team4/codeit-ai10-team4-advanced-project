@@ -433,6 +433,11 @@ def job_image(job_id: str) -> Response:
     job = jobs.get(job_id)
     if job is None or job.status != "done":
         raise HTTPException(404, "아직 결과가 없습니다.")
+    if job.kind != "image":
+        # 문구·평가 작업의 결과는 dict 다. 여기서 막지 않으면 아래에서 dict.save()
+        # 를 불러 500 이 난다 — kind 를 붙이기 전에는 모든 작업이 이미지라
+        # 안전했던 자리다. (귀한님 #66 리뷰)
+        raise HTTPException(404, "이 작업에는 이미지가 없습니다.")
     buf = io.BytesIO()
     job.result.save(buf, format="PNG")
     return Response(buf.getvalue(), media_type="image/png")
