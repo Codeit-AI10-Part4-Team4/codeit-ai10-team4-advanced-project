@@ -30,17 +30,12 @@ def log_path() -> Path:
 
 
 def enabled() -> bool:
-    """**기본은 켜짐.** `ADS_TURNLOG_ENABLED=0` 으로 끈다.
+    """**기본은 꺼짐.** 개발 중 필요할 때만 `ADS_TURNLOG_ENABLED=1` 로 켠다.
 
-    켜두는 이유: 이 로그가 골든셋의 원천이라 꺼져 있으면 아무도 안 켜고,
-    나중에 "그때 그 발화" 를 다시 만들 수 없다. 지금은 팀 개발용 화면이라
-    실제 사장님 발화가 들어오지 않는다.
-
-    ⚠️ **실제 사용자에게 여는 순간 기본값을 뒤집어야 한다.** 남는 것이
-    사장님 발화 원문이라 개인정보가 섞일 수 있다. 그때는 동의를 받거나
-    `ADS_TURNLOG_ENABLED=0` 을 배포 기본값으로 둘 것.
+    남는 것이 사장님 발화 원문이라 개인정보가 섞일 수 있다. 골든셋 수집처럼
+    목적과 보존 정책이 정해진 개발 환경에서만 명시적으로 켠다.
     """
-    return os.environ.get("ADS_TURNLOG_ENABLED", "1") != "0"
+    return os.environ.get("ADS_TURNLOG_ENABLED", "0") == "1"
 
 
 def record(

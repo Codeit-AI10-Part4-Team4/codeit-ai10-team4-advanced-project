@@ -70,12 +70,16 @@ def test_끌_수_있다(monkeypatch: pytest.MonkeyPatch) -> None:
     assert turnlog.read_all() == []
 
 
-def test_기본은_켜짐이다(monkeypatch: pytest.MonkeyPatch) -> None:
-    """골든셋의 원천이라 꺼져 있으면 아무도 안 켜고 발화가 안 쌓인다.
-    주석과 코드가 어긋나 있던 자리라 값으로 못을 박아둔다.
-    """
+def test_기본은_꺼짐이다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """공개 배포에서 별도 설정 없이 사장님 발화 원문을 저장하면 안 된다."""
     monkeypatch.delenv("ADS_TURNLOG_ENABLED", raising=False)
-    assert turnlog.enabled() is True
+    assert turnlog.enabled() is False
+
+
+def test_명시적으로_켜야_발화를_남긴다(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ADS_TURNLOG_ENABLED", "1")
+    record()
+    assert turnlog.read_all()[0]["utterance"] == "크로플이요"
 
 
 def test_로그가_없으면_빈_목록() -> None:
