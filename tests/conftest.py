@@ -79,7 +79,7 @@ def no_real_image_backends(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(image_backend, "_openai_scene", _boom)
     monkeypatch.setattr(image_backend, "_openai_edit", _boom)
     monkeypatch.setattr(image_backend, "_openai_restage", _boom)
-    image_backend._notices.clear()
+    image_backend.pop_notices()
 
 
 @pytest.fixture
