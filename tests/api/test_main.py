@@ -6,7 +6,7 @@
 
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 from fastapi.testclient import TestClient
@@ -154,6 +154,49 @@ def test_기타_업종은_직접_적은_이름_없이는_등록도_안_된다() 
     }
     assert client.post("/ads/image", json=body).status_code == 422
     assert client.post("/ads/image", json={**body, "industry_note": "반찬가게"}).status_code == 202
+
+
+def test_글자_없는_유형은_문구_없이도_등록된다() -> None:
+    """글자를 안 얹는 결과물은 문구를 받지 않는다 — 여기서 막으면 영영 못 만든다."""
+    body = {
+        "store_name": "연남 크로플",
+        "industry": "cafe",
+        "product": "크로플",
+        "price": 4500,
+        "output_type": "emotional_no_text",
+    }
+    assert client.post("/ads/image", json=body).status_code == 202
+
+
+def test_글자_있는_유형은_문구가_없으면_거절한다() -> None:
+    body = {
+        "store_name": "연남 크로플",
+        "industry": "cafe",
+        "product": "크로플",
+        "price": 4500,
+        "output_type": "poster",
+    }
+    assert client.post("/ads/image", json=body).status_code == 422
+    assert client.post("/ads/image", json={**body, "headline": "겨울 크로플"}).status_code == 202
+
+
+def test_문구_필수_판정은_한_군데다() -> None:
+    """요청 검증과 파이프라인이 각자 조건을 적어두면 갈렸을 때 한쪽만 통과한다.
+
+    같은 실수를 #51 에서 이미 겪었다 (#76 리뷰). 스키마의 needs_copy 하나만 본다.
+    """
+    from app_core.schema import OutputType, needs_copy
+
+    for value in get_args(OutputType):
+        body = {
+            "store_name": "연남 크로플",
+            "industry": "cafe",
+            "product": "크로플",
+            "price": 4500,
+            "output_type": value,
+        }
+        rejected = client.post("/ads/image", json=body).status_code == 422
+        assert rejected is needs_copy(value), value
 
 
 # ── 로그인 · 내 가게 ────────────────────────────────────────────

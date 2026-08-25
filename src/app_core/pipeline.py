@@ -9,7 +9,6 @@
 """
 
 from dataclasses import dataclass
-from typing import Literal
 
 from PIL import Image, ImageOps
 
@@ -24,37 +23,37 @@ from app_core.photo_router import mask_area, remove_crumbs
 from app_core.poster import generate_poster, generate_uploaded_photo_poster
 from app_core.poster_plan import PosterPlan, plan_poster
 from app_core.prompt_builder import build_bg_prompt, build_hero_prompt, build_scene_prompt
-from app_core.schema import AdBrief, CopyCandidate, Store
+from app_core.schema import (
+    AdBrief,
+    CopyCandidate,
+    OutputType,
+    Store,
+    Style,
+    needs_copy,
+    style_of,
+)
 
-Style = Literal["simple", "poster"]
-
-#: 사장님이 **대화보다 먼저** 고르는 결과물 유형 (화면 STEP 1).
-#:
-#: 이 값이 정하는 것은 딱 하나 — **글자를 얹느냐**다. 어떤 이미지 기능(1~4번)이
-#: 도는지는 별개로 "사진을 올렸나 / 레퍼런스를 올렸나 / 스케치를 올렸나" 가 정한다.
-#: 둘은 서로 독립이라 3×4 조합이 전부 성립한다.
-OutputType = Literal["emotional_no_text", "emotional_text", "poster"]
-
-#: 결과물 유형 → 조판 형태. 글자 없는 유형은 조판 자체를 안 하므로 감성형 재료를 쓴다.
-_OUTPUT_STYLE: dict[str, Style] = {
-    "emotional_no_text": "simple",
-    "emotional_text": "simple",
-    "poster": "poster",
-}
-
-
-def needs_copy(output_type: OutputType) -> bool:
-    """문구·손님 패널 단계를 거쳐야 하는 유형인가.
-
-    화면이 이 함수로 단계를 건너뛸지 정한다 — 글자가 없는 결과물에 문구를 고르게
-    하면 사장님이 고른 문구가 **어디에도 안 나오는** 흐름이 된다 (PDF STEP 3).
-    """
-    return output_type != "emotional_no_text"
-
-
-def style_of(output_type: OutputType) -> Style:
-    """결과물 유형이 쓰는 조판 형태."""
-    return _OUTPUT_STYLE[output_type]
+# 결과물 유형·조판 형태와 그 판정은 schema 에 있다 — api.main 이 확산 모델을 피해
+# pipeline 을 지연 import 하므로, 요청 검증이 쓸 수 있으려면 가벼운 쪽에 있어야 한다.
+# 여기서 다시 내보내는 것은 기존 호출부(`pipeline.Style` 등)를 위해서다.
+__all__ = [
+    "AdMaterials",
+    "OutputType",
+    "PosterMaterials",
+    "SimpleMaterials",
+    "Style",
+    "UploadedPhotoPosterMaterials",
+    "generate_ad",
+    "generate_no_text_ad",
+    "generate_output",
+    "needs_copy",
+    "prepare_materials",
+    "prepare_output",
+    "render_ad",
+    "render_no_text_ad",
+    "render_output",
+    "style_of",
+]
 
 
 @dataclass(frozen=True)

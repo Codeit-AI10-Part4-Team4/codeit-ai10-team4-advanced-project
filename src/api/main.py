@@ -22,7 +22,7 @@ from app_core import ads, auth, copy_gen, llm, registry, stores
 from app_core.panel.aggregate import AggregationError
 from app_core.panel.features import NoTradeAreaError, build_features
 from app_core.panel.review import CLEAR_MARGIN, rank
-from app_core.schema import AdBrief, CopyCandidate, Store, StoreInput
+from app_core.schema import AdBrief, CopyCandidate, OutputType, Store, StoreInput, needs_copy
 
 app = FastAPI(title="codeit-ai10-team4-advanced-project")
 
@@ -163,7 +163,7 @@ class ImageRequest(BaseModel):
     #: 사장님이 **대화보다 먼저** 고른 결과물 유형 (화면 STEP 1).
     #: 어떤 이미지 기능(1~4번)이 도는지는 이 값이 아니라 사진·레퍼런스·스케치를
     #: 올렸는지가 정한다. 이 값은 **글자를 얹을지**만 정한다.
-    output_type: Literal["emotional_no_text", "emotional_text", "poster"] = "emotional_text"
+    output_type: OutputType = "emotional_text"
     #: 업종이 other 일 때 사장님이 직접 적은 업종명
     industry_note: str = ""
 
@@ -171,7 +171,10 @@ class ImageRequest(BaseModel):
     def _copy_needed_when_text(self) -> ImageRequest:
         # 글자가 들어가는 유형인데 문구가 비면 작업 스레드 안에서 터진다.
         # 등록 단계에서 막아야 사장님이 한참 기다린 끝에 오류를 보지 않는다.
-        if self.output_type != "emotional_no_text" and not self.headline.strip():
+        #
+        # 조건을 여기 다시 적지 않고 needs_copy 를 부른다 — 같은 판정이 두 곳에
+        # 있으면 갈렸을 때 한쪽만 통과하는 상태가 생긴다 (#76 리뷰 · #51 선례).
+        if needs_copy(self.output_type) and not self.headline.strip():
             raise ValueError("글자가 들어가는 결과물은 문구가 있어야 합니다")
         return self
 
@@ -212,9 +215,7 @@ def _render(req: ImageRequest) -> Any:
     from app_core import pipeline
 
     copy = (
-        CopyCandidate(headline=req.headline, sub=req.sub)
-        if pipeline.needs_copy(req.output_type)
-        else None
+        CopyCandidate(headline=req.headline, sub=req.sub) if needs_copy(req.output_type) else None
     )
     return pipeline.generate_output(
         AdBrief(

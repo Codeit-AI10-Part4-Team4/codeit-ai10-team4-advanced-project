@@ -21,6 +21,43 @@ from app_core import registry
 
 Goal = Literal["image", "copy"]
 
+#: 조판 형태 — 재료를 어떤 틀에 얹을지.
+Style = Literal["simple", "poster"]
+
+#: 사장님이 **대화보다 먼저** 고르는 결과물 유형 (화면 STEP 1).
+#:
+#: 이 값이 정하는 것은 딱 하나 — **글자를 얹느냐**다. 어떤 이미지 기능(1~4번)이
+#: 도는지는 별개로 "사진을 올렸나 / 레퍼런스를 올렸나 / 스케치를 올렸나" 가 정한다.
+#: 둘은 서로 독립이라 3×4 조합이 전부 성립한다.
+OutputType = Literal["emotional_no_text", "emotional_text", "poster"]
+
+#: 결과물 유형 → 조판 형태. 글자 없는 유형은 조판 자체를 안 하므로 감성형 재료를 쓴다.
+_OUTPUT_STYLE: dict[str, Style] = {
+    "emotional_no_text": "simple",
+    "emotional_text": "simple",
+    "poster": "poster",
+}
+
+
+def needs_copy(output_type: OutputType) -> bool:
+    """문구·손님 패널 단계를 거쳐야 하는 유형인가.
+
+    화면이 이 함수로 단계를 건너뛸지 정하고, API 검증도 이걸로 문구 필수 여부를
+    정한다. **판정이 한 군데여야 한다** — 두 곳에 같은 조건을 적어두면 갈렸을 때
+    한쪽만 통과하는 상태가 생긴다 (#76 리뷰, #51 에서 같은 실수를 이미 겪었다).
+
+    `pipeline` 이 아니라 여기 있는 이유: `api.main` 은 확산 모델 의존을 피하려고
+    `pipeline` 을 **요청 처리 안에서** 지연 import 한다. 요청 검증에 쓰려면 판정이
+    가벼운 모듈에 있어야 한다.
+    """
+    return output_type != "emotional_no_text"
+
+
+def style_of(output_type: OutputType) -> Style:
+    """결과물 유형이 쓰는 조판 형태."""
+    return _OUTPUT_STYLE[output_type]
+
+
 # 다시 만드는 경로는 셋이지만 담기는 자리는 하나다.
 #   typed   사장님이 말로 요청      "좀 더 밝게"
 #   option  화면 선택지를 누름       [더 짧게]
