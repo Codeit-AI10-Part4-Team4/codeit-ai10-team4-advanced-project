@@ -190,6 +190,11 @@ function imageCard(im) {
     </div>`;
 }
 
+/* 서버 계약이 `style` 에서 `output_type` 으로 바뀌는 중이다 (#76).
+ * 둘 다 보내면 **어느 쪽 서버에도 붙는다** — ImageRequest 는 모르는 키를 무시한다.
+ * #76 이 머지되면 style 을 뺀다. 화면 안에서는 style 이 계속 작업 키다. */
+const OUTPUT_TYPE = { simple: 'emotional_text', poster: 'poster' };
+
 /** 두 형태를 한꺼번에 맡기고 각각 물어본다. 서버가 2개까지 동시에 돌린다. */
 async function startImages() {
   const store = picked();
@@ -213,7 +218,7 @@ async function startImages() {
       const res = await fetch(`${API_BASE}/ads/image`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...body, style: im.style }),
+        body: JSON.stringify({ ...body, style: im.style, output_type: OUTPUT_TYPE[im.style] }),
       });
       if (!res.ok) throw new Error(`등록 실패 ${res.status}`);
       const { job_id: jobId } = await res.json();
