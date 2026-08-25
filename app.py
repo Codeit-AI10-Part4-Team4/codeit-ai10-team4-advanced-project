@@ -363,6 +363,16 @@ def _panel_source(result: EvaluationResult) -> None:
             icon="ℹ️",
         )
 
+    if result.price_axis_closed:
+        # 안 물어본 것과 문제없는 것을 구분해준다. 이걸 안 쓰면 사장님은
+        # "가격 걸림돌 0명" 을 "가격은 괜찮다" 로 읽는다.
+        st.info(
+            "문구에 금액이 없어 **가격은 물어보지 않았습니다.** "
+            "'비싸다'는 반응이 없는 것은 당연하니, 가격 반응이 궁금하시면 "
+            "문구에 금액을 넣고 다시 만들어보세요.",
+            icon="🏷️",
+        )
+
     if result.confidence == "low":
         why = "".join(f"\n- {reason}" for reason in result.confidence_reasons)
         st.warning(f"이 평가는 **참고만** 해주세요.{why}", icon="⚠️")
