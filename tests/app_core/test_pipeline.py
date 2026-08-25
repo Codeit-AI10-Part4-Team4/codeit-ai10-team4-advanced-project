@@ -715,3 +715,88 @@ def test_바뀐_주문서로_재료를_다시_만들면_기획에_전달된다(m
         AdBrief(goal="image", product="크로플", price=0, tone="차분"), _store(), "poster"
     )
     assert seen == ["발랄", "차분"]
+
+
+# ── 글자 없는 감성 사진 ───────────────────────────────────────
+
+
+def test_사진이_없으면_생성한_장면을_글자_없이_그대로_돌려준다(monkeypatch):
+    """통생성 장면에는 상품까지 들어 있으므로 조판을 거치지 않는다."""
+    _simple_ready(monkeypatch)
+    background = Image.new("RGB", (1080, 1080), (12, 34, 56))
+    _both_backends(monkeypatch, lambda prompt: background)
+
+    result = pipeline.generate_no_text_ad(_brief(), _store())
+
+    assert result.size == (1080, 1080)
+    assert result.getpixel((0, 0)) == (12, 34, 56)
+
+
+def test_업로드_사진은_글자를_얹지_않고_사진만_돌려준다(tmp_path, monkeypatch):
+    """일반 업로드 사진도 상호·문구·연출 표기를 이미지에 새기지 않는다."""
+    _photo_dir(tmp_path, monkeypatch)
+    _simple_ready(monkeypatch)
+    enhanced = Image.new("RGB", (1080, 1080), (21, 43, 65))
+    monkeypatch.setattr(pipeline, "_safe_uploaded_photo", lambda photo: enhanced)
+
+    brief = _brief().model_copy(update={"photo_id": _put()})
+
+    result = pipeline.generate_no_text_ad(brief, _store())
+
+    assert result.size == (1080, 1080)
+    assert result.getpixel((0, 0)) == (21, 43, 65)
+
+
+def test_누끼와_배경이_분리돼도_상품을_빼먹지_않는다(tmp_path, monkeypatch):
+    """레퍼런스 주문은 상품 누끼를 빈 문구로 합성해 상품을 보존한다."""
+    _photo_dir(tmp_path, monkeypatch)
+    _simple_ready(monkeypatch)
+    cut = Image.new("RGBA", (64, 64), (255, 0, 0, 255))
+    background = Image.new("RGB", (1080, 1080), (10, 20, 30))
+    monkeypatch.setattr(pipeline, "remove_background", lambda photo: cut)
+    monkeypatch.setattr(pipeline, "remove_crumbs", lambda product: product)
+    monkeypatch.setattr(pipeline.ref_style, "describe_style", lambda *a, **k: "warm light")
+    _both_backends(monkeypatch, lambda prompt: background)
+    seen = {}
+
+    def _compose(product, **kwargs):
+        seen.update(product=product, kwargs=kwargs)
+        return Image.new("RGB", (1080, 1080), (99, 88, 77))
+
+    monkeypatch.setattr(pipeline, "compose_no_text", _compose)
+    brief = _brief().model_copy(update={"photo_id": _put(), "ref_id": _put()})
+
+    result = pipeline.generate_no_text_ad(brief, _store())
+
+    assert result.getpixel((0, 0)) == (99, 88, 77)
+    assert seen["product"] is cut
+    assert seen["kwargs"]["background"] is background
+
+
+def test_사진과_스케치가_있어도_글자_없는_결과에_상품을_남긴다(tmp_path, monkeypatch):
+    """스케치가 구도를 맡아도 사진에서 딴 실제 상품 누끼는 결과에 남는다."""
+    _photo_dir(tmp_path, monkeypatch)
+    _simple_ready(monkeypatch)
+    cut = Image.new("RGBA", (64, 64), (255, 0, 0, 255))
+    background = Image.new("RGB", (1080, 1080), (30, 20, 10))
+    monkeypatch.setattr(pipeline, "remove_background", lambda photo: cut)
+    monkeypatch.setattr(pipeline, "remove_crumbs", lambda product: product)
+    monkeypatch.setattr(
+        pipeline.sketch_gen,
+        "generate_from_sketch",
+        lambda sketch, prompt: background,
+    )
+    seen = {}
+
+    def _compose(product, **kwargs):
+        seen.update(product=product, kwargs=kwargs)
+        return Image.new("RGB", (1080, 1080), (77, 88, 99))
+
+    monkeypatch.setattr(pipeline, "compose_no_text", _compose)
+    brief = _brief().model_copy(update={"photo_id": _put(), "sketch_id": _put()})
+
+    result = pipeline.generate_no_text_ad(brief, _store())
+
+    assert result.getpixel((0, 0)) == (77, 88, 99)
+    assert seen["product"] is cut
+    assert seen["kwargs"]["background"] is background

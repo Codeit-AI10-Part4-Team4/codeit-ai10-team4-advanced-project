@@ -8,6 +8,8 @@ from __future__ import annotations
 import base64
 import io
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from types import ModuleType
 
 import pytest
@@ -73,6 +75,35 @@ def test_GPT가_실패하면_로컬로_폴백하고_안내를_남긴다(
     assert len(notes) == 1
     assert "로컬" in notes[0]
     assert "연결 실패" not in notes[0]
+    assert image_backend.pop_notices() == []
+
+
+def test_동시_사용자의_폴백_안내가_서로_섞이지_않는다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """한 서버를 함께 써도 각 요청은 자기 안내 한 건만 받아야 한다."""
+    monkeypatch.setenv("IMAGE_PROFILE", "openai")
+    both_fell_back = Barrier(2)
+
+    def _fail(prompt: str, size: tuple[int, int]) -> Image.Image:
+        raise RuntimeError(f"{prompt}: 연결 실패")
+
+    def _local(prompt: str, size: tuple[int, int] = (1080, 1080)) -> Image.Image:
+        both_fell_back.wait(timeout=5)
+        return LOCAL
+
+    monkeypatch.setattr(image_backend, "_openai_scene", _fail)
+    monkeypatch.setattr(image_backend.gen_background, "generate_background", _local)
+
+    def _request(label: str) -> list[str]:
+        assert image_backend.generate_scene(label) is LOCAL
+        return image_backend.pop_notices()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        notes_by_user = list(pool.map(_request, ("첫 사용자", "둘째 사용자")))
+
+    expected = ["GPT 이미지 연결이 실패해 로컬 모델로 만들었습니다."]
+    assert notes_by_user == [expected, expected]
     assert image_backend.pop_notices() == []
 
 
