@@ -151,6 +151,7 @@ def test_기타_업종은_직접_적은_이름_없이는_등록도_안_된다() 
         "product": "모둠 반찬",
         "price": 8000,
         "headline": "오늘 반찬 다 됐습니다",
+        "output_type": "emotional_text",
     }
     assert client.post("/ads/image", json=body).status_code == 422
     assert client.post("/ads/image", json={**body, "industry_note": "반찬가게"}).status_code == 202
@@ -197,6 +198,22 @@ def test_문구_필수_판정은_한_군데다() -> None:
         }
         rejected = client.post("/ads/image", json=body).status_code == 422
         assert rejected is needs_copy(value), value
+
+
+def test_낡은_style_키만_보내면_거절한다() -> None:
+    """`extra="forbid"` 가 없어 낡은 키는 무시된다. `output_type` 에 기본값까지
+    있으면 낡은 호출자가 **422 가 아니라 202** 로 통과하고, 포스터를 고른
+    사장님이 감성형을 받는다 — 로그에도 안 남는다 (아인님 #77 지적).
+    """
+    body = {
+        "store_name": "연남 크로플",
+        "industry": "cafe",
+        "product": "크로플",
+        "price": 4500,
+        "headline": "겨울 크로플",
+    }
+    assert client.post("/ads/image", json={**body, "style": "poster"}).status_code == 422
+    assert client.post("/ads/image", json={**body, "output_type": "poster"}).status_code == 202
 
 
 # ── 로그인 · 내 가게 ────────────────────────────────────────────
