@@ -58,34 +58,52 @@ def test_문구를_고르기_전에는_이미지를_만들지_않는다(monkeypa
     from app_core import pipeline
 
     calls: list[Any] = []
-    monkeypatch.setattr(pipeline, "prepare_materials", lambda *a, **kw: calls.append(a))
-    infos = _install(monkeypatch, FakeState())
+    monkeypatch.setattr(pipeline, "prepare_output", lambda *a, **kw: calls.append(a))
+    infos = _install(monkeypatch, FakeState(output_type="emotional_text"))
 
     assert app._make_images(_store(), _brief()) is False
     assert calls == []  # 비싼 생성이 시작조차 안 됐다
     assert any("골라주세요" in msg for msg in infos)
 
 
+def test_글자_없는_유형은_문구_없이도_만든다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """문구를 고르는 화면 자체를 안 거치는 유형이다 — 여기서 막으면 영영 못 만든다."""
+    from app_core import pipeline
+
+    monkeypatch.setattr(pipeline, "prepare_output", lambda brief, store, out: f"MAT-{out}")
+    received: list[Any] = []
+
+    def _fake_render(materials: Any, output_type: str, copy: Any) -> Image.Image:
+        received.append((materials, output_type, copy))
+        return Image.new("RGB", (8, 8))
+
+    monkeypatch.setattr(pipeline, "render_output", _fake_render)
+    state = FakeState(output_type="emotional_no_text")
+    _install(monkeypatch, state)
+
+    assert app._make_images(_store(), _brief()) is True
+    assert received == [("MAT-emotional_no_text", "emotional_no_text", None)]
+
+
 def test_고른_문구가_이미지_생성에_그대로_전달된다(monkeypatch: pytest.MonkeyPatch) -> None:
     from app_core import pipeline
 
     received: list[tuple[Any, int | None]] = []
-    monkeypatch.setattr(
-        pipeline, "prepare_materials", lambda brief, store, style="simple": f"MAT-{style}"
-    )
+    monkeypatch.setattr(pipeline, "prepare_output", lambda brief, store, out: f"MAT-{out}")
 
-    def _fake_render(materials: Any, copy: CopyCandidate) -> Image.Image:
+    def _fake_render(materials: Any, output_type: str, copy: CopyCandidate) -> Image.Image:
         received.append((materials, copy.id))
         return Image.new("RGB", (8, 8))
 
-    monkeypatch.setattr(pipeline, "render_ad", _fake_render)
+    monkeypatch.setattr(pipeline, "render_output", _fake_render)
     picked = CopyCandidate(id=7, headline="여름의 청량함", sub="6,000원")
-    state = FakeState(picked=picked)
+    state = FakeState(picked=picked, output_type="poster")
     _install(monkeypatch, state)
 
     assert app._make_images(_store(), _brief()) is True
-    assert received == [("MAT-simple", 7), ("MAT-poster", 7)]  # 두 형태 모두 고른 문구로
-    assert set(state["images"]) == {"simple", "poster"}
+    # 고른 **한 형태만** 만든다 — 안 고른 쪽에 GPU·API 비용이 나가면 안 된다
+    assert received == [("MAT-poster", 7)]
+    assert set(state["images"]) == {"poster"}
 
 
 def test_문구만_바꾸면_재료를_다시_만들지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -93,11 +111,12 @@ def test_문구만_바꾸면_재료를_다시_만들지_않는다(monkeypatch: p
     from app_core import pipeline
 
     prepare_calls: list[Any] = []
-    monkeypatch.setattr(pipeline, "prepare_materials", lambda *a, **kw: prepare_calls.append(a))
-    monkeypatch.setattr(pipeline, "render_ad", lambda m, c: Image.new("RGB", (8, 8)))
+    monkeypatch.setattr(pipeline, "prepare_output", lambda *a, **kw: prepare_calls.append(a))
+    monkeypatch.setattr(pipeline, "render_output", lambda m, o, c: Image.new("RGB", (8, 8)))
     state = FakeState(
         picked=CopyCandidate(id=1, headline="다른 문구"),
-        materials={"simple": "MAT", "poster": "MAT"},
+        output_type="emotional_text",
+        materials={"emotional_text": "MAT"},
         materials_brief=_brief(),
         mat_errors={},
     )

@@ -6,7 +6,7 @@
 
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 from fastapi.testclient import TestClient
@@ -151,9 +151,69 @@ def test_기타_업종은_직접_적은_이름_없이는_등록도_안_된다() 
         "product": "모둠 반찬",
         "price": 8000,
         "headline": "오늘 반찬 다 됐습니다",
+        "output_type": "emotional_text",
     }
     assert client.post("/ads/image", json=body).status_code == 422
     assert client.post("/ads/image", json={**body, "industry_note": "반찬가게"}).status_code == 202
+
+
+def test_글자_없는_유형은_문구_없이도_등록된다() -> None:
+    """글자를 안 얹는 결과물은 문구를 받지 않는다 — 여기서 막으면 영영 못 만든다."""
+    body = {
+        "store_name": "연남 크로플",
+        "industry": "cafe",
+        "product": "크로플",
+        "price": 4500,
+        "output_type": "emotional_no_text",
+    }
+    assert client.post("/ads/image", json=body).status_code == 202
+
+
+def test_글자_있는_유형은_문구가_없으면_거절한다() -> None:
+    body = {
+        "store_name": "연남 크로플",
+        "industry": "cafe",
+        "product": "크로플",
+        "price": 4500,
+        "output_type": "poster",
+    }
+    assert client.post("/ads/image", json=body).status_code == 422
+    assert client.post("/ads/image", json={**body, "headline": "겨울 크로플"}).status_code == 202
+
+
+def test_문구_필수_판정은_한_군데다() -> None:
+    """요청 검증과 파이프라인이 각자 조건을 적어두면 갈렸을 때 한쪽만 통과한다.
+
+    같은 실수를 #51 에서 이미 겪었다 (#76 리뷰). 스키마의 needs_copy 하나만 본다.
+    """
+    from app_core.schema import OutputType, needs_copy
+
+    for value in get_args(OutputType):
+        body = {
+            "store_name": "연남 크로플",
+            "industry": "cafe",
+            "product": "크로플",
+            "price": 4500,
+            "output_type": value,
+        }
+        rejected = client.post("/ads/image", json=body).status_code == 422
+        assert rejected is needs_copy(value), value
+
+
+def test_낡은_style_키만_보내면_거절한다() -> None:
+    """`extra="forbid"` 가 없어 낡은 키는 무시된다. `output_type` 에 기본값까지
+    있으면 낡은 호출자가 **422 가 아니라 202** 로 통과하고, 포스터를 고른
+    사장님이 감성형을 받는다 — 로그에도 안 남는다 (아인님 #77 지적).
+    """
+    body = {
+        "store_name": "연남 크로플",
+        "industry": "cafe",
+        "product": "크로플",
+        "price": 4500,
+        "headline": "겨울 크로플",
+    }
+    assert client.post("/ads/image", json={**body, "style": "poster"}).status_code == 422
+    assert client.post("/ads/image", json={**body, "output_type": "poster"}).status_code == 202
 
 
 # ── 로그인 · 내 가게 ────────────────────────────────────────────
