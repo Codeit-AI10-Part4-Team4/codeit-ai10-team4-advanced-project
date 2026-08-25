@@ -105,6 +105,7 @@ const S = {
   turns: [],         // { who, text } — 사장님과 챗봇이 주고받은 것
   options: [],       // 챗봇이 준 이번 턴의 선택지
   copies: null,      // /ads/copies 결과
+  pick: 0,           // 사장님이 고른 문구의 자리. 안 고르면 1위
   adId: null,        // 그 문구들이 저장된 광고 번호 — /ads/review 가 쓴다
   result: null,      // /ads/review 결과 중 1위 후보의 평가
   margin: null,      // clear_margin — "1등이 낫다"고 말할 기준
@@ -209,12 +210,14 @@ async function startImages() {
     store_name: store.name,
     // 목업 가게는 industryId, 서버에서 받은 가게는 industry 가 id 다.
     industry: store.industryId || store.industry,
-    product: M.brief.product,
-    price: Number(String(M.brief.price).replace(/[^\d]/g, '')) || 0,
-    headline: copies()[0].headline,
-    sub: copies()[0].sub,
-    situation: M.brief.situation,
-    tone: S.tone || M.brief.tone,
+    // 사장님이 대화로 채운 주문서를 쓴다. 목업은 서버가 없을 때만 —
+    // 여기서 M.brief 를 그대로 쓰면 어느 가게든 "순대국 8,000원" 광고가 나온다.
+    product: chosen().product,
+    price: chosen().price,
+    headline: chosen().headline,
+    sub: chosen().sub,
+    situation: chosen().situation,
+    tone: chosen().tone,
     // '기타' 업종은 이게 없으면 서버가 Store 를 못 만든다
     industry_note: store.industry_note || '',
   };
@@ -508,7 +511,9 @@ const SCREENS = {
         const body = url
           ? `<img src="${url}" alt="${esc(label)} 미리보기"
                   style="width:100%;height:200px;object-fit:cover;border-radius:var(--r);border:1px solid var(--line)">
-             ${read ? `<p class="muted">AI가 읽은 내용 — ${esc(M.photos.product.note)}</p>` : ''}
+             <!-- 사진은 아직 서버로 안 간다(미리보기만). 목업 분석 문구를 그대로
+                  띄우면 AI 가 이 사진을 읽은 것처럼 보인다 — 안 읽었다. -->
+             ${read && !live() ? `<p class="muted">AI가 읽은 내용 — ${esc(M.photos.product.note)}</p>` : ''}
              <button class="btn btn--line btn--sm" style="width:auto;align-self:flex-start"
                      data-drop="${key}">빼기</button>`
           // hidden 이 아니라 sr-only 다 — hidden 이면 키보드로 닿지 못한다
@@ -525,6 +530,9 @@ const SCREENS = {
       return `
       <div class="stack">
         <div class="note">세 칸 모두 선택입니다. 안 올려도 광고는 만들어집니다.</div>
+        <!-- 올린 사진이 광고에 안 들어가는데 아무 말이 없으면, 사장님은 들어간
+             줄 알고 기다린다. 붙일 때까지는 화면이 사실대로 말한다. -->
+        ${live() ? '<div class="note note--flag">지금은 <b>미리보기까지만</b> 됩니다 — 올린 사진은 아직 광고에 들어가지 않습니다.</div>' : ''}
         ${slot(slots[0])}
         <div class="rule stack">${slot(slots[1])}${slot(slots[2])}</div>
         <p class="muted rule">제품 사진만 AI가 읽어 문구에 반영합니다.
@@ -549,12 +557,12 @@ const SCREENS = {
         </div>
 
         <div class="stack--s">
-          ${copies().map((c) => `
-            <div class="card">
+          ${copies().map((c, i) => `
+            <div class="card${i === S.pick ? ' card--pick' : ''}">
               <strong style="font-size:18px;letter-spacing:-.02em;line-height:1.35">${esc(c.headline)}</strong>
               <span class="muted" style="font-size:14px">${esc(c.sub)}</span>
               ${(c.defects || []).map((d) => `<div class="note note--flag" style="font-size:13px">⚠ ${esc(d)}</div>`).join('')}
-              <button class="btn btn--line btn--sm" data-go="image">이걸로 할게요</button>
+              <button class="btn btn--line btn--sm" data-pick-copy="${i}">이걸로 할게요</button>
             </div>`).join('')}
         </div>
 
@@ -641,7 +649,7 @@ const SCREENS = {
                 <strong style="font-size:18px;letter-spacing:-.02em;line-height:1.35">${esc(c.headline)}</strong>
                 <span class="muted" style="font-size:14px">${esc(c.sub)}</span>
                 ${c.defects.map((d) => `<div class="note note--flag" style="font-size:13px">⚠ ${esc(d)}</div>`).join('')}
-                <button class="btn ${i === 0 ? '' : 'btn--line'} btn--sm" data-go="image">이걸로 할게요</button>
+                <button class="btn ${i === 0 ? '' : 'btn--line'} btn--sm" data-pick-copy="${i}">이걸로 할게요</button>
               </div>`).join('')}
           </div>
         </section>
@@ -697,7 +705,7 @@ const SCREENS = {
     bar: true, back: 'panel',
     render: () => `
       <div class="stack">
-        <div class="note note--accent">고른 문구 — <b>${esc(copies()[0].headline)}</b></div>
+        <div class="note note--accent">고른 문구 — <b>${esc(chosen().headline)}</b></div>
 
         <div class="stack--s">
           <button class="btn" data-make>광고 이미지 만들기</button>
@@ -837,6 +845,14 @@ document.addEventListener('click', (e) => {
 
   if (e.target.closest('[data-download]')) { toast('목업이라 아직 내려받을 이미지가 없습니다'); return; }
 
+  const pickCopy = e.target.closest('[data-pick-copy]');
+  if (pickCopy) {
+    S.pick = Number(pickCopy.dataset.pickCopy);
+    keep();
+    go('image');
+    return;
+  }
+
   if (e.target.closest('[data-make-copies]')) { makeCopies(); return; }
   if (e.target.closest('[data-review]')) { reviewCopies(); return; }
 
@@ -969,6 +985,25 @@ const result = () => S.result || M.result;
 const turns = () => (S.turns.length ? S.turns : [...M.turns, ...S.said]);
 const chips = () => (S.options.length ? S.options : M.toneChips);
 
+/** 사장님이 고른 문구와 주문서. 이미지 생성이 쓰는 값 한 벌.
+ *
+ * 문구를 안 골랐으면 1위를 쓴다 — 손님들이 가장 낫다고 한 것이다.
+ * 주문서는 대화로 채운 것을 쓰고, 서버가 없을 때만 목업으로 떨어진다. */
+function chosen() {
+  const cs = copies();
+  const c = cs[S.pick] || cs[0] || {};
+  const d = S.draft || {};
+  const mockPrice = Number(String(M.brief.price).replace(/[^\d]/g, '')) || 0;
+  return {
+    headline: c.headline || '',
+    sub: c.sub || '',
+    product: d.product || M.brief.product,
+    price: d.price ?? mockPrice,
+    situation: d.situation || M.brief.situation,
+    tone: S.tone || d.tone || M.brief.tone,
+  };
+}
+
 /** 주문서 한 줄. 서버 주문서(AdBriefDraft)는 아직 안 채워진 칸이 null 이다. */
 const slip = (key, fallback) => {
   const v = S.draft ? S.draft[key] : fallback;
@@ -989,7 +1024,7 @@ const rememberStore = (s) => {
  *
  * 손님 평가 한 번이 1분이다. 시연 중에 새로고침 한 번으로 그게 날아가면
  * 다시 1분을 기다려야 한다. 서버가 주는 것만 담는다 — 목업은 어차피 코드에 있다. */
-const KEEP = ['draft', 'turns', 'options', 'copies', 'adId', 'result', 'margin', 'tone'];
+const KEEP = ['draft', 'turns', 'options', 'copies', 'adId', 'result', 'margin', 'tone', 'pick'];
 
 const keep = () => {
   const box = {};
@@ -1028,7 +1063,9 @@ async function loadTradeArea() {
   r.is_category_fallback = t.is_category_fallback;
 
   const src = `서울시 ${quarter(t.quarter)}`;
-  const price = Number(String(M.brief.price).replace(/[^\d]/g, ''));
+  // 주문서에 적힌 값을 쓴다. 목업 가격을 쓰면 사장님이 6,500원이라 했는데
+  // 대조 문장만 8,000원이라 말하는 화면이 된다.
+  const price = chosen().price;
   const cheaper = price && price < t.avg_ticket;
 
   r.contrast_notes = [
@@ -1166,6 +1203,7 @@ async function makeCopies() {
   S.copies = out.copies;
   S.adId = out.ad_id;
   S.result = null;                // 문구가 갈렸으니 이전 평가는 더 이상 이 문구의 것이 아니다
+  S.pick = 0;                     // 고른 자리도 사라진 문구를 가리킨다
   keep();
   go('copy');
 }
