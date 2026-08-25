@@ -385,14 +385,25 @@ def compose_no_text(
     *,
     size: tuple[int, int] = (1080, 1080),
     background: Image.Image | None = None,
+    staged: bool = False,
 ) -> Image.Image:
-    """배경과 선택적 상품 누끼만 합성하고 어떤 글자도 그리지 않는다."""
+    """배경과 선택적 상품 누끼만 합성하고 **광고 문구는** 그리지 않는다.
+
+    `staged` 면 "연출된 이미지" 표기는 새긴다. 문구가 없다고 고지까지 빼면
+    안 되는 자리다 — 조판도 글자도 없는 맨 사진이라 **실제 촬영본과 구분이
+    되지 않는다.** 표기가 가장 필요한 쪽이 오히려 여기다 (근거: #45).
+
+    위쪽 구석에 붙인다. 다른 조판은 글자 영역의 반대쪽을 골랐지만 여기는
+    비켜야 할 글자가 없다.
+    """
     bg = (
         fit_photo_canvas(background, size) if background else make_gradient_background(size)
     ).convert("RGB")
     canvas = bg.convert("RGBA")
     if product is not None:
         _place_product(canvas, product, text_bottom=0)
+    if staged:
+        draw_staged_notice(canvas, "top")
     return canvas.convert("RGB")
 
 
