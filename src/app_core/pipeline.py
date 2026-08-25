@@ -282,6 +282,7 @@ def render_no_text_ad(materials: SimpleMaterials) -> Image.Image:
     return compose_no_text(
         materials.product,
         background=materials.background,
+        staged=materials.staged,
     )
 
 

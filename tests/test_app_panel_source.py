@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from app_core.panel.review import Ranked
 from app_core.panel.schemas import EvaluationResult, PersonaComment
 
 app = pytest.importorskip("app", reason="streamlit 미설치 환경에서는 건너뛴다")
@@ -25,17 +26,18 @@ class Screen:
     def __init__(self) -> None:
         self.caption: list[str] = []
         self.info: list[str] = []
+        self.success: list[str] = []
         self.warning: list[str] = []
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> Screen:
-        for kind in ("caption", "info", "warning"):
+        for kind in ("caption", "info", "success", "warning"):
             box = getattr(self, kind)
             monkeypatch.setattr(app.st, kind, lambda msg, box=box, **kw: box.append(str(msg)))
         return self
 
     @property
     def all_text(self) -> str:
-        return "\n".join(self.caption + self.info + self.warning)
+        return "\n".join(self.caption + self.info + self.success + self.warning)
 
 
 def _result(survivors: int = 12, **over: Any) -> EvaluationResult:
@@ -66,6 +68,75 @@ def _result(survivors: int = 12, **over: Any) -> EvaluationResult:
     }
     base.update(over)
     return EvaluationResult(**base)
+
+
+def _ranked(*intents: float) -> list[Ranked]:
+    from app_core.schema import CopyCandidate
+
+    return [
+        Ranked(
+            copy=CopyCandidate(headline=f"후보 {i}"),
+            result=_result(scores={"attention": 60.0, "message": 70.0, "intent": intent}),
+            defects=[],
+        )
+        for i, intent in enumerate(intents, start=1)
+    ]
+
+
+def test_격차가_확실하면_점수_대신_1위_추천을_보여준다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    screen = Screen().install(monkeypatch)
+    ranked = _ranked(54.0, 51.0, 49.0)
+
+    app._rank_summary(ranked)
+
+    assert "1위 문구" in "\n".join(screen.success)
+    assert "점 차" not in screen.all_text
+    assert "손님들이 가장 반응한 문구" in app._rank_caption(1, ranked)
+
+
+def test_격차가_작으면_추천하지_않고_비슷하다고_알린다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    screen = Screen().install(monkeypatch)
+    ranked = _ranked(35.0, 34.0, 33.0)
+
+    app._rank_summary(ranked)
+
+    assert "셋이 비슷" in "\n".join(screen.info)
+    assert not screen.success
+    assert "가장 반응한" not in app._rank_caption(1, ranked)
+
+
+def test_후보_카드에는_방문의향_절대_점수를_표시하지_않는다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import nullcontext
+
+    ranked = _ranked(54.0, 51.0, 49.0)
+    screen = Screen().install(monkeypatch)
+    store, _, _ = _args()
+    draft: Any = object()
+    monkeypatch.setattr(
+        app.st,
+        "session_state",
+        _State(copies=[item.copy for item in ranked], ranked=ranked),
+    )
+    monkeypatch.setattr(app.st, "container", lambda **_kw: nullcontext())
+    monkeypatch.setattr(app.st, "markdown", lambda *_a, **_kw: None)
+    monkeypatch.setattr(app.st, "write", lambda *_a, **_kw: None)
+    monkeypatch.setattr(app.st, "button", lambda *_a, **_kw: False)
+    monkeypatch.setattr(app, "_panel_source", lambda *_a, **_kw: None)
+    monkeypatch.setattr(app, "_rank_summary", lambda *_a, **_kw: None)
+    monkeypatch.setattr(app, "revise_view", lambda *_a, **_kw: None)
+
+    app.copy_view(store, draft)
+
+    joined = "\n".join(screen.caption)
+    assert "방문의향" not in joined
+    assert all(str(score) not in joined for score in (54, 51, 49))
+    assert "손님들이 가장 반응한 문구" in joined
 
 
 def test_어느_동네_언제_데이터인지_밝힌다(monkeypatch: pytest.MonkeyPatch) -> None:

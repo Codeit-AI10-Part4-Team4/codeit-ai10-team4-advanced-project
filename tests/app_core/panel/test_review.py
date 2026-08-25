@@ -15,7 +15,7 @@ import pytest
 
 from app_core.panel.features import DB_PATH, build_features
 from app_core.panel.panel_builder import build_panel
-from app_core.panel.review import Ranked, bands, rank, rank_key, review, to_panel
+from app_core.panel.review import Ranked, bands, has_clear_winner, rank, rank_key, review, to_panel
 from app_core.schema import AdBrief, CopyCandidate, Store, StoreInput
 
 from .test_evaluator import FakeClient, _good
@@ -146,6 +146,16 @@ def test_결함까지_같으면_눈길이_가른다() -> None:
 def test_전부_같으면_만든_순서를_지킨다() -> None:
     keys = _keys(*(_ranked(intent=52.0) for _ in range(3)))
     assert [n for *_, n in sorted(keys)] == [0, 1, 2]
+
+
+def test_1위가_모든_후보보다_확실히_앞설_때만_추천한다() -> None:
+    assert has_clear_winner([_ranked(54.0), _ranked(51.0), _ranked(49.0)])
+
+
+def test_화면상_2위_뒤에_가까운_경쟁자가_있으면_추천하지_않는다() -> None:
+    """같은 무리 안에서 결함 수로 재정렬된 후보를 건너뛰면 안 된다."""
+    ranked = [_ranked(54.0), _ranked(51.0), _ranked(52.5)]
+    assert not has_clear_winner(ranked)
 
 
 def test_후보마다_하나씩_돌려준다() -> None:

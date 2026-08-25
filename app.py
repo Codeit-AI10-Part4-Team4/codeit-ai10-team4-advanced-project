@@ -33,7 +33,7 @@ from app_core import (
 )
 from app_core.panel.aggregate import AggregationError
 from app_core.panel.features import NoTradeAreaError
-from app_core.panel.review import CLEAR_MARGIN, Ranked, rank
+from app_core.panel.review import Ranked, has_clear_winner, rank
 from app_core.panel.schemas import EvaluationResult
 from app_core.schema import AdBrief, AdBriefDraft, CopyCandidate, Feedback, Store, StoreInput
 
@@ -368,6 +368,14 @@ def _panel_source(result: EvaluationResult) -> None:
         st.warning(f"이 평가는 **참고만** 해주세요.{why}", icon="⚠️")
 
 
+def _rank_caption(position: int, ranked: list[Ranked]) -> str:
+    """절대 점수 없이 순위와 근거 있는 추천만 보여준다."""
+    label = f"**{position}위**"
+    if position == 1 and has_clear_winner(ranked):
+        return f"{label} · 🏆 손님들이 가장 반응한 문구"
+    return label
+
+
 def _rank_summary(ranked: list[Ranked]) -> None:
     """1등을 권하되 **차이가 잡음보다 클 때만** 권한다.
 
@@ -378,10 +386,9 @@ def _rank_summary(ranked: list[Ranked]) -> None:
     """
     if len(ranked) < 2:
         return
-    gap = ranked[0].result.scores["intent"] - ranked[1].result.scores["intent"]
-    if gap >= CLEAR_MARGIN:
+    if has_clear_winner(ranked):
         st.success(
-            f"손님들은 **1위 문구**에 가장 마음이 움직였습니다 (2위와 {gap:.0f}점 차).",
+            "손님들은 **1위 문구**에 가장 마음이 움직였습니다.",
             icon="🧑‍🤝‍🧑",
         )
     else:
@@ -486,7 +493,7 @@ def copy_view(store: Store, draft: AdBriefDraft) -> None:
     for i, (candidate, scored) in enumerate(shown, start=1):
         with st.container(border=True):
             if scored is not None:
-                st.caption(f"**{i}위** · 방문의향 {scored.result.scores['intent']:.0f}")
+                st.caption(_rank_caption(i, ranked))
             st.markdown(f"### {candidate.headline}")
             if candidate.sub:
                 st.write(candidate.sub)

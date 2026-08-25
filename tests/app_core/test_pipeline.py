@@ -569,6 +569,21 @@ def test_사진_없이_만든_포스터에도_연출_표기가_붙는다(monkeyp
     assert calls, "생성한 주인공을 쓰는데 연출 표기가 붙지 않았다"
 
 
+def test_글자_없는_결과물에도_연출_표기가_붙는다(monkeypatch):
+    """문구가 없다고 고지까지 빼면 안 된다.
+
+    조판도 글자도 없는 맨 사진이라 **실제 촬영본과 구분이 되지 않는다.** 사장님이
+    자기가 찍은 사진인 양 올리게 되는 자리가 여기다 — 표기가 가장 필요한 쪽이다.
+    """
+    _simple_ready(monkeypatch)
+    calls = _notice_spy(monkeypatch)
+    _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (1080, 1080), (10, 20, 30)))
+
+    pipeline.generate_no_text_ad(_brief(), _store())
+
+    assert calls, "글자 없는 광고인데 연출 표기가 붙지 않았다"
+
+
 def test_사장님_사진을_그대로_쓰면_표기하지_않는다(tmp_path, monkeypatch):
     """안전 보정본은 **사장님이 찍은 진짜 사진**이므로 연출 표기를 붙이지 않는다."""
     _photo_dir(tmp_path, monkeypatch)
