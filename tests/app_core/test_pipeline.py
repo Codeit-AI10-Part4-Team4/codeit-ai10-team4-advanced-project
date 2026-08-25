@@ -325,16 +325,30 @@ def test_openai여도_사진과_스케치가_같이_있으면_기존_합성을_�
     assert seen["누끼"] is True
 
 
-def test_사진과_레퍼런스는_청소된_누끼를_배경에_얹는다(tmp_path, monkeypatch):
-    """명시한 레퍼런스가 있으면 상품 누끼를 보존하고 분위기만 생성한다."""
-    raw = Image.new("RGBA", (64, 64), (255, 255, 255, 255))
-    cleaned = Image.new("RGBA", (10, 10), (1, 2, 3, 255))
+def _never_cut(_image):
+    raise AssertionError("사진 보존 경로에서는 누끼를 따면 안 된다")
+
+
+def test_사진과_레퍼런스를_같이_주면_사진을_보존한_채_분위기를_얹는다(tmp_path, monkeypatch):
+    """레퍼런스는 사진 보존(3번)을 **끄지 않는다** — 둘 다 반영한다 (2026-08-24 결정).
+
+    전에는 `ref_id` 가 있으면 재촬영 경로가 통째로 꺼지고 누끼+배경 합성으로
+    빠졌다. 사장님은 "이 사진을 이런 느낌으로" 를 고른 건데 상품이 오려져 나갔다.
+    """
+    restaged = Image.new("RGB", (1080, 1080), (7, 7, 7))
+    seen: dict[str, object] = {}
     _simple_ready(monkeypatch)
+    monkeypatch.setenv("IMAGE_PROFILE", "openai")
     monkeypatch.setattr(pipeline.photo_store, "path_of", lambda pid: _photo(tmp_path))
-    monkeypatch.setattr(pipeline, "remove_background", lambda im: raw)
-    monkeypatch.setattr(pipeline, "remove_crumbs", lambda cut: cleaned)
+    monkeypatch.setattr(pipeline.photo_store, "load", lambda pid: (b"ref", "image/png"))
     monkeypatch.setattr(pipeline.ref_style, "describe_style", lambda *a, **k: "warm light")
-    _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (1080, 1080)))
+
+    def _restage(photo, **kwargs):
+        seen.update(kwargs)
+        return image_backend.RestageResult(restaged, staged=False)
+
+    monkeypatch.setattr(pipeline, "restage_photo", _restage)
+    monkeypatch.setattr(pipeline, "remove_background", _never_cut)
 
     materials = pipeline.prepare_materials(
         AdBrief(goal="image", product="크로플", price=0, photo_id=7, ref_id=8),
@@ -343,7 +357,10 @@ def test_사진과_레퍼런스는_청소된_누끼를_배경에_얹는다(tmp_p
     )
 
     assert isinstance(materials, pipeline.SimpleMaterials)
-    assert materials.product is cleaned
+    assert materials.background is restaged
+    assert materials.product is None  # 사진 전체를 쓰므로 누끼를 따지 않는다
+    assert materials.preserved_photo is True
+    assert seen["reference"] == "warm light"  # 분위기는 재촬영 지시에 얹힌다
 
 
 def test_사진_있는_포스터는_누끼_없이_사진_전체를_카드로_쓴다(tmp_path, monkeypatch):
@@ -447,10 +464,14 @@ def test_사진과_스케치를_같이_올려도_제품이_하나다(tmp_path, m
     assert seen["누끼"] is True  # 제품은 누끼 한 번만
 
 
-def test_레퍼런스를_같이_주면_실상품_누끼와_분위기를_함께_쓴다(tmp_path, monkeypatch):
-    """레퍼런스는 생성 배경에만 반영하고 실제 상품 누끼는 그대로 보존한다."""
+def test_로컬에서_레퍼런스를_주면_누끼_경로로_내려가_분위기를_살린다(tmp_path, monkeypatch):
+    """local 은 재촬영을 못 한다 — 사진을 통째로 쓰면 레퍼런스가 갈 자리가 없다.
+
+    안전 색보정에는 분위기를 얹을 수 없어서, 그대로 두면 사장님이 올린 레퍼런스가
+    **아무 일도 안 하고 사라진다.** 그때는 누끼+생성 배경으로 내려가야 살아난다.
+    """
     _cutout_ready(tmp_path, monkeypatch)
-    monkeypatch.setenv("IMAGE_PROFILE", "openai")
+    monkeypatch.setenv("IMAGE_PROFILE", "local")
     monkeypatch.setattr(pipeline.photo_store, "load", lambda pid: (b"x", "image/png"))
     monkeypatch.setattr(pipeline.ref_style, "describe_style", lambda *a, **k: "warm light")
 
@@ -464,8 +485,22 @@ def test_레퍼런스를_같이_주면_실상품_누끼와_분위기를_함께_�
     materials = pipeline.prepare_materials(
         _brief().model_copy(update={"photo_id": 7, "ref_id": 8}), _store(), "simple"
     )
-    assert materials.product is not None  # 기존 누끼+배경 경로
+    assert materials.product is not None  # 실제 상품은 누끼로 보존
     assert "warm light" in seen["prompt"]  # 레퍼런스 분위기가 실제로 반영됐다
+
+
+def test_로컬이어도_레퍼런스가_없으면_사진을_그대로_쓴다(tmp_path, monkeypatch):
+    """위 우회는 **레퍼런스가 있을 때만**이다 — 없으면 안전 보정한 사진 전체를 쓴다."""
+    _cutout_ready(tmp_path, monkeypatch)
+    monkeypatch.setenv("IMAGE_PROFILE", "local")
+    monkeypatch.setattr(pipeline, "_safe_uploaded_photo", lambda p: Image.new("RGB", (1080, 1080)))
+
+    materials = pipeline.prepare_materials(
+        _brief().model_copy(update={"photo_id": 7}), _store(), "simple"
+    )
+    assert isinstance(materials, pipeline.SimpleMaterials)
+    assert materials.preserved_photo is True
+    assert materials.product is None
 
 
 def test_스케치만_있으면_스케치가_제품을_그린다(tmp_path, monkeypatch):
@@ -568,6 +603,21 @@ def test_사진_없이_만든_포스터에도_연출_표기가_붙는다(monkeyp
     pipeline.generate_ad(_brief(), _store(), CopyCandidate(headline="크로플"), "poster")
 
     assert calls, "생성한 주인공을 쓰는데 연출 표기가 붙지 않았다"
+
+
+def test_글자_없는_결과물에도_연출_표기가_붙는다(monkeypatch):
+    """문구가 없다고 고지까지 빼면 안 된다.
+
+    조판도 글자도 없는 맨 사진이라 **실제 촬영본과 구분이 되지 않는다.** 사장님이
+    자기가 찍은 사진인 양 올리게 되는 자리가 여기다 — 표기가 가장 필요한 쪽이다.
+    """
+    _simple_ready(monkeypatch)
+    calls = _notice_spy(monkeypatch)
+    _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (1080, 1080), (10, 20, 30)))
+
+    pipeline.generate_no_text_ad(_brief(), _store())
+
+    assert calls, "글자 없는 광고인데 연출 표기가 붙지 않았다"
 
 
 def test_사장님_사진을_그대로_쓰면_표기하지_않는다(tmp_path, monkeypatch):
@@ -695,15 +745,15 @@ def test_문구만_바꾸면_포스터_기획은_재사용된다(monkeypatch):
     assert heads == ["첫 문구", "다른 문구"]
 
 
-def test_사진_없는_포스터에도_주문서_가격을_전달한다(monkeypatch):
-    """가격은 문구 생성 여부와 무관한 주문 사실이므로 포스터 조판에 직접 전달한다."""
+def test_사진_없는_포스터에_주문서_가격과_기획_팔레트를_전달한다(monkeypatch):
+    """가격은 주문 사실이고, 팔레트는 기획 결과이므로 둘 다 조판에 직접 전달한다."""
     monkeypatch.setattr(pipeline, "build_hero_prompt", lambda *a, **k: "hero")
     _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (512, 512)))
     monkeypatch.setattr(
         pipeline,
         "plan_poster",
         lambda **kwargs: PosterPlan(
-            tagline="t", badge="", date_line="", features=[], event="", palette="warm_bakery"
+            tagline="t", badge="", date_line="", features=[], event="", palette="fresh_mint"
         ),
     )
     seen = {}
@@ -719,7 +769,7 @@ def test_사진_없는_포스터에도_주문서_가격을_전달한다(monkeypa
 
     assert seen["price_text"] == "6,500원"
     assert seen["product_name"] == brief.product
-    assert seen["palette"] == "warm_bakery"
+    assert seen["palette"] == "fresh_mint"
 
 
 def test_바뀐_주문서로_재료를_다시_만들면_기획에_전달된다(monkeypatch):
@@ -828,3 +878,42 @@ def test_사진과_스케치가_있어도_글자_없는_결과에_상품을_남�
     assert result.getpixel((0, 0)) == (77, 88, 99)
     assert seen["product"] is cut
     assert seen["kwargs"]["background"] is background
+
+
+# ── 결과물 유형 (PDF STEP 1) ─────────────────────────────────
+#
+# output_type 이 정하는 것은 **글자를 얹느냐** 하나다. 어떤 이미지 기능(1~4번)이
+# 도는지는 주문서에 사진·레퍼런스·스케치가 담겼는지가 정한다 — 둘은 독립이다.
+
+
+def test_글자_없는_유형만_문구_단계를_건너뛴다():
+    assert pipeline.needs_copy("emotional_no_text") is False
+    assert pipeline.needs_copy("emotional_text") is True
+    assert pipeline.needs_copy("poster") is True
+
+
+def test_감성_두_유형은_같은_재료를_쓴다():
+    """글자 유무는 조판에서 갈린다 — 재료를 따로 만들면 두 배로 든다."""
+    assert pipeline.style_of("emotional_no_text") == "simple"
+    assert pipeline.style_of("emotional_text") == "simple"
+    assert pipeline.style_of("poster") == "poster"
+
+
+def test_글자_없는_유형은_문구를_안_받아도_만든다(monkeypatch):
+    _simple_ready(monkeypatch)
+    _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (1080, 1080), (5, 6, 7)))
+
+    ad = pipeline.generate_output(_brief(), _store(), "emotional_no_text")
+
+    assert ad.size == (1080, 1080)
+
+
+def test_글자_있는_유형에_문구가_없으면_막는다(monkeypatch):
+    """작업 스레드 안에서 터지면 사장님은 한참 기다린 끝에 오류를 본다."""
+    import pytest
+
+    _simple_ready(monkeypatch)
+    _both_backends(monkeypatch, lambda prompt: Image.new("RGB", (1080, 1080)))
+
+    with pytest.raises(ValueError, match="문구가 있어야"):
+        pipeline.generate_output(_brief(), _store(), "emotional_text")

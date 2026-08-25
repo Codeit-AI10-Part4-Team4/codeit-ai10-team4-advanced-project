@@ -246,6 +246,7 @@ def test_AI_재촬영은_고품질과_스타일별_연출을_API에_전달한다
         extra="",
         transcript="",
         style="simple",
+        reference="warm golden light",
         size=(32, 32),
     )
 
@@ -261,6 +262,8 @@ def test_AI_재촬영은_고품질과_스타일별_연출을_API에_전달한다
     assert "No people or human body parts anywhere" in prompt
     assert "hands, arms" in prompt
     assert "cropped human body parts" in prompt
+    assert "warm golden light" in prompt
+    assert "never copy any product, packaging, or text" in prompt
     assert "Preserve every visible product exactly" not in prompt
 
     poster_prompt = image_backend._restage_prompt(

@@ -166,8 +166,15 @@ def _restage_prompt(
     extra: str,
     transcript: str,
     style: RestageStyle,
+    reference: str = "",
 ) -> str:
-    """사장님 사진을 참고한 광고 재촬영 지시 — 조판 글자는 모델에 맡기지 않는다."""
+    """사장님 사진을 참고한 광고 재촬영 지시 — 조판 글자는 모델에 맡기지 않는다.
+
+    `reference` 는 사장님이 "이런 느낌으로" 하고 올린 레퍼런스에서 읽은 분위기
+    구절이다(ref_style). 확산 모델 경로와 달리 여기는 CLIP 77토큰 제한이 없어서
+    프롬프트 뒤에 붙여도 잘리지 않는다 — **사진 보존(3번)과 레퍼런스 반영(2번)을
+    동시에** 할 수 있는 자리다.
+    """
     facts = "\n".join(
         line
         for line in (
@@ -179,6 +186,15 @@ def _restage_prompt(
             f"Owner's original words: {transcript}" if transcript.strip() else "",
         )
         if line
+    )
+    # 레퍼런스는 **분위기만** 따른다. 남의 상품이 사장님 광고에 들어가면 안 되므로
+    # ref_style 이 애초에 제품·글자를 뺀 구절만 준다 (ref_style.SYSTEM_PROMPT).
+    mood = (
+        f"\nMatch this visual mood the owner asked for: {reference.strip()}. "
+        "Apply it to lighting, color, setting, and styling only — never copy any "
+        "product, packaging, or text from that reference."
+        if reference.strip()
+        else ""
     )
     return f"""Use the uploaded customer photo as the visual reference for a new, high-end
 photorealistic advertisement photograph for a Korean neighborhood shop. Freely rebuild the
@@ -203,7 +219,7 @@ No people or human body parts anywhere in the frame: no faces, heads, torsos, ha
 fingers, legs, feet, human reflections, human silhouettes, or someone holding, reaching for, or
 serving the product. Keep every edge of the frame free of cropped human body parts.
 Avoid plastic-looking surfaces, impossible geometry, excessive gloss, fake bokeh, duplicated
-objects, and over-saturated colors."""
+objects, and over-saturated colors.{mood}"""
 
 
 def _openai_restage(
@@ -217,6 +233,7 @@ def _openai_restage(
     transcript: str,
     style: RestageStyle,
     size: tuple[int, int],
+    reference: str = "",
 ) -> Image.Image:
     """업로드 사진을 참고 이미지로 삼아 광고 촬영본을 새로 만든다."""
     from openai import OpenAI
@@ -239,6 +256,7 @@ def _openai_restage(
             extra=extra,
             transcript=transcript,
             style=style,
+            reference=reference,
         ),
         size=api_size,
         quality=_RESTAGE_QUALITY,
@@ -261,8 +279,13 @@ def restage_photo(
     transcript: str = "",
     style: RestageStyle = "simple",
     size: tuple[int, int] = (1080, 1080),
+    reference: str = "",
 ) -> RestageResult:
-    """사진을 광고 촬영본으로 재연출한다. 실패하면 안전 보정본으로 끝낸다."""
+    """사진을 광고 촬영본으로 재연출한다. 실패하면 안전 보정본으로 끝낸다.
+
+    `reference` 를 주면 그 분위기까지 함께 반영한다 — 사장님이 실제 상품 사진과
+    레퍼런스를 **둘 다** 올린 경우다 (3번 + 2번).
+    """
     try:
         image = _openai_restage(
             photo,
@@ -274,6 +297,7 @@ def restage_photo(
             transcript=transcript,
             style=style,
             size=size,
+            reference=reference,
         )
         return RestageResult(image=image, staged=True)
     except Exception:  # noqa: BLE001 — 외부 편집 실패가 광고 전체를 막으면 안 된다
