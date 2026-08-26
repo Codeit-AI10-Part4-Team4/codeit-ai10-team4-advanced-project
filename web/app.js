@@ -215,13 +215,11 @@ async function startImages() {
   for (const im of M.images) {
     S.jobs[im.style] = { status: 'queued', sec: 0 };
     try {
-      const res = await fetch(`${API_BASE}/ads/image`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...body, style: im.style, output_type: OUTPUT_TYPE[im.style] }),
+      // api() 로 부른다 — 토큰을 싣는 창구가 여기 하나다. 직접 fetch 를 쓰면
+      // Authorization 이 빠져서 서버가 인증을 걸 수 없다 (수호님 보안 점검 S1).
+      const { job_id: jobId } = await api('/ads/image', {
+        ...body, style: im.style, output_type: OUTPUT_TYPE[im.style],
       });
-      if (!res.ok) throw new Error(`등록 실패 ${res.status}`);
-      const { job_id: jobId } = await res.json();
       S.jobs[im.style].jobId = jobId;
       pollJob(im.style, jobId);
     } catch (e) {
@@ -249,9 +247,12 @@ async function pollJob(style, jobId) {
   while (busy(S.jobs[style])) {
     await new Promise((r) => setTimeout(r, 2000));
     try {
-      const res = await fetch(`${API_BASE}/jobs/${jobId}`);
-      if (res.status === 404) throw new Error('작업이 사라졌습니다. 다시 만들어주세요.');
-      const st = await res.json();
+      // 여기도 api() 다. 서버를 재시작하면 작업이 사라져 404 가 온다.
+      const st = await api(`/jobs/${jobId}`).catch((err) => {
+        throw err.status === 404
+          ? new Error('작업이 사라졌습니다. 다시 만들어주세요.')
+          : err;
+      });
       const j = S.jobs[style];
       if (st.status === 'done') {
         S.jobs[style] = { status: 'done', url: st.image_url, sec: Math.round(st.elapsed_ms / 1000) };
@@ -321,7 +322,7 @@ const SCREENS = {
         <form class="stack" data-login>
           <div class="stack--s">
             <div class="field"><label for="em">아이디</label>
-              <input id="em" name="username" autocomplete="username" placeholder="sajang@example.com" required></div>
+              <input id="em" name="username" autocomplete="username" placeholder="사장님아이디" required></div>
             <div class="field"><label for="pw">비밀번호</label>
               <input id="pw" name="password" type="password" autocomplete="current-password" placeholder="••••••••" required></div>
           </div>
@@ -350,9 +351,9 @@ const SCREENS = {
         <form class="stack" data-signup>
           <div class="stack--s">
             <div class="field"><label for="su-em">아이디</label>
-              <input id="su-em" name="username" autocomplete="username" placeholder="sajang@example.com" required></div>
+              <input id="su-em" name="username" autocomplete="username" placeholder="사장님아이디" required></div>
             <div class="field"><label for="su-pw">비밀번호</label>
-              <input id="su-pw" name="password" type="password" autocomplete="new-password" placeholder="8자 이상" required></div>
+              <input id="su-pw" name="password" type="password" autocomplete="new-password" placeholder="8자 이상" minlength="8" required></div>
             <div class="field"><label for="su-pw2">비밀번호 확인</label>
               <input id="su-pw2" name="password2" type="password" autocomplete="new-password" required></div>
           </div>
@@ -408,6 +409,11 @@ const SCREENS = {
     bar: true, back: 'stores',
     render: () => `
       <form class="stack" data-store-new>
+        <!-- 등록 실패는 여기에 남는다. 토스트는 2초 뒤 사라지고 화면 아래쪽에 떠서,
+             주소칸을 보고 있는 사장님에게는 "버튼이 안 눌린 것"으로 보인다
+             (수호님 점검 5번). -->
+        <div class="note note--flag" data-form-error hidden></div>
+
         <div class="field"><label for="sn-name">상호</label>
           <input id="sn-name" name="name" placeholder="행복한 순대국" required></div>
 
@@ -525,8 +531,8 @@ const SCREENS = {
   },
 
   // 문구 만들기와 손님 평가는 실제로도 두 단계다 — 평가가 비싸기 때문이다.
-  // 후보 1건당 손님 12명을 부르니 셋이면 36콜. 문구만 보고 마음에 안 들면
-  // 평가 없이 여기서 바로 다시 만들 수 있어야 한다.
+  // 후보 1건당 그 동네 손님 수만큼 부르니 셋이면 그 세 배다. 문구만 보고
+  // 마음에 안 들면 평가 없이 여기서 바로 다시 만들 수 있어야 한다.
   copy: {
     title: '문구 후보',
     bar: true, back: 'chat',
@@ -550,7 +556,10 @@ const SCREENS = {
 
         <div class="rule stack--s">
           <button class="btn" data-go="panel">동네 손님들에게 셋 다 보여주기</button>
-          <p class="muted" style="text-align:center">손님 12명이 셋을 다 봅니다. 1분쯤 걸립니다.</p>
+          <!-- 인원을 여기서 못 박지 않는다. 손님 수는 상권마다 다르고(실측 300조합 중
+               26%가 12명이 아니었다) 누르기 전에는 아직 모른다. 결과 화면의 band() 가
+               실제 인원을 말한다. -->
+          <p class="muted" style="text-align:center">동네 손님들이 셋을 다 봅니다. 1분쯤 걸립니다.</p>
         </div>
 
         ${revise()}
@@ -614,7 +623,10 @@ const SCREENS = {
               <div class="card${i === 0 ? ' card--pick' : ''}">
                 <div style="display:flex;justify-content:space-between;align-items:baseline">
                   <strong class="data" style="color:${i === 0 ? 'var(--accent)' : 'var(--ink-2)'};font-weight:700">${i + 1}위</strong>
-                  <span class="data">방문의향 ${c.intent}</span>
+                  <!-- 절대 점수는 안 보여준다 — "54점"이 좋은지 나쁜지 말할 수 없다.
+                       실측에서 방문의향이 49.7~54.0 사이에만 머물렀다. 후보끼리의
+                       차이만 쓸 수 있다. app.py 의 _rank_line 과 같은 규칙 (#73). -->
+                  ${i === 0 && gap >= 2 ? '<span class="data">🏆 손님들이 가장 반응한 문구</span>' : ''}
                 </div>
                 <strong style="font-size:18px;letter-spacing:-.02em;line-height:1.35">${esc(c.headline)}</strong>
                 <span class="muted" style="font-size:14px">${esc(c.sub)}</span>
@@ -688,7 +700,10 @@ const SCREENS = {
           ${M.images.map((im) => imageCard(im)).join('')}
         </div>
 
-        <p class="muted">GPU를 찾지 못해 CPU로 만들었습니다. GPU가 있으면 훨씬 빠릅니다.</p>
+        <!-- 무엇으로 만들었는지는 화면이 모른다. 서버의 image_backend.pop_notices()
+             는 아직 API 로 안 나온다 — 실패했을 때도, OpenAI 로 만들었을 때도 "CPU로
+             만들었습니다"가 뜨던 자리다 (수호님 점검 6번). 늘 참인 말만 남긴다. -->
+        <p class="muted">GPU가 없는 컴퓨터에서는 더 걸립니다.</p>
         <button class="btn btn--line" data-make>사진만 다시 만들기</button>
         <p class="muted rule">문구를 바꾸려면 손님 반응 화면에서 다른 것을 고르세요 —
           사진은 그대로 두고 글자만 다시 얹습니다.</p>
@@ -1058,14 +1073,25 @@ async function addStore(form) {
     industry_note: form.industry_note.value.trim(),
   };
 
+  const 오류 = $('[data-store-new] [data-form-error]');
+  const 알린다 = (msg) => {
+    if (오류) { 오류.textContent = msg; 오류.hidden = false; }
+    toast(msg);
+  };
+  if (오류) 오류.hidden = true;
+
   if (!API_BASE || !TOKEN.get()) {
+    // 서버 없이 도는 시연이라도 규칙은 같아야 한다. 여기서 안 보면 부산 주소가
+    // 그냥 등록되고, 상권을 찾을 때가 되어서야 조용히 실패한다.
+    // 규칙 원본은 서버의 StoreInput._seoul_only 다.
+    if (!body.address.startsWith('서울')) { 알린다('지금은 서울 주소만 지원합니다'); return; }
     S.stores.push(body);
     S.store = body;
   } else {
     try {
       S.store = await api('/stores', body);
       await loadStores();
-    } catch (e) { toast(e.message); return; }
+    } catch (e) { 알린다(e.message); return; }
   }
   rememberStore(S.store);
 

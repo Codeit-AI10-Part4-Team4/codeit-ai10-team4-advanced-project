@@ -22,12 +22,12 @@ def _brief() -> AdBrief:
 
 
 def _both_backends(monkeypatch, fake):
-    """로컬 배경 생성과 새 이미지 백엔드를 같은 대역으로 바꾼다.
+    """이미지 백엔드를 대역으로 바꾼다 — 이제 문이 하나다.
 
-    포스터형은 generate_background를 사용하고,
-    감성형은 generate_scene을 사용하므로 둘 다 막아야 실제 모델이 호출되지 않는다.
+    예전에는 포스터형이 generate_background 를, 감성형이 generate_scene 을 써서
+    둘 다 막아야 했다. 그 갈림이 곧 버그였다 — 포스터만 IMAGE_PROFILE 을 무시하고
+    늘 sd-turbo 로 갔다. 지금은 둘 다 generate_scene 을 지난다.
     """
-    monkeypatch.setattr(pipeline, "generate_background", fake)
     monkeypatch.setattr(pipeline, "generate_scene", fake)
 
 
@@ -206,10 +206,6 @@ def test_감성형_배경은_이미지_백엔드가_그린다(monkeypatch):
     """감성형 배경이 새 이미지 백엔드를 거치는지 확인한다."""
     _simple_ready(monkeypatch)
 
-    def _wrong_door(prompt):
-        raise AssertionError("감성형이 백엔드를 거치지 않고 로컬 모델을 직접 불렀다")
-
-    monkeypatch.setattr(pipeline, "generate_background", _wrong_door)
     monkeypatch.setattr(
         pipeline,
         "generate_scene",
@@ -220,6 +216,35 @@ def test_감성형_배경은_이미지_백엔드가_그린다(monkeypatch):
 
     assert isinstance(materials, pipeline.SimpleMaterials)
     assert materials.background.size == (1080, 1080)
+
+
+def test_포스터_주인공도_이미지_백엔드를_거친다(monkeypatch):
+    """포스터의 주인공 이미지가 IMAGE_PROFILE 을 보는 문으로 나가는지 본다.
+
+    generate_background 를 직접 부르던 시절에는 openai 프로필에서도 늘 sd-turbo
+    로 갔다. 확산 모델이 안 깔린 노트북에서는 감성형은 되는데 **포스터만**
+    "No module named 'diffusers'" 로 죽었다 (수호님 점검 13번).
+    """
+    _simple_ready(monkeypatch)
+    불린_프롬프트 = []
+
+    def _scene(prompt):
+        불린_프롬프트.append(prompt)
+        return Image.new("RGB", (512, 512))
+
+    monkeypatch.setattr(pipeline, "generate_scene", _scene)
+    monkeypatch.setattr(
+        pipeline,
+        "plan_poster",
+        lambda **k: PosterPlan(
+            tagline="t", badge="b", date_line="", features=["a|b"], event="", palette="warm_bakery"
+        ),
+    )
+
+    materials = pipeline.prepare_materials(_brief(), _store(), "poster")
+
+    assert isinstance(materials, pipeline.PosterMaterials)
+    assert 불린_프롬프트, "포스터 주인공이 이미지 백엔드를 안 거쳤다"
 
 
 def test_레퍼런스와_스케치를_같이_쓸_수_있다(tmp_path, monkeypatch):
@@ -264,7 +289,6 @@ def test_사진을_올린_감성형은_OpenAI에서_광고_재촬영한다(tmp_p
     monkeypatch.setattr(pipeline, "restage_photo", _restage)
     monkeypatch.setattr(pipeline, "remove_background", _forbidden)
     monkeypatch.setattr(pipeline, "generate_scene", _forbidden)
-    monkeypatch.setattr(pipeline, "generate_background", _forbidden)
     monkeypatch.setattr(photo_router, "route_photo", _forbidden)
 
     materials = pipeline.prepare_materials(

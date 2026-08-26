@@ -81,9 +81,11 @@ class StoreInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     industry: str = Field(description="industries.yaml 의 id — 예: cafe")
-    name: str = Field(min_length=1, description="상호")
+    # 상한이 없으면 100자짜리 상호가 그대로 등록돼 주문서·포스터에서 세 줄로 접힌다.
+    # 글자 종류는 막지 않는다 — "카페 & 베이커리", "8番", "S/S" 같은 실제 상호가 걸린다.
+    name: str = Field(min_length=1, max_length=40, description="상호")
     address: str = Field(default="서울", min_length=2, description="주소. 상권 조회의 출발점")
-    phone: str = Field(default="", description="전단지·POP 에 넣는다")
+    phone: str = Field(default="", max_length=30, description="전단지·POP 에 넣는다")
     industry_note: str = Field(
         default="", description="업종이 other 일 때 사장님이 직접 적은 업종명"
     )
@@ -103,6 +105,23 @@ class StoreInput(BaseModel):
         v = v.strip()
         if not v.startswith("서울"):
             raise ValueError("지금은 서울 주소만 지원합니다")
+        return v
+
+    @field_validator("phone")
+    @classmethod
+    def _looks_like_phone(cls, v: str) -> str:
+        """전단지·POP 에 **그대로** 실리는 값이라 모양은 보고 넘긴다.
+
+        형식을 하나로 못 박지는 않는다 — 02-000-0000, 010 0000 0000, +82 2 …
+        가 다 쓰인다. 숫자가 8~15개이고 전화번호에 쓰는 기호만 있으면 통과다.
+        """
+        v = v.strip()
+        if not v:
+            return v  # 연락처는 선택이다
+        if not all(c.isdigit() or c in "-+() ." for c in v):
+            raise ValueError("연락처는 숫자와 -, +, ( ) 만 쓸 수 있습니다")
+        if not 8 <= sum(c.isdigit() for c in v) <= 15:
+            raise ValueError("연락처의 숫자가 너무 짧거나 깁니다")
         return v
 
     @model_validator(mode="after")
