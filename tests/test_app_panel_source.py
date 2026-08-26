@@ -197,6 +197,56 @@ def test_정상이면_경고를_띄우지_않는다(monkeypatch: pytest.MonkeyPa
     assert not screen.info
 
 
+def test_가격을_안_물어봤으면_그렇다고_말한다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ "가격 걸림돌 0명" 과 "가격을 안 물어봤음" 은 다르다.
+
+    문구에 금액이 없으면 손님에게 객단가를 안 보여주고, 되묻고, 분류에도
+    "price 는 고를 수 없다" 가 붙어서 `price` 가 **구조적으로** 0 이 된다.
+    화면이 조용하면 사장님은 그 0 을 "가격은 문제없다" 로 읽는다.
+
+    실측(2026-08-25, 같은 주문서 18,000원 · 문구만 교체):
+    금액 있음 price 12/12 · 금액 없음 0/12. 그리고 금액 없음 쪽 손님들은
+    "가격이 없어서 가볼 마음이 잘 안 생깁니다" 라고 답했다 — 가격이
+    괜찮았던 게 아니라 **못 봤던** 것이다.
+    """
+    screen = Screen().install(monkeypatch)
+    app._panel_source(_result(price_axis_closed=True, top_resistance=["message"]))
+    joined = "\n".join(screen.info)
+    assert "물어보지 않았습니다" in joined
+    assert "금액을 넣고" in joined
+
+
+def test_가격을_물어봤으면_그_말은_안_한다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """문구에 금액이 있으면 이 배지는 안 뜬다 — 뜨면 거짓말이다."""
+    screen = Screen().install(monkeypatch)
+    app._panel_source(_result())
+    assert not screen.info
+
+
+def test_가격_배지는_신뢰도와_무관하다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """축 하나를 안 쓴 것이지 평가가 부실한 게 아니다.
+
+    사유 목록(`confidence_reasons`)에 넣으면 `confidence` 가 같이 "low" 로
+    떨어진다 — 그 목록의 뜻은 **"이 평가를 믿기 어렵다"** 이고, 여기는
+    그 뜻이 아니다. `is_category_fallback` 과 같은 층의 플래그로 둔 이유다.
+    """
+    screen = Screen().install(monkeypatch)
+    app._panel_source(_result(price_axis_closed=True))
+    assert not screen.warning
+
+
+def test_주소를_못_찾아도_가격_배지는_따로_뜬다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """폴백 두 개는 센 쪽 하나만 말하지만, 가격 축은 다른 얘기다.
+
+    "어느 동네 손님인가" 와 "가격을 물어봤는가" 는 겹치지 않는다. 한쪽이
+    켜졌다고 다른 쪽을 숨기면 사장님이 못 듣는 사실이 생긴다.
+    """
+    screen = Screen().install(monkeypatch)
+    app._panel_source(_result(is_fallback=True, price_axis_closed=True))
+    assert "서울 평균" in "\n".join(screen.warning)
+    assert "물어보지 않았습니다" in "\n".join(screen.info)
+
+
 # ── 실패했을 때 안내가 남는가 ──────────────────────────────────────
 #
 # 귀한님이 통합 스모크에서 찾은 것(2026-08-19): 카카오 키가 없는 환경에서

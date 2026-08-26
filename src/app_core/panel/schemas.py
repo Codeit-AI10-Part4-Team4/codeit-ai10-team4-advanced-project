@@ -372,6 +372,19 @@ class EvaluationResult(BaseModel):
     is_fallback: bool
     #: 업종 폴백 여부. 화면에 "이 동네 전체 손님 기준" 배지를 띄우는 근거.
     is_category_fallback: bool = False
+    #: 문구에 금액이 없어 가격 축을 닫고 평가했는지 (`contrast.price_visible`).
+    #:
+    #: **"가격 걸림돌 0명" 과 "가격을 안 물어봤음" 은 다르다.** 축을 닫으면
+    #: 손님에게 객단가를 안 보여주고, 되묻고, 분류에도 "price 는 고를 수 없다"
+    #: 가 붙어서 `price` 가 구조적으로 0 이 된다. 사장님이 그 0 을 "가격은
+    #: 문제없다" 로 읽으면 안 되므로 화면이 구분해서 말해야 한다.
+    #:
+    #: 실측(2026-08-21, 같은 주문서 18,000원 · 문구만 교체):
+    #: 금액 있음 price 9/12 · 금액 없음 price 0/12.
+    #:
+    #: 신뢰도가 아니라 **배지**다 — `is_category_fallback` 과 같은 층이다.
+    #: 평가가 부실한 게 아니라 축 하나를 안 쓴 것이라 점수는 그대로 낸다.
+    price_axis_closed: bool = False
     demo_coverage: float
     #: 평가 전체에 걸린 시간(ms). 07 R4 의 30초 예산을 지켰는지 결과가 스스로 말한다.
     elapsed_ms: int = 0

@@ -103,6 +103,7 @@ def aggregate(
     elapsed_ms: int = 0,
     sigma_max: float = DEFAULT_SIGMA_MAX,
     include_boundary_in_scores: bool = False,
+    price_axis_closed: bool = False,
 ) -> EvaluationResult:
     """평가 응답을 검증·집계해 결과를 만든다.
 
@@ -122,6 +123,10 @@ def aggregate(
         sigma_max: 이 값을 넘는 가중 표준편차면 `confidence="low"`.
         include_boundary_in_scores: 경계 페르소나를 점수에 넣을지.
             기본값 False가 07 §7.1의 설계다.
+        price_axis_closed: 문구에 금액이 없어 가격 축을 닫고 평가했는지.
+            **신뢰도에 넣지 않는다** — `is_category_fallback` 과 같은 이유로
+            평가가 부실한 게 아니라 축 하나를 안 쓴 것이다. 집계는 판정하지
+            않고 호출 단계의 판정(`contrast.price_visible`)을 실어 나른다.
 
     Raises:
         AggregationError: 점수를 낼 응답이 하나도 남지 않은 경우.
@@ -194,6 +199,7 @@ def aggregate(
     # 달라져야 하므로 사유를 따로 남긴다.
     # 업종 폴백(is_category_fallback)은 여기 넣지 않는다 — 정밀도가 낮아질 뿐
     # "우리 동네" 그라운딩은 유지되므로 신뢰 불가가 아니다 (07 §4.5).
+    # 가격 축을 닫은 것(price_axis_closed)도 같은 이유로 안 넣는다.
     reasons: list[str] = list(extra_reasons or [])
     if len(scored) < MIN_SCORED_PERSONAS:
         reasons.append(
@@ -236,6 +242,7 @@ def aggregate(
         quarter=features.quarter,
         is_fallback=features.is_fallback,
         is_category_fallback=features.is_category_fallback,
+        price_axis_closed=price_axis_closed,
         demo_coverage=features.demo_coverage,
         elapsed_ms=elapsed_ms,
     )
