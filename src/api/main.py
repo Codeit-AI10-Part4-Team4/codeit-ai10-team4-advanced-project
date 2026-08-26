@@ -18,11 +18,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, model_validator
 
 from api import jobs, session
-from app_core import ads, auth, copy_gen, llm, registry, stores
+from app_core import ads, auth, chat, copy_gen, llm, registry, stores
 from app_core.panel.aggregate import AggregationError
 from app_core.panel.features import NoTradeAreaError, build_features
 from app_core.panel.review import CLEAR_MARGIN, rank
-from app_core.schema import AdBrief, CopyCandidate, OutputType, Store, StoreInput, needs_copy
+from app_core.schema import (
+    AdBrief,
+    AdBriefDraft,
+    ChatTurn,
+    CopyCandidate,
+    OutputType,
+    Store,
+    StoreInput,
+    needs_copy,
+)
 
 app = FastAPI(title="codeit-ai10-team4-advanced-project")
 
@@ -171,6 +180,14 @@ class ImageRequest(BaseModel):
     output_type: OutputType
     #: 업종이 other 일 때 사장님이 직접 적은 업종명
     industry_note: str = ""
+    #: 포스터 하단에 **그대로 인쇄되는** 줄이다 (app_core.pipeline._info_line).
+    #:
+    #: 기본값은 StoreInput 과 같은 "서울" 이다 — 안 보내던 호출자는 지금과 똑같이
+    #: 동작한다. 이 값이 없어서 상권은 진짜 주소로 도는데 포스터에 찍히는 글자만
+    #: "서울" 이었다. 사장님이 전단지로 뽑으면 주소가 "서울" 인 광고가 나온다.
+    address: str = Field(default="서울", min_length=2)
+    #: 없으면 포스터에서 그 자리를 통째로 뺀다 — 빈 구분자가 남지 않는다.
+    phone: str = ""
 
     @model_validator(mode="after")
     def _copy_needed_when_text(self) -> ImageRequest:
@@ -236,6 +253,8 @@ def _render(req: ImageRequest) -> Any:
             name=req.store_name,
             industry=req.industry,
             industry_note=req.industry_note,
+            address=req.address,
+            phone=req.phone,
         ),
         req.output_type,
         copy,
@@ -435,6 +454,36 @@ def _review(store: Store, body: ReviewRequest) -> dict[str, Any]:
             for r in ranked
         ],
     }
+
+
+# ── 대화 ────────────────────────────────────────────────────────
+# chat.respond 가 무상태다 — 주문서를 받아 갱신해 돌려준다. 그래서 서버가 대화
+# 상태를 들지 않고, 화면이 주문서를 들고 다닌다. 여러 대로 띄워도 아무 데나 붙어도
+# 되고, 서버를 재시작해도 하던 대화가 안 끊긴다.
+
+
+class ChatBody(BaseModel):
+    store_id: int
+    utterance: str = Field(min_length=1, max_length=2000, description="사장님이 한 말")
+    #: 첫 턴이면 비운다. 이후로는 직전 응답의 draft 를 그대로 돌려보낸다.
+    draft: AdBriefDraft = Field(default_factory=AdBriefDraft)
+
+
+@app.post("/chat")
+def chat_turn(body: ChatBody, user_id: int = Depends(current_user)) -> ChatTurn:
+    """사장님 말 한 마디 → 갱신된 주문서와 다음 질문.
+
+    작업 큐를 안 쓰는 이유: 한 턴이 LLM 한 번이라 몇 초다. 등록-폴링을 끼우면
+    대화가 그만큼 늦어지는데, 대화만은 즉답처럼 느껴져야 한다.
+    """
+    store = _my_store(user_id, body.store_id)
+    try:
+        return chat.respond(body.draft, body.utterance, store)
+    except Exception as exc:
+        # 여기서 안 잡으면 화면에 "/chat → 500" 이 뜬다. 사장님이 읽을 문장이 아니다.
+        raise HTTPException(
+            503, "지금은 대답을 만들지 못했습니다. 잠시 뒤 다시 말씀해주세요."
+        ) from exc
 
 
 @app.post("/ads/copies", status_code=202)

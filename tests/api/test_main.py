@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api import jobs
-from api.main import app
+from api.main import ImageRequest, app
 
 client = TestClient(app)
 
@@ -135,6 +135,55 @@ def test_끝나기_전에는_이미지를_안_준다() -> None:
 
     job = jobs.submit(아직)
     assert client.get(f"/jobs/{job.id}/image").status_code == 404
+
+
+def test_포스터에_찍히는_주소는_가게_주소다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """상권 조회는 진짜 주소로 도는데 **포스터에 인쇄되는 글자만** 기본값이었다.
+
+    ImageRequest 에 주소가 없어서 Store 가 StoreInput 의 기본값("서울")을 썼다.
+    사장님이 전단지로 뽑으면 주소가 "서울" 인 광고가 나온다.
+    """
+    from api import main as api_main
+    from app_core import pipeline
+
+    받은: dict[str, Any] = {}
+
+    def _fake(brief: Any, store: Any, output_type: Any, copy: Any) -> str:
+        받은["address"] = store.address
+        받은["phone"] = store.phone
+        return "그린 셈 친다"
+
+    monkeypatch.setattr(pipeline, "generate_output", _fake)
+
+    api_main._render(
+        api_main.ImageRequest(
+            store_name="망원 백반집",
+            industry="korean_food",
+            product="김치찌개 백반",
+            price=9000,
+            headline="퇴근길 한 그릇",
+            output_type="emotional_text",
+            address="서울시 마포구 망원동 57-8",
+            phone="02-1234-5678",
+        )
+    )
+
+    assert 받은["address"] == "서울시 마포구 망원동 57-8"
+    assert 받은["phone"] == "02-1234-5678"
+
+
+def test_주소를_안_보내면_예전처럼_동작한다() -> None:
+    """기본값을 StoreInput 과 같게 뒀다 — 낡은 호출자가 422 로 죽지 않는다."""
+    assert (
+        ImageRequest(
+            store_name="가게",
+            industry="cafe",
+            product="크로플",
+            price=0,
+            output_type="emotional_no_text",
+        ).address
+        == "서울"
+    )
 
 
 def test_이미지_요청은_필수값이_빠지면_거절한다() -> None:
@@ -389,3 +438,54 @@ def test_이미지_작업은_json_결과를_싣지_않는다() -> None:
     body = _wait(job.id)
     assert body["result"] is None
     assert body["image_url"] == f"/jobs/{job.id}/image"
+
+
+# ── 대화 ────────────────────────────────────────────────────────
+# 실제 LLM 은 부르지 않는다. conftest 가 MODEL_PROFILE 을 stub 으로 고정하므로
+# 뽑아내기는 안 되지만, **무엇을 물을지는 코드가 정하므로** 그 부분은 그대로 돈다.
+
+
+def test_대화는_로그인해야_한다() -> None:
+    assert client.post("/chat", json={"store_id": 1, "utterance": "안녕하세요"}).status_code == 401
+
+
+def test_남의_가게로는_대화를_못_한다() -> None:
+    mine, other = _signup("사장님10"), _signup("사장님11")
+    store_id = _store_of(mine)
+    res = client.post(
+        "/chat", headers=_bearer(other), json={"store_id": store_id, "utterance": "안녕하세요"}
+    )
+    assert res.status_code == 404
+
+
+def test_빈_말은_거절한다() -> None:
+    token = _signup("사장님12")
+    res = client.post(
+        "/chat", headers=_bearer(token), json={"store_id": _store_of(token), "utterance": ""}
+    )
+    assert res.status_code == 422
+
+
+def test_주문서를_주고받으며_대화가_이어진다() -> None:
+    """서버가 대화 상태를 들지 않는다. 화면이 주문서를 들고 다니고, 서버는
+    받은 주문서를 갱신해 돌려준다 — 그래서 서버를 재시작해도 대화가 안 끊긴다."""
+    token = _signup("사장님13")
+    store_id = _store_of(token)
+
+    first = client.post(
+        "/chat", headers=_bearer(token), json={"store_id": store_id, "utterance": "순대국 팔아요"}
+    )
+    assert first.status_code == 200
+    turn = first.json()
+    assert turn["message"]  # 비어 있으면 화면에 빈 말풍선이 뜬다
+    assert "product" in turn["draft"]["asked"]  # 물어본 것을 기록해야 같은 걸 두 번 안 묻는다
+    assert "순대국 팔아요" in turn["draft"]["transcript"]  # 한 말은 문구 생성으로 넘어간다
+
+    # 받은 주문서를 그대로 돌려보내면 이어진다
+    second = client.post(
+        "/chat",
+        headers=_bearer(token),
+        json={"store_id": store_id, "utterance": "8천원이요", "draft": turn["draft"]},
+    )
+    assert second.status_code == 200
+    assert "8천원이요" in second.json()["draft"]["transcript"]
