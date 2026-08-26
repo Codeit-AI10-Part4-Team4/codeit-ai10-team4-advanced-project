@@ -573,7 +573,13 @@ const SCREENS = {
       const r = M.result;
       const people = r.persona_comments;
       const total = people.length + r.excluded_cnt;
-      const gap = M.copies[0].intent - M.copies[1].intent;
+      // ⚠️ 화면상 2위가 아니라 **나머지 전체 중 가장 높은** 방문의향과 견준다.
+      //    같은 방문의향 무리 안에서는 결함·눈길로 순서를 다시 정하므로, 화면상
+      //    2위가 가장 가까운 경쟁자라는 보장이 없다. 54.0 / 51.0 / 52.5 면
+      //    화면상 2위와는 3.0 차라 배지가 붙지만 실제로는 1.5 차다.
+      //    서버의 review.has_clear_winner 와 같은 규칙이다 (#73 · 수호님 #80 리뷰).
+      const nearest = Math.max(...M.copies.slice(1).map((c) => c.intent));
+      const gap = M.copies[0].intent - nearest;
 
       const badges = [
         r.is_fallback
