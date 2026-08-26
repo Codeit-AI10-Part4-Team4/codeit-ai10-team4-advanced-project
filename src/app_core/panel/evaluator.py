@@ -947,6 +947,7 @@ def evaluate(
         failed_ids=failed_ids + timed_out,
         contrast_notes=notes,
         extra_reasons=extra_reasons,
+        price_axis_closed=not price_visible(brief, copy),
         elapsed_ms=int((time.perf_counter() - started) * 1000),
         sigma_max=sigma_max,
     )
