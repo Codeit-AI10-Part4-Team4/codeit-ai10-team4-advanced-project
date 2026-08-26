@@ -15,7 +15,6 @@ from PIL import Image, ImageOps
 from app_core import photo_store, ref_style, sketch_gen
 from app_core.background import remove_background
 from app_core.compose import compose_ad, compose_no_text
-from app_core.gen_background import generate_background
 from app_core.image_backend import generate_scene, restage_photo
 from app_core.image_backend import profile as image_profile
 from app_core.photo_enhance import enhance_uploaded_photo
@@ -248,7 +247,9 @@ def _poster_materials(brief: AdBrief, store: Store, product: Image.Image | None)
         hero_prompt = build_hero_prompt(store.industry_label, brief.product, brief.tone)
         # 레퍼런스는 여기에도 얹는다 — 배경만 분위기를 따르고 주인공은 안 따르면
         # 한 장 안에서 두 느낌이 부딪힌다.
-        product = generate_background(_with_reference(brief, hero_prompt)).convert("RGBA")
+        # 감성형과 같은 백엔드 관문을 거친다. 로컬 생성기를 직접 부르면
+        # IMAGE_PROFILE=openai 여도 포스터만 diffusers 를 요구하게 된다.
+        product = generate_scene(_with_reference(brief, hero_prompt)).convert("RGBA")
 
     plan = plan_poster(
         shop=store.name,

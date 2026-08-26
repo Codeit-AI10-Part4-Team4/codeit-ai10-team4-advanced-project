@@ -22,12 +22,7 @@ def _brief() -> AdBrief:
 
 
 def _both_backends(monkeypatch, fake):
-    """로컬 배경 생성과 새 이미지 백엔드를 같은 대역으로 바꾼다.
-
-    포스터형은 generate_background를 사용하고,
-    감성형은 generate_scene을 사용하므로 둘 다 막아야 실제 모델이 호출되지 않는다.
-    """
-    monkeypatch.setattr(pipeline, "generate_background", fake)
+    """이미지 백엔드를 대역으로 바꿔 실제 모델 호출을 막는다."""
     monkeypatch.setattr(pipeline, "generate_scene", fake)
 
 
@@ -85,6 +80,38 @@ def test_poster_style_without_photo_generates_hero(monkeypatch):
     brief = AdBrief(goal="image", product="꽃다발", price=0, photo_id=None)
     ad = pipeline.generate_ad(brief, _store(), CopyCandidate(headline="봄 꽃다발"), "poster")
     assert ad.size == (1080, 1080)
+
+
+def test_사진_없는_포스터도_OpenAI_프로필_백엔드를_거친다(monkeypatch):
+    """포스터만 로컬 생성기를 직행하면 GPU 없는 OpenAI 배포에서 실패한다."""
+    monkeypatch.setenv("IMAGE_PROFILE", "openai")
+    monkeypatch.setattr(pipeline, "build_hero_prompt", lambda *a, **k: "hero prompt")
+    seen: dict[str, str] = {}
+
+    def _scene(prompt):
+        seen["prompt"] = prompt
+        return Image.new("RGB", (512, 512), (20, 40, 60))
+
+    def _local(*args, **kwargs):
+        raise AssertionError("OpenAI 프로필인데 포스터가 로컬 diffusers 경로를 탔다")
+
+    monkeypatch.setattr(pipeline, "generate_scene", _scene)
+    # 과거 구현의 직접 호출 이름이 다시 생겨도 이 테스트가 잡는다.
+    monkeypatch.setattr(pipeline, "generate_background", _local, raising=False)
+    monkeypatch.setattr(
+        pipeline,
+        "plan_poster",
+        lambda **kwargs: PosterPlan(
+            tagline="t", badge="", date_line="", features=[], event="", palette="fresh_mint"
+        ),
+    )
+
+    materials = pipeline.prepare_materials(_brief(), _store(), "poster")
+
+    assert isinstance(materials, pipeline.PosterMaterials)
+    assert seen["prompt"] == "hero prompt"
+    assert materials.product is not None
+    assert materials.product.mode == "RGBA"
 
 
 # ── 레퍼런스(2번) · 스케치(4번) 연결 ──────────────────────────
@@ -209,7 +236,7 @@ def test_감성형_배경은_이미지_백엔드가_그린다(monkeypatch):
     def _wrong_door(prompt):
         raise AssertionError("감성형이 백엔드를 거치지 않고 로컬 모델을 직접 불렀다")
 
-    monkeypatch.setattr(pipeline, "generate_background", _wrong_door)
+    monkeypatch.setattr(pipeline, "generate_background", _wrong_door, raising=False)
     monkeypatch.setattr(
         pipeline,
         "generate_scene",
@@ -264,7 +291,7 @@ def test_사진을_올린_감성형은_OpenAI에서_광고_재촬영한다(tmp_p
     monkeypatch.setattr(pipeline, "restage_photo", _restage)
     monkeypatch.setattr(pipeline, "remove_background", _forbidden)
     monkeypatch.setattr(pipeline, "generate_scene", _forbidden)
-    monkeypatch.setattr(pipeline, "generate_background", _forbidden)
+    monkeypatch.setattr(pipeline, "generate_background", _forbidden, raising=False)
     monkeypatch.setattr(photo_router, "route_photo", _forbidden)
 
     materials = pipeline.prepare_materials(
