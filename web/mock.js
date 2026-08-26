@@ -136,9 +136,9 @@ window.MOCK = {
       { persona_id: 'p10', demo: '20대 여성', weight: 0.06, is_boundary: true,  resistance: 'relevance',   comment: '저녁에 이 길을 지나가긴 하는데 국밥을 잘 안 먹어요.' },
     ],
     contrast_notes: [
-      { kind: 'price',       fit: 0.8,  text: '광고에 적힌 <b>8,000원</b>은 이 동네 결제 평균 <b>9,546원</b>보다 낮습니다.', src: '서울시 2026년 1분기 · 객단가' },
-      { kind: 'timing',      fit: 0.21, text: '광고는 <b>저녁</b>을 말하는데, 이 동네는 <b>점심(11–14시)</b>에 가장 많이 팔립니다 — 매출의 42%.', src: '서울시 2026년 1분기 · 시간대별 매출' },
-      { kind: 'competition', fit: null, text: '같은 업종 가게가 <b>34곳</b>, 이번 분기에 <b>3곳 열고 5곳 닫았습니다.</b>', src: '서울시 2026년 1분기 · 점포 수' },
+      { kind: 'price',       fit: 0.8,  text: '광고에 적힌 <b>8,000원</b>은 이 동네 결제 평균 <b>9,546원</b>보다 낮습니다.', evidence: '서울시 2026년 1분기 · 객단가' },
+      { kind: 'timing',      fit: 0.21, text: '광고는 <b>저녁</b>을 말하는데, 이 동네는 <b>점심(11–14시)</b>에 가장 많이 팔립니다 — 매출의 42%.', evidence: '서울시 2026년 1분기 · 시간대별 매출' },
+      { kind: 'competition', fit: null, text: '같은 업종 가게가 <b>34곳</b>, 이번 분기에 <b>3곳 열고 5곳 닫았습니다.</b>', evidence: '서울시 2026년 1분기 · 점포 수' },
     ],
   },
 
