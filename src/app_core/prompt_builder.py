@@ -25,7 +25,10 @@ _SYSTEM = (
 )
 
 # 사진이 없을 때는 반대로 "주인공 자체"를 그린다. _BASE(빈 무대)와 용도가 반대다.
-_HERO_BASE = "professional product photography, centered close-up, soft light, blurred background"
+_HERO_BASE = (
+    "professional product photography, centered close-up, soft light, blurred background, "
+    "no people, no human body parts, no hands, no arms"
+)
 
 _HERO_SYSTEM = (
     "You turn Korean shop-order details into a short English phrase "
@@ -45,7 +48,8 @@ _SCENE_BASE = (
 _SCENE_SAFETY = (
     "preserve factual accuracy; do not invent ingredients, toppings, "
     "components, quantities, quality claims, origin, awards, discounts, "
-    "or packaging claims; no text, logos, watermarks, or people"
+    "or packaging claims; no text, logos, or watermarks; no people, faces, "
+    "human body parts, hands, arms, fingers, human reflections, or human silhouettes"
 )
 
 _SCENE_SYSTEM = (

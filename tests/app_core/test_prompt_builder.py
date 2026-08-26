@@ -51,6 +51,8 @@ def test_촬영프롬프트에_사실성_안전장치가_붙는다() -> None:
     assert "a refreshing watermelon juice photo" in result
     assert "do not invent ingredients" in result
     assert "no text" in result
+    assert "no people" in result
+    assert "hands, arms" in result
 
 
 def test_LLM이_비어도_상품이_프롬프트에_남는다() -> None:
@@ -81,3 +83,6 @@ def test_포스터용_hero는_기존의_짧은_계약을_유지한다() -> None:
 
     assert "at most 12 words" in client.system
     assert result.startswith("fresh watermelon juice")
+    assert "no people" in result
+    assert "no hands" in result
+    assert "no arms" in result
