@@ -74,6 +74,20 @@ class Ranked(NamedTuple):
 CLEAR_MARGIN: Final = 2.0
 
 
+def has_clear_winner(ranked: list[Ranked]) -> bool:
+    """1위가 나머지 **모든 후보**보다 확실히 앞설 때만 참이다.
+
+    같은 방문의향 무리 안에서는 결함·눈길로 순서를 다시 정하므로, 화면상 2위가
+    방문의향 기준으로 가장 가까운 경쟁자라는 보장이 없다. 따라서 정렬된 2위 한
+    명이 아니라 나머지 후보 중 가장 높은 방문의향과 비교한다.
+    """
+    if len(ranked) < 2:
+        return False
+    winner_intent = ranked[0].result.scores.get("intent", 0.0)
+    nearest_intent = max(r.result.scores.get("intent", 0.0) for r in ranked[1:])
+    return winner_intent - nearest_intent >= CLEAR_MARGIN
+
+
 def rank(
     store: Store,
     brief: AdBrief,

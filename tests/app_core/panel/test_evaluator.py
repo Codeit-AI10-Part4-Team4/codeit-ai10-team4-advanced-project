@@ -1786,3 +1786,54 @@ def test_멀쩡한_제안은_그대로_통과한다() -> None:
 
     assert _unbacked_claims("지금 가야 할 이유를 한 줄 넣어보시면 어떨까요", "") == set()
     assert _unbacked_claims("영업시간을 광고에 적어보시면 어떨까요", "") == set()
+
+
+# --- 가격 축이 닫힌 것을 화면이 알아야 한다 (2026-08-21 실측) ----------------
+
+
+def test_closed_price_axis_is_reported(yeoksam: Panel, shop, copy) -> None:
+    """ "가격 걸림돌 0명" 과 "가격을 안 물어봤음" 은 다르다.
+
+    문구에 금액이 없으면 손님에게 객단가를 안 보여주고, 되묻고, 분류에도
+    "price 는 고를 수 없다" 가 붙는다. 그래서 `price` 가 구조적으로 0 이 된다.
+
+    실측(같은 주문서 18,000원 · 문구만 교체): 금액 있음 9/12 · 없음 0/12.
+    사장님이 0 을 "가격은 문제없다" 로 읽으면 안 된다.
+    """
+    brief = AdBrief(goal="copy", product="크로플", price=18000)
+    plain = CopyCandidate(headline="점심 후 달달한 크로플", sub="주문하고 자리 잡으면 나옵니다")
+
+    result = evaluate(
+        yeoksam, shop, brief, plain, client=FakeClient(_reply_by_demo(yeoksam)), consistency_k=1
+    )
+    assert result.price_axis_closed
+
+
+def test_open_price_axis_is_not_reported(yeoksam: Panel, shop) -> None:
+    """문구에 금액이 있으면 플래그가 안 선다."""
+    brief = AdBrief(goal="copy", product="크로플", price=18000)
+    priced = CopyCandidate(headline="점심 후 달달한 크로플", sub="18,000원")
+
+    result = evaluate(
+        yeoksam, shop, brief, priced, client=FakeClient(_reply_by_demo(yeoksam)), consistency_k=1
+    )
+    assert not result.price_axis_closed
+
+
+def test_closed_price_axis_keeps_the_scores(yeoksam: Panel, shop, copy) -> None:
+    """신뢰도를 내리지 않는다 — 평가가 부실한 게 아니라 축 하나를 안 쓴 것이다.
+
+    ⚠️ 이 검사가 처음 이 수정을 잡았다. 사유를 `extra_reasons` 에 넣었더니
+    `confidence="low" if reasons else "ok"` 에 걸려 신뢰도가 같이 떨어졌다.
+    그 목록은 **"이 평가를 믿기 어렵다"** 는 뜻이고, 가격 축을 안 쓴 것은
+    그 뜻이 아니다. `is_category_fallback` 과 같은 층의 플래그로 옮겼다.
+    """
+    brief = AdBrief(goal="copy", product="크로플", price=18000)
+    plain = CopyCandidate(headline="점심 후 달달한 크로플", sub="주문하고 자리 잡으면 나옵니다")
+
+    result = evaluate(
+        yeoksam, shop, brief, plain, client=FakeClient(_reply_by_demo(yeoksam)), consistency_k=1
+    )
+    assert result.scores
+    assert result.confidence == "ok"
+    assert not any("가격" in r for r in result.confidence_reasons)

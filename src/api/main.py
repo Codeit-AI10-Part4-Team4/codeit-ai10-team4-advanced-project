@@ -22,7 +22,16 @@ from app_core import ads, auth, chat, copy_gen, llm, registry, stores
 from app_core.panel.aggregate import AggregationError
 from app_core.panel.features import NoTradeAreaError, build_features
 from app_core.panel.review import CLEAR_MARGIN, rank
-from app_core.schema import AdBrief, AdBriefDraft, ChatTurn, CopyCandidate, Store, StoreInput
+from app_core.schema import (
+    AdBrief,
+    AdBriefDraft,
+    ChatTurn,
+    CopyCandidate,
+    OutputType,
+    Store,
+    StoreInput,
+    needs_copy,
+)
 
 app = FastAPI(title="codeit-ai10-team4-advanced-project")
 
@@ -154,13 +163,34 @@ class ImageRequest(BaseModel):
     #: 원 단위 정수. 화면의 "8,000원"은 보낼 때 숫자로 바꾼다 —
     #: 쉼표·단위를 서버가 풀기 시작하면 "팔천원"까지 받아줘야 한다.
     price: int = Field(ge=0)
-    headline: str = Field(min_length=1)
+    #: 글자 없는 유형은 문구를 안 받는다 — 그래서 여기서 필수가 아니다.
+    #: 문구가 필요한 유형인데 비어 있으면 아래 검증이 막는다.
+    headline: str = ""
     sub: str = ""
     situation: str = ""
     tone: str = ""
-    style: Literal["simple", "poster"] = "simple"
+    #: 사장님이 **대화보다 먼저** 고른 결과물 유형 (화면 STEP 1).
+    #: 어떤 이미지 기능(1~4번)이 도는지는 이 값이 아니라 사진·레퍼런스·스케치를
+    #: 올렸는지가 정한다. 이 값은 **글자를 얹을지**만 정한다.
+    #:
+    #: 🪤 **기본값을 두지 않는다.** `extra="forbid"` 가 없어서 낡은 `style` 키는
+    #: 그냥 무시되는데, 여기에 기본값까지 있으면 낡은 호출자가 **422 가 아니라
+    #: 202** 로 통과한다. 포스터를 고른 사장님이 감성형 한 장을 받고 로그에도
+    #: 안 남는다 (아인님 #77 지적). 필수로 두면 낡은 호출자가 소리를 낸다.
+    output_type: OutputType
     #: 업종이 other 일 때 사장님이 직접 적은 업종명
     industry_note: str = ""
+
+    @model_validator(mode="after")
+    def _copy_needed_when_text(self) -> ImageRequest:
+        # 글자가 들어가는 유형인데 문구가 비면 작업 스레드 안에서 터진다.
+        # 등록 단계에서 막아야 사장님이 한참 기다린 끝에 오류를 보지 않는다.
+        #
+        # 조건을 여기 다시 적지 않고 needs_copy 를 부른다 — 같은 판정이 두 곳에
+        # 있으면 갈렸을 때 한쪽만 통과하는 상태가 생긴다 (#76 리뷰 · #51 선례).
+        if needs_copy(self.output_type) and not self.headline.strip():
+            raise ValueError("글자가 들어가는 결과물은 문구가 있어야 합니다")
+        return self
 
     @model_validator(mode="after")
     def _other_needs_note(self) -> ImageRequest:
@@ -198,7 +228,10 @@ def _render(req: ImageRequest) -> Any:
     확산 모델을 안 쓰는 환경에서도 서버는 떠야 한다."""
     from app_core import pipeline
 
-    return pipeline.generate_ad(
+    copy = (
+        CopyCandidate(headline=req.headline, sub=req.sub) if needs_copy(req.output_type) else None
+    )
+    return pipeline.generate_output(
         AdBrief(
             goal="image",
             product=req.product,
@@ -213,8 +246,8 @@ def _render(req: ImageRequest) -> Any:
             industry=req.industry,
             industry_note=req.industry_note,
         ),
-        CopyCandidate(headline=req.headline, sub=req.sub),
-        style=req.style,
+        req.output_type,
+        copy,
     )
 
 
