@@ -15,7 +15,6 @@ from PIL import Image, ImageOps
 from app_core import photo_store, ref_style, sketch_gen
 from app_core.background import remove_background
 from app_core.compose import compose_ad, compose_no_text
-from app_core.gen_background import generate_background
 from app_core.image_backend import generate_scene, restage_photo
 from app_core.image_backend import profile as image_profile
 from app_core.photo_enhance import enhance_uploaded_photo
@@ -75,6 +74,8 @@ class PosterMaterials:
     plan: PosterPlan  #: 포스터 기획 결과
     shop: str  #: 가게 이름
     info: str  #: 하단 한 줄 (주소·전화)
+    product_name: str  #: 주문서의 홍보 대상
+    price_text: str  #: 주문서 가격. 0원이면 빈 문자열
     staged: bool = False  #: 상품 이미지를 AI 가 그렸는지 → "연출된 이미지" 표기
 
 
@@ -86,6 +87,7 @@ class UploadedPhotoPosterMaterials:
     shop: str
     info: str
     product_name: str
+    price_text: str
     staged: bool = False
 
 
@@ -96,6 +98,11 @@ AdMaterials = SimpleMaterials | PosterMaterials | UploadedPhotoPosterMaterials
 def _info_line(store: Store) -> str:
     """포스터 하단 한 줄 — 없는 항목은 빼고 이어 붙인다."""
     return "  ·  ".join(part for part in (store.address, store.phone) if part)
+
+
+def _price_text(brief: AdBrief) -> str:
+    """가격 0원은 '표시 안 함'이고, 실제 가격만 원 단위로 조판한다."""
+    return f"{brief.price:,}원" if brief.show_price else ""
 
 
 def _safe_uploaded_photo(photo: Image.Image) -> Image.Image:
@@ -240,7 +247,9 @@ def _poster_materials(brief: AdBrief, store: Store, product: Image.Image | None)
         hero_prompt = build_hero_prompt(store.industry_label, brief.product, brief.tone)
         # 레퍼런스는 여기에도 얹는다 — 배경만 분위기를 따르고 주인공은 안 따르면
         # 한 장 안에서 두 느낌이 부딪힌다.
-        product = generate_background(_with_reference(brief, hero_prompt)).convert("RGBA")
+        # 감성형과 같은 백엔드 관문을 거친다. 로컬 생성기를 직접 부르면
+        # IMAGE_PROFILE=openai 여도 포스터만 diffusers 를 요구하게 된다.
+        product = generate_scene(_with_reference(brief, hero_prompt)).convert("RGBA")
 
     plan = plan_poster(
         shop=store.name,
@@ -256,6 +265,8 @@ def _poster_materials(brief: AdBrief, store: Store, product: Image.Image | None)
         plan=plan,
         shop=store.name,
         info=_info_line(store),
+        product_name=brief.product,
+        price_text=_price_text(brief),
         staged=staged,
     )
 
@@ -310,6 +321,7 @@ def prepare_materials(
             shop=store.name,
             info=_info_line(store),
             product_name=brief.product,
+            price_text=_price_text(brief),
             staged=staged,
         )
 
@@ -366,6 +378,7 @@ def render_ad(materials: AdMaterials, copy: CopyCandidate) -> Image.Image:
             headline=copy.headline,
             product_name=materials.product_name,
             sub=copy.sub,
+            price_text=materials.price_text,
             info=materials.info,
             staged=materials.staged,
         )
@@ -380,7 +393,11 @@ def render_ad(materials: AdMaterials, copy: CopyCandidate) -> Image.Image:
             features=plan.features,
             event=plan.event,
             headline=copy.headline,
+            product_name=materials.product_name,
+            sub=copy.sub,
+            price_text=materials.price_text,
             info=materials.info,
+            # 포스터 틀은 통일하고, 색은 기획이 업종·분위기에 맞춰 고른다.
             palette=plan.palette,
             staged=materials.staged,
         )
