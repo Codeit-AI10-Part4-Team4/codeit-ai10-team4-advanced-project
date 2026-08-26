@@ -9,7 +9,6 @@
 """
 
 from dataclasses import dataclass
-from typing import Literal
 
 from PIL import Image, ImageOps
 
@@ -24,9 +23,37 @@ from app_core.photo_router import mask_area, remove_crumbs
 from app_core.poster import generate_poster, generate_uploaded_photo_poster
 from app_core.poster_plan import PosterPlan, plan_poster
 from app_core.prompt_builder import build_bg_prompt, build_hero_prompt, build_scene_prompt
-from app_core.schema import AdBrief, CopyCandidate, Store
+from app_core.schema import (
+    AdBrief,
+    CopyCandidate,
+    OutputType,
+    Store,
+    Style,
+    needs_copy,
+    style_of,
+)
 
-Style = Literal["simple", "poster"]
+# 결과물 유형·조판 형태와 그 판정은 schema 에 있다 — api.main 이 확산 모델을 피해
+# pipeline 을 지연 import 하므로, 요청 검증이 쓸 수 있으려면 가벼운 쪽에 있어야 한다.
+# 여기서 다시 내보내는 것은 기존 호출부(`pipeline.Style` 등)를 위해서다.
+__all__ = [
+    "AdMaterials",
+    "OutputType",
+    "PosterMaterials",
+    "SimpleMaterials",
+    "Style",
+    "UploadedPhotoPosterMaterials",
+    "generate_ad",
+    "generate_no_text_ad",
+    "generate_output",
+    "needs_copy",
+    "prepare_materials",
+    "prepare_output",
+    "render_ad",
+    "render_no_text_ad",
+    "render_output",
+    "style_of",
+]
 
 
 @dataclass(frozen=True)
@@ -85,7 +112,11 @@ def _uploaded_ad_photo(
     store: Store,
     style: Style,
 ) -> tuple[Image.Image, bool]:
-    """OpenAI면 스타일별 광고 재촬영, 로컬이면 비용 없는 안전 보정."""
+    """OpenAI면 스타일별 광고 재촬영, 로컬이면 비용 없는 안전 보정.
+
+    레퍼런스를 같이 올렸으면 그 분위기까지 재촬영 지시에 얹는다 — 사진 보존(3번)과
+    레퍼런스(2번)는 서로를 끄지 않는다.
+    """
     if image_profile() == "openai":
         result = restage_photo(
             photo,
@@ -97,9 +128,28 @@ def _uploaded_ad_photo(
             transcript=brief.raw_utterance,
             style=style,
             size=(1080, 1080) if style == "simple" else (1080, 720),
+            reference=_reference_mood(brief),
         )
         return result.image, result.staged
     return _safe_uploaded_photo(photo), False
+
+
+def _keeps_photo(brief: AdBrief) -> bool:
+    """올린 사진을 통째로 살리는 경로로 갈지.
+
+    레퍼런스를 같이 올렸다면 **그 분위기를 반영할 수 있을 때만** 사진을 통째로
+    쓴다. openai 는 재촬영 지시에 얹을 수 있고(3번+2번), local 은 안전 색보정뿐이라
+    얹을 자리가 없어서 누끼+생성 배경으로 내려가야 레퍼런스가 살아난다.
+    """
+    return brief.ref_id is None or image_profile() == "openai"
+
+
+def _reference_mood(brief: AdBrief) -> str:
+    """레퍼런스에서 읽은 분위기 구절. 없거나 못 읽으면 빈 문자열 — 광고는 만든다."""
+    if brief.ref_id is None:
+        return ""
+    loaded = photo_store.load(brief.ref_id)
+    return ref_style.describe_style(*loaded) if loaded else ""
 
 
 def _with_reference(brief: AdBrief, prompt: str) -> str:
@@ -108,12 +158,7 @@ def _with_reference(brief: AdBrief, prompt: str) -> str:
     이미지를 확산 모델에 직접 넣는 길(IP-Adapter·img2img)은 둘 다 막혀서
     말로 바꿔 넣는다 — 자세한 근거는 ref_style 참고.
     """
-    if brief.ref_id is None:
-        return prompt
-    loaded = photo_store.load(brief.ref_id)
-    if loaded is None:
-        return prompt  # 보관함에서 사라졌어도 광고는 만든다
-    return ref_style.apply_to(prompt, ref_style.describe_style(*loaded))
+    return ref_style.apply_to(prompt, _reference_mood(brief))
 
 
 def _background(brief: AdBrief, prompt: str) -> Image.Image:
@@ -234,7 +279,21 @@ def prepare_materials(
         with Image.open(path) as f:
             photo = ImageOps.exif_transpose(f).copy()
 
-    if style == "simple" and photo is not None and brief.ref_id is None and brief.sketch_id is None:
+    # 사진을 올렸으면 **사진 보존(3번)이 기본 경로**다. 레퍼런스를 같이 올려도
+    # 끄지 않는다 — 분위기는 재촬영 지시에 얹혀서 함께 반영된다(_uploaded_ad_photo).
+    #
+    # 🪤 전에는 `ref_id is None` 까지 걸려 있어서, 레퍼런스를 같이 올리면 3번이
+    #    통째로 꺼지고 옛날 누끼 합성으로 빠졌다. 사장님은 "사진 있음 + 이런 느낌"
+    #    을 고른 건데 실제로는 상품이 오려져 나갔다.
+    #
+    # 스케치는 남긴다 — **사진 없음 갈래의 입력**이라 사진과 같이 오면 구도 지시가
+    # 우선이고, 실제 상품 누끼를 그 구도 위에 얹어야 한다.
+    #
+    # 🪤 local 프로필에서는 레퍼런스가 있으면 이 경로로 오면 안 된다. 로컬은 재촬영을
+    #    못 해서 안전 색보정만 하는데, 거기엔 분위기를 얹을 자리가 없다 — 사장님이
+    #    올린 레퍼런스가 **아무 일도 안 하고 사라진다.** 그때는 누끼+생성 배경으로
+    #    내려가야 분위기가 배경 프롬프트에 실제로 반영된다.
+    if style == "simple" and photo is not None and brief.sketch_id is None and _keeps_photo(brief):
         background, staged = _uploaded_ad_photo(photo, brief, store, "simple")
         return SimpleMaterials(
             product=None,
@@ -282,6 +341,7 @@ def render_no_text_ad(materials: SimpleMaterials) -> Image.Image:
     return compose_no_text(
         materials.product,
         background=materials.background,
+        staged=materials.staged,
     )
 
 
@@ -347,3 +407,48 @@ def generate_ad(
     prepare_materials 결과를 들고 render_ad 만 다시 부른다.
     """
     return render_ad(prepare_materials(brief, store, style), copy)
+
+
+def render_output(
+    materials: AdMaterials,
+    output_type: OutputType,
+    copy: CopyCandidate | None = None,
+) -> Image.Image:
+    """재료에 결과물 유형에 맞는 마무리를 한다 — **싼 단계만.**
+
+    사진만 다시 만들 때는 prepare_output 을, 문구만 바꿀 때는 이 함수만 다시
+    부른다 (PDF STEP 5). 비싼 재료(GPT 재촬영·확산 배경·포스터 기획)는 재사용된다.
+    """
+    if output_type == "emotional_no_text":
+        if not isinstance(materials, SimpleMaterials):
+            raise TypeError("글자 없는 결과물은 감성형 재료만 사용할 수 있습니다")
+        return render_no_text_ad(materials)
+    if copy is None:
+        raise ValueError(f"{output_type} 은 문구가 있어야 만들 수 있습니다")
+    return render_ad(materials, copy)
+
+
+def prepare_output(brief: AdBrief, store: Store, output_type: OutputType) -> AdMaterials:
+    """결과물 유형에 맞는 재료를 준비한다 — **비싼 단계 전부, 문구는 모른다.**"""
+    return prepare_materials(brief, store, style_of(output_type))
+
+
+def generate_output(
+    brief: AdBrief,
+    store: Store,
+    output_type: OutputType,
+    copy: CopyCandidate | None = None,
+) -> Image.Image:
+    """결과물 유형 하나로 광고 한 장을 만든다 — 화면이 부르는 단일 진입점.
+
+    어떤 이미지 기능이 도는지는 여기서 정하지 않는다. 주문서에 무엇이 담겼는지가
+    정한다 (prepare_materials) —
+
+        사진 있음 + 레퍼런스   3번 보존 + 2번 분위기   (둘 다 반영)
+        사진 있음             3번 보존
+        사진 없음 + 스케치     4번 스케치 구도
+        사진 없음             1번 통생성
+
+    output_type 은 그 위에 **글자를 얹을지**만 정한다.
+    """
+    return render_output(prepare_output(brief, store, output_type), output_type, copy)
