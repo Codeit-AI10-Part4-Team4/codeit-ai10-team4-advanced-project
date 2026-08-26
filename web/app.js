@@ -586,6 +586,24 @@ const SCREENS = {
     bar: true, back: 'copy',
     render: () => {
       const r = result();
+      // 아직 안 물어봤다. 목업으로 채우지 않고 **여기서 물어볼 수 있게** 한다.
+      if (!r) {
+        return `
+        <div class="stack">
+          <div>
+            <h2 class="h2" style="margin-bottom:2px">아직 손님들에게 안 보여줬습니다</h2>
+            <p class="muted">동네 손님들이 문구 후보 셋을 보고 어디에 마음이 움직이는지 알려드립니다.</p>
+          </div>
+          <div class="stack--s">
+            <button class="btn" data-review ${S.work.review === 'running' ? 'disabled' : ''}>
+              ${S.work.review === 'running' ? '손님들이 보는 중…' : '동네 손님들에게 보여주기'}</button>
+            <p class="muted" style="text-align:center">1분쯤 걸립니다.</p>
+            ${S.work.review === 'failed' ? `<div class="note note--flag">${esc(S.work.reviewError || '')}</div>` : ''}
+          </div>
+          ${copies().length ? '' : `<div class="note note--flag">먼저 문구를 만들어주세요.</div>
+            <button class="btn btn--line" data-go="chat">대화로 돌아가기</button>`}
+        </div>`;
+      }
       const people = r.persona_comments;
       const total = people.length + r.excluded_cnt;
       // 방문의향은 절대값으로 못 쓰고 차이는 쓸 수 있다 (재실행 잡음 최대 1.8점).
@@ -984,8 +1002,13 @@ const picked = () => S.store || M.stores[0];
 
 // 서버에서 받은 게 있으면 그것을, 없으면 목업을 쓴다. 화면 코드가 둘을 구분하지
 // 않도록 여기서만 갈라둔다 — 화면마다 삼항 연산자를 흩어두면 한 곳을 빠뜨린다.
-const copies = () => S.copies || M.copies;
-const result = () => S.result || M.result;
+const copies = () => S.copies || (live() ? [] : M.copies);
+/* 목업 손님 반응이 진짜처럼 뜨던 자리다.
+ *
+ * 이미지 화면의 뒤로가기가 여기로 온다. 평가를 안 돌렸는데 `M.result` 로 떨어지면
+ * **가짜 손님 12명의 코멘트와 순위가 이 가게 것처럼 보인다.** 화면에 "예시"라고
+ * 적힌 곳도 없다. 목업 중에 제일 위험한 자리라 여기부터 막는다. */
+const result = () => S.result || (live() ? null : M.result);
 /* 목업은 **서버가 없을 때만** 쓴다.
  *
  * `S.turns` 가 비면 무조건 목업 대화로 떨어지던 자리다. 그래서 가게를 새로 등록하고
@@ -1224,7 +1247,11 @@ async function makeCopies() {
 
 /** 후보 셋을 동네 손님들에게 보여준다. 1분쯤 걸린다. */
 async function reviewCopies() {
-  if (!live() || !S.adId) { go('panel'); return; }
+  // 서버 없이 도는 시연은 목업 결과 화면으로 보낸다.
+  if (!live()) { go('panel'); return; }
+  // 서버가 있는데 광고 번호가 없으면 문구부터다. 그냥 panel 로 보내면 빈 화면에서
+  // 버튼만 다시 눌리는 막다른 길이 된다.
+  if (!S.adId) { toast('문구를 먼저 만들어주세요'); go('chat'); return; }
   const d = S.draft || {};
   const st = picked();
 
