@@ -418,3 +418,56 @@ def test_이미지_작업은_json_결과를_싣지_않는다() -> None:
     body = _wait(job.id)
     assert body["result"] is None
     assert body["image_url"] == f"/jobs/{job.id}/image"
+
+
+# ── 대화 ────────────────────────────────────────────────────────
+# 실제 LLM 은 부르지 않는다. conftest 가 MODEL_PROFILE 을 stub 으로 고정하므로
+# 뽑아내기는 안 되지만, **무엇을 물을지는 코드가 정하므로** 그 부분은 그대로 돈다.
+
+
+def test_대화는_로그인해야_한다() -> None:
+    # 토큰을 **안** 싣는 클라이언트로 부른다. 공용 client 는 _logged_in 픽스처가
+    # 로그인시켜 두므로 여기서는 401 이 안 나온다.
+    assert bare.post("/chat", json={"store_id": 1, "utterance": "안녕하세요"}).status_code == 401
+
+
+def test_남의_가게로는_대화를_못_한다() -> None:
+    mine, other = _signup("사장님10"), _signup("사장님11")
+    store_id = _store_of(mine)
+    res = client.post(
+        "/chat", headers=_bearer(other), json={"store_id": store_id, "utterance": "안녕하세요"}
+    )
+    assert res.status_code == 404
+
+
+def test_빈_말은_거절한다() -> None:
+    token = _signup("사장님12")
+    res = client.post(
+        "/chat", headers=_bearer(token), json={"store_id": _store_of(token), "utterance": ""}
+    )
+    assert res.status_code == 422
+
+
+def test_주문서를_주고받으며_대화가_이어진다() -> None:
+    """서버가 대화 상태를 들지 않는다. 화면이 주문서를 들고 다니고, 서버는
+    받은 주문서를 갱신해 돌려준다 — 그래서 서버를 재시작해도 대화가 안 끊긴다."""
+    token = _signup("사장님13")
+    store_id = _store_of(token)
+
+    first = client.post(
+        "/chat", headers=_bearer(token), json={"store_id": store_id, "utterance": "순대국 팔아요"}
+    )
+    assert first.status_code == 200
+    turn = first.json()
+    assert turn["message"]  # 비어 있으면 화면에 빈 말풍선이 뜬다
+    assert "product" in turn["draft"]["asked"]  # 물어본 것을 기록해야 같은 걸 두 번 안 묻는다
+    assert "순대국 팔아요" in turn["draft"]["transcript"]  # 한 말은 문구 생성으로 넘어간다
+
+    # 받은 주문서를 그대로 돌려보내면 이어진다
+    second = client.post(
+        "/chat",
+        headers=_bearer(token),
+        json={"store_id": store_id, "utterance": "8천원이요", "draft": turn["draft"]},
+    )
+    assert second.status_code == 200
+    assert "8천원이요" in second.json()["draft"]["transcript"]
