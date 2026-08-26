@@ -225,6 +225,10 @@ async function startImages() {
     tone: chosen().tone,
     // '기타' 업종은 이게 없으면 서버가 Store 를 못 만든다
     industry_note: store.industry_note || '',
+    // 포스터 하단에 그대로 인쇄되는 줄이다. 안 보내면 서버 기본값이 쓰여서
+    // 상권은 진짜 주소로 도는데 포스터 글자만 "서울" 이 된다.
+    address: store.address || '서울',
+    phone: store.phone || '',
   };
 
   for (const im of M.images) {

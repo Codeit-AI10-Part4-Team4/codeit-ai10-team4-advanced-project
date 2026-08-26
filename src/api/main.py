@@ -180,6 +180,14 @@ class ImageRequest(BaseModel):
     output_type: OutputType
     #: 업종이 other 일 때 사장님이 직접 적은 업종명
     industry_note: str = ""
+    #: 포스터 하단에 **그대로 인쇄되는** 줄이다 (app_core.pipeline._info_line).
+    #:
+    #: 기본값은 StoreInput 과 같은 "서울" 이다 — 안 보내던 호출자는 지금과 똑같이
+    #: 동작한다. 이 값이 없어서 상권은 진짜 주소로 도는데 포스터에 찍히는 글자만
+    #: "서울" 이었다. 사장님이 전단지로 뽑으면 주소가 "서울" 인 광고가 나온다.
+    address: str = Field(default="서울", min_length=2)
+    #: 없으면 포스터에서 그 자리를 통째로 뺀다 — 빈 구분자가 남지 않는다.
+    phone: str = ""
 
     @model_validator(mode="after")
     def _copy_needed_when_text(self) -> ImageRequest:
@@ -245,6 +253,8 @@ def _render(req: ImageRequest) -> Any:
             name=req.store_name,
             industry=req.industry,
             industry_note=req.industry_note,
+            address=req.address,
+            phone=req.phone,
         ),
         req.output_type,
         copy,
