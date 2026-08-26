@@ -1837,3 +1837,76 @@ def test_closed_price_axis_keeps_the_scores(yeoksam: Panel, shop, copy) -> None:
     assert result.scores
     assert result.confidence == "ok"
     assert not any("가격" in r for r in result.confidence_reasons)
+
+
+# --- 보지도 않은 것을 봤다고 하면 되묻는다 (2026-08-26 실측) ----------------
+
+
+def test_없는_사진을_봤다고_하면_잡는다() -> None:
+    """실제로 나온 문장이다. 웹 관통 2026-08-26, 40대 여성 코멘트.
+
+    이 답은 근거 관문을 그냥 통과했다 — `evidence.py` 는 인용한 **숫자**만
+    대조하는데 이 문장에는 숫자가 없다. 없는 것을 근거로 든 답이 점수가 됐다.
+    """
+    from app_core.panel.evaluator import _unseen_visuals
+
+    assert _unseen_visuals("국물 사진이 따뜻해 보여서 눈이 갔어요.") == {"사진"}
+
+
+def test_제안은_안_잡는다() -> None:
+    """ "포스터로 붙여두면 눈에 띄겠다" 는 봤다는 주장이 아니라 제안이다.
+
+    낱말만 세면 이것까지 버린다. `price_contradictions` 에서 오탐을 두 번
+    낸 자리라 처음부터 절 단위로 짰다.
+    """
+    from app_core.panel.evaluator import _unseen_visuals
+
+    assert _unseen_visuals("포스터로 붙여두면 눈에 잘 띌 것 같아요") == set()
+    assert _unseen_visuals("사진 한 장 있으면 좋겠네요") == set()
+    assert _unseen_visuals("퇴근길이라는 말이 눈에 들어왔어요") == set()
+
+
+def test_여러_낱말을_모아_돌려준다() -> None:
+    from app_core.panel.evaluator import _unseen_visuals
+
+    assert _unseen_visuals("사진 색감이 예뻐 보여서") == {"사진", "색감"}
+
+
+def test_없는_사진을_봤다고_하면_되묻는다(yeoksam: Panel, shop, brief, copy) -> None:
+    """가격 되묻기와 같은 방식이다 — 기준선은 안 건드리고 틀린 답만 고친다.
+
+    `SYSTEM` 에 "사진은 없다" 를 상시로 넣으면 안 틀린 손님의 `attention`
+    까지 같이 움직인다. 그러면 이 변경이 점수를 바꾼 것인지 아닌지 알 수
+    없게 된다. 되묻기는 어긴 응답에만 붙으므로 그 문제가 없다.
+    """
+    seen: list[str] = []
+
+    class Spy(FakeClient):
+        def complete_json(self, system: str, user: str) -> dict[str, Any]:
+            if not system.startswith("너는 아래 특성의 손님이다"):
+                return super().complete_json(system, user)
+            seen.append(user)
+            out = super().complete_json(system, user)
+            if "사진이 없다" not in user:
+                return {**out, "comment": "국물 사진이 따뜻해 보여서 눈이 갔어요"}
+            return out
+
+    evaluate(yeoksam, shop, brief, copy, client=Spy(_reply_by_demo(yeoksam)), consistency_k=1)
+
+    assert any("사진이 없다" in u for u in seen)
+    assert any("글자 두 줄" in u for u in seen)
+
+
+def test_사진_얘기가_없으면_안_되묻는다(yeoksam: Panel, shop, brief, copy) -> None:
+    """멀쩡한 답에 되묻기가 붙으면 콜만 두 배가 된다."""
+    seen: list[str] = []
+
+    class Spy(FakeClient):
+        def complete_json(self, system: str, user: str) -> dict[str, Any]:
+            if system.startswith("너는 아래 특성의 손님이다"):
+                seen.append(user)
+            return super().complete_json(system, user)
+
+    evaluate(yeoksam, shop, brief, copy, client=Spy(_reply_by_demo(yeoksam)), consistency_k=1)
+
+    assert seen and not any("사진이 없다" in u for u in seen)
