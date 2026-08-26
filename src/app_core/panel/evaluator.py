@@ -569,32 +569,38 @@ def _evaluate_one(
             )
             continue
 
-        # 광고에 가격이 없는데 가격이 걸린다고 하면 앞뒤가 안 맞는다.
-        # 코드가 아는 사실이므로 모델의 자기검열에 맡기지 않고 여기서 되묻는다.
-        # 한 번만 되묻고, 그래도 같으면 점수는 살려 둔다 — 걸림돌 하나 때문에
-        # 그 손님의 평가 전체를 버리면 12명이 통째로 날아갈 수 있다.
-        if attempt == 0 and result.resistance == "price" and not price_visible(brief, copy):
-            logger.debug("가격 없는 광고에 price 응답 %s — 되묻는다", persona.persona_id)
-            hint = _retry_hint(
-                "이 광고에는 **가격이 적혀 있지 않다.** 적히지도 않은 가격을 "
-                "걸림돌로 고를 수는 없다. 광고에 실제로 있는 것만 놓고 다시 골라라."
-            )
-            continue
-
-        # 이 단계의 광고는 글자 두 줄이다. 사진을 봤다고 하면 지어낸 것이므로
-        # 가격 되묻기와 같은 방식으로 한 번만 되묻는다. 그래도 같으면 점수는
-        # 살려 둔다 — 코멘트 한 줄 때문에 그 손님을 통째로 버리면 12명이
-        # 날아갈 수 있다. 다만 `_summarize` 가 그 문장을 제안의 재료로 쓰므로
-        # 되묻는 것만으로도 새어나가는 양이 줄어든다.
-        if attempt == 0 and (unseen := _unseen_visuals(result.comment)):
-            logger.debug("없는 것을 봤다는 응답 %s: %s", persona.persona_id, unseen)
-            hint = _retry_hint(
-                "이 광고에는 **사진이 없다.** 지금 네가 본 것은 글자 두 줄이 전부다 "
-                f"— 헤드라인과 그 아래 한 줄. '{', '.join(sorted(unseen))}' 은(는) "
-                "아직 만들어지지도 않았다. 광고에 실제로 있는 **글자**만 놓고 "
-                "다시 답하라."
-            )
-            continue
+        # 광고에 없는 것을 근거로 든 답을 되묻는다. 코드가 아는 사실이므로
+        # 모델의 자기검열에 맡기지 않는다. 한 번만 되묻고, 그래도 같으면 점수는
+        # 살려 둔다 — 흠 하나 때문에 그 손님의 평가 전체를 버리면 패널이 통째로
+        # 날아갈 수 있다.
+        #
+        # **어긴 것을 모아 한 번에 보낸다.** 관문마다 `continue` 하면 먼저 걸린
+        # 하나만 지적하고 나가는데, 되묻기는 `attempt == 0` 에서만 도니까
+        # 나머지는 영영 안 걸린다. 한 응답이 둘 다 어기는 일이 실제로 있다 —
+        # 가격 없는 광고에 price 라고 답하면서 코멘트에는 사진 이야기를 하는 것.
+        # 되묻는 횟수는 그대로고 관문만 같이 걸린다 (아인님 #81 리뷰).
+        if attempt == 0:
+            broke: list[str] = []
+            if result.resistance == "price" and not price_visible(brief, copy):
+                logger.debug("가격 없는 광고에 price 응답 %s", persona.persona_id)
+                broke.append(
+                    "이 광고에는 **가격이 적혀 있지 않다.** 적히지도 않은 가격을 "
+                    "걸림돌로 고를 수는 없다. 광고에 실제로 있는 것만 놓고 다시 골라라."
+                )
+            # 이 단계의 광고는 글자 두 줄이다. 사진을 봤다고 하면 지어낸 것이다.
+            # `_summarize` 가 그 문장을 제안의 재료로 쓰므로, 되묻는 것만으로도
+            # 새어나가는 양이 줄어든다.
+            if unseen := _unseen_visuals(result.comment):
+                logger.debug("없는 것을 봤다는 응답 %s: %s", persona.persona_id, unseen)
+                broke.append(
+                    "이 광고에는 **사진이 없다.** 지금 네가 본 것은 글자 두 줄이 전부다 "
+                    f"— 헤드라인과 그 아래 한 줄. '{', '.join(sorted(unseen))}' 은(는) "
+                    "아직 만들어지지도 않았다. 광고에 실제로 있는 **글자**만 놓고 "
+                    "다시 답하라."
+                )
+            if broke:
+                hint = _retry_hint("\n".join(broke))
+                continue
 
         # 그 손님에게 보여준 숫자만 근거로 인정한다 — 값이 맞아도 남의 것이면
         # "정확한 인용"일 뿐 자기 판단의 근거가 아니다.

@@ -1910,3 +1910,35 @@ def test_사진_얘기가_없으면_안_되묻는다(yeoksam: Panel, shop, brief
     evaluate(yeoksam, shop, brief, copy, client=Spy(_reply_by_demo(yeoksam)), consistency_k=1)
 
     assert seen and not any("사진이 없다" in u for u in seen)
+
+
+def test_둘_다_어기면_한_번에_되묻는다(yeoksam: Panel, shop, copy) -> None:
+    """되묻기는 `attempt == 0` 에서만 돈다 — 관문마다 나가면 한 번을 나눠 쓴다.
+
+    가격 없는 광고에 price 라고 답하면서 코멘트에는 사진 이야기를 하면,
+    관문마다 `continue` 하는 구조에서는 가격만 지적하고 나간다. 다음 판에는
+    두 관문이 다 꺼져 있어서 사진 문장이 그대로 남는다 (아인님 #81 리뷰).
+    """
+    seen: list[str] = []
+    plain = CopyCandidate(headline="점심 후 달달한 크로플", sub="주문하고 자리 잡으면 나옵니다")
+    brief = AdBrief(goal="copy", product="크로플", price=18000)
+
+    class Spy(FakeClient):
+        def complete_json(self, system: str, user: str) -> dict[str, Any]:
+            if not system.startswith("너는 아래 특성의 손님이다"):
+                return super().complete_json(system, user)
+            seen.append(user)
+            out = super().complete_json(system, user)
+            if "가격이 적혀 있지 않다" in user:
+                return out
+            return {
+                **out,
+                "resistance": "price",
+                "comment": "국물 사진이 따뜻해 보여서 눈이 갔어요",
+            }
+
+    evaluate(yeoksam, shop, brief, plain, client=Spy(_reply_by_demo(yeoksam)), consistency_k=1)
+
+    retried = [u for u in seen if "직전 응답이 규칙을 어겼다" in u]
+    assert retried, "되묻지 않았다"
+    assert any("가격이 적혀 있지 않다" in u and "사진이 없다" in u for u in retried)
