@@ -472,6 +472,10 @@ const SCREENS = {
         </div>
 
         <div class="chat">
+          <!-- 목업을 걷어내면 대화가 시작되기 전에는 비어 있다. 빈 화면에 입력칸만
+               두면 무엇을 써야 할지 모른다. 이 한 줄은 **가게에 대한 주장이 아니라
+               화면이 스스로 하는 질문**이라 목업과 다르다. -->
+          ${turns().length ? '' : '<div class="bubble bubble--bot">어떤 메뉴를 알리고 싶으세요?</div>'}
           ${turns().map((t) => `<div class="bubble bubble--${t.who}">${esc(t.text)}</div>`).join('')}
           ${S.work.chat === 'running' ? '<div class="bubble bubble--bot"><span class="data">…</span></div>' : ''}
         </div>
@@ -982,8 +986,14 @@ const picked = () => S.store || M.stores[0];
 // 않도록 여기서만 갈라둔다 — 화면마다 삼항 연산자를 흩어두면 한 곳을 빠뜨린다.
 const copies = () => S.copies || M.copies;
 const result = () => S.result || M.result;
-const turns = () => (S.turns.length ? S.turns : [...M.turns, ...S.said]);
-const chips = () => (S.options.length ? S.options : M.toneChips);
+/* 목업은 **서버가 없을 때만** 쓴다.
+ *
+ * `S.turns` 가 비면 무조건 목업 대화로 떨어지던 자리다. 그래서 가게를 새로 등록하고
+ * 대화 화면에 들어가면, 한 마디도 안 했는데 순대국 8,000원짜리 대화가 이미 오간
+ * 것처럼 보였다 — **카페를 등록해도** 그랬다. 사장님 눈에는 자기가 하지도 않은 말이
+ * 자기 주문서에 적혀 있는 것이다 (수호님 점검 1번). */
+const turns = () => (live() ? S.turns : [...M.turns, ...S.said]);
+const chips = () => (S.options.length ? S.options : live() ? [] : M.toneChips);
 
 /** 사장님이 고른 문구와 주문서. 이미지 생성이 쓰는 값 한 벌.
  *
@@ -993,20 +1003,24 @@ function chosen() {
   const cs = copies();
   const c = cs[S.pick] || cs[0] || {};
   const d = S.draft || {};
-  const mockPrice = Number(String(M.brief.price).replace(/[^\d]/g, '')) || 0;
+  // 서버에 붙어 있으면 목업 주문서로 안 떨어진다. 떨어지면 **남의 가게 주문서로
+  // 만든 광고**가 나온다 — 카페를 등록했는데 순대국 8,000원으로 만들어진다.
+  const m = live() ? {} : M.brief;
+  const mockPrice = Number(String(m.price ?? '').replace(/[^\d]/g, '')) || 0;
   return {
     headline: c.headline || '',
     sub: c.sub || '',
-    product: d.product || M.brief.product,
+    product: d.product || m.product || '',
     price: d.price ?? mockPrice,
-    situation: d.situation || M.brief.situation,
-    tone: S.tone || d.tone || M.brief.tone,
+    situation: d.situation || m.situation || '',
+    tone: S.tone || d.tone || m.tone || '',
   };
 }
 
 /** 주문서 한 줄. 서버 주문서(AdBriefDraft)는 아직 안 채워진 칸이 null 이다. */
 const slip = (key, fallback) => {
-  const v = S.draft ? S.draft[key] : fallback;
+  // 서버에 붙어 있으면 목업으로 안 떨어진다 — 아직 안 물어본 칸은 "아직" 이다.
+  const v = S.draft ? S.draft[key] : live() ? null : fallback;
   return v === null || v === undefined || v === '' ? '아직' : String(v);
 };
 
