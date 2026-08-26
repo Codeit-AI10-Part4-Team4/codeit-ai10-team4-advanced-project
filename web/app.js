@@ -707,7 +707,7 @@ const SCREENS = {
           <ul class="facts">
             ${r.contrast_notes.map((n) => `
               <li class="${n.fit !== null && n.fit < 0.5 ? 'off' : ''}">${rich(n.text)}
-                <span class="src">${esc(n.evidence)}</span></li>`).join('')}
+                <span class="src">${esc(noteSrc(n, quarter(r.quarter)))}</span></li>`).join('')}
           </ul>
         </section>
 
@@ -1002,6 +1002,25 @@ const picked = () => S.store || M.stores[0];
 
 // 서버에서 받은 게 있으면 그것을, 없으면 목업을 쓴다. 화면 코드가 둘을 구분하지
 // 않도록 여기서만 갈라둔다 — 화면마다 삼항 연산자를 흩어두면 한 곳을 빠뜨린다.
+/** 대조 문장의 출처 한 줄.
+ *
+ * 두 경로가 **서로 다른 모양**을 준다. 상권 조회(loadTradeArea)는 사람이 읽을
+ * 문자열을 만들어 넣지만, 손님 평가 결과는 `[{path, value}]` 목록을 준다 — 근거
+ * 관문이 대조한 **감사 흔적**이라 그렇다.
+ *
+ * 문자열만 상정하고 그려서 화면에 `[object Object],[object Object]` 가 떴다.
+ * 목업은 문자열이라 시연에서는 멀쩡해 보였고, **서버를 붙이고 나서야** 나왔다. */
+const NOTE_SRC = {
+  price: '객단가', price_text: '객단가',
+  timing: '시간대별 매출', weekend: '요일별 매출',
+  composition: '연령·성별 매출 비중', competition: '점포 수',
+  product: '업종 매출', claim: '업종 매출',
+};
+const noteSrc = (n, q) =>
+  typeof n.evidence === 'string'
+    ? n.evidence
+    : `서울시 ${q} · ${NOTE_SRC[n.kind] || '상권 실측'}`;
+
 const copies = () => S.copies || (live() ? [] : M.copies);
 /* 목업 손님 반응이 진짜처럼 뜨던 자리다.
  *
