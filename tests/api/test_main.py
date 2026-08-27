@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api import jobs
-from api.main import app
+from api.main import ImageRequest, app
 
 client = TestClient(app)
 
@@ -163,6 +163,55 @@ def test_끝나기_전에는_이미지를_안_준다() -> None:
 
     job = jobs.submit(아직)
     assert client.get(f"/jobs/{job.id}/image").status_code == 404
+
+
+def test_포스터에_찍히는_주소는_가게_주소다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """상권 조회는 진짜 주소로 도는데 **포스터에 인쇄되는 글자만** 기본값이었다.
+
+    ImageRequest 에 주소가 없어서 Store 가 StoreInput 의 기본값("서울")을 썼다.
+    사장님이 전단지로 뽑으면 주소가 "서울" 인 광고가 나온다.
+    """
+    from api import main as api_main
+    from app_core import pipeline
+
+    받은: dict[str, Any] = {}
+
+    def _fake(brief: Any, store: Any, output_type: Any, copy: Any) -> str:
+        받은["address"] = store.address
+        받은["phone"] = store.phone
+        return "그린 셈 친다"
+
+    monkeypatch.setattr(pipeline, "generate_output", _fake)
+
+    api_main._render(
+        api_main.ImageRequest(
+            store_name="망원 백반집",
+            industry="korean_food",
+            product="김치찌개 백반",
+            price=9000,
+            headline="퇴근길 한 그릇",
+            output_type="emotional_text",
+            address="서울시 마포구 망원동 57-8",
+            phone="02-1234-5678",
+        )
+    )
+
+    assert 받은["address"] == "서울시 마포구 망원동 57-8"
+    assert 받은["phone"] == "02-1234-5678"
+
+
+def test_주소를_안_보내면_예전처럼_동작한다() -> None:
+    """기본값을 StoreInput 과 같게 뒀다 — 낡은 호출자가 422 로 죽지 않는다."""
+    assert (
+        ImageRequest(
+            store_name="가게",
+            industry="cafe",
+            product="크로플",
+            price=0,
+            output_type="emotional_no_text",
+        ).address
+        == "서울"
+    )
 
 
 def test_이미지_요청은_필수값이_빠지면_거절한다() -> None:
