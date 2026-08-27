@@ -47,6 +47,18 @@ if _origins:
     )
 
 
+# ⚠️ 라우터보다 **위**에 있어야 한다. Depends(current_user) 는 함수를 정의할 때
+#    평가되므로, 아래에 두면 먼저 나오는 라우터가 NameError 로 죽는다.
+#    /trade-area·/ads/image 에 인증이 없던 것도 이 순서 때문이었다.
+def current_user(authorization: str = Header(default="")) -> int:
+    """`Authorization: Bearer <토큰>` 에서 user_id 를 꺼낸다."""
+    scheme, _, token = authorization.partition(" ")
+    user_id = session.read(token) if scheme.lower() == "bearer" else None
+    if user_id is None:
+        raise HTTPException(401, "로그인이 필요합니다.")
+    return user_id
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     """Liveness probe."""
@@ -132,6 +144,7 @@ def trade_area(
     industry: str = Query(min_length=1, description="업종 id — /industries 의 값"),
     lat: float | None = Query(default=None, ge=-90, le=90),
     lon: float | None = Query(default=None, ge=-180, le=180),
+    _user: int = Depends(current_user),
 ) -> TradeArea:
     """주소·업종 → 그 동네의 서울시 실측.
 
@@ -262,14 +275,14 @@ def _render(req: ImageRequest) -> Any:
 
 
 @app.post("/ads/image", status_code=202)
-def make_image(req: ImageRequest) -> JobAccepted:
+def make_image(req: ImageRequest, _user: int = Depends(current_user)) -> JobAccepted:
     """광고 이미지 만들기를 **등록만** 한다. 진행 상태는 /jobs/{id} 로 물어본다."""
     job = jobs.submit(_render, req, kind="image")
     return JobAccepted(job_id=job.id)
 
 
 @app.get("/jobs/{job_id}")
-def job_status(job_id: str) -> JobStatus:
+def job_status(job_id: str, _user: int = Depends(current_user)) -> JobStatus:
     job = jobs.get(job_id)
     if job is None:
         # 서버를 재시작하면 진행 중이던 작업이 날아간다. 404 를 받으면 화면은
@@ -292,13 +305,7 @@ def job_status(job_id: str) -> JobStatus:
 # user_id 를 그대로 주고받으면 아무나 남의 번호를 적어 남의 가게를 열 수 있다.
 
 
-def current_user(authorization: str = Header(default="")) -> int:
-    """`Authorization: Bearer <토큰>` 에서 user_id 를 꺼낸다."""
-    scheme, _, token = authorization.partition(" ")
-    user_id = session.read(token) if scheme.lower() == "bearer" else None
-    if user_id is None:
-        raise HTTPException(401, "로그인이 필요합니다.")
-    return user_id
+# current_user 는 파일 맨 위에 있다 — 아래 라우터만 쓰던 때의 자리였다.
 
 
 class SignupBody(BaseModel):
@@ -502,7 +509,13 @@ def review_job(body: ReviewRequest, user_id: int = Depends(current_user)) -> Job
 
 @app.get("/jobs/{job_id}/image")
 def job_image(job_id: str) -> Response:
-    """완성된 이미지를 PNG 로 돌려준다."""
+    """완성된 이미지를 PNG 로 돌려준다.
+
+    ⚠️ 여기만 인증이 없다. 화면이 `<img src=...>` 로 부르는데 브라우저는 그 요청에
+    Authorization 헤더를 못 싣기 때문이다. 지금은 job_id(uuid4) 를 아는 것이 곧
+    권한이다 — 주소창·기록·로그에 남으면 새는 구조라 공개 배포 전에는 고쳐야 한다
+    (서명된 단기 URL 이나 blob 으로 받아 오는 길). 수호님 보안 점검 S5.
+    """
     job = jobs.get(job_id)
     if job is None or job.status != "done":
         raise HTTPException(404, "아직 결과가 없습니다.")

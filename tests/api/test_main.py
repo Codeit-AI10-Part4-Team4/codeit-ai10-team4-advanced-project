@@ -5,6 +5,7 @@
 """
 
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, get_args
 
@@ -15,6 +16,33 @@ from api import jobs
 from api.main import ImageRequest, app
 
 client = TestClient(app)
+
+#: 토큰을 **안** 싣는 클라이언트. 인증이 걸렸는지 보는 테스트만 쓴다.
+bare = TestClient(app)
+
+
+def _signup(username: str) -> str:
+    """가입하고 토큰을 돌려준다."""
+    res = bare.post("/auth/signup", json={"username": username, "password": "비밀번호12345"})
+    assert res.status_code == 201, res.text
+    return str(res.json()["token"])
+
+
+def _bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture(autouse=True)
+def _logged_in() -> Iterator[None]:
+    """거의 모든 엔드포인트가 로그인을 요구한다 — 공용 client 를 로그인시켜 둔다.
+
+    인증 자체를 확인하는 테스트는 위의 `bare` 를 쓴다. 요청에 headers 를 직접
+    주면 그쪽이 이긴다(위조 토큰 테스트가 그렇게 돈다).
+    """
+    client.headers.update(_bearer(_signup("테스트 사장님")))
+    yield
+    client.headers.pop("Authorization", None)
+
 
 #: 망원동 근처. 좌표를 주면 KAKAO_REST_KEY 없이 돈다.
 MANGWON = {
@@ -268,19 +296,8 @@ def test_낡은_style_키만_보내면_거절한다() -> None:
 # ── 로그인 · 내 가게 ────────────────────────────────────────────
 
 
-def _signup(username: str) -> str:
-    """가입하고 토큰을 돌려준다."""
-    res = client.post("/auth/signup", json={"username": username, "password": "비밀번호12345"})
-    assert res.status_code == 201, res.text
-    return str(res.json()["token"])
-
-
-def _bearer(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
-
-
 def test_토큰_없이는_내_가게를_못_본다() -> None:
-    assert client.get("/stores").status_code == 401
+    assert bare.get("/stores").status_code == 401
 
 
 def test_가입하고_가게를_넣으면_내_목록에_보인다() -> None:
@@ -363,9 +380,21 @@ def _store_of(token: str, industry: str = "korean_food") -> int:
 _BRIEF = {"product": "순대국", "price": 8000, "situation": "퇴근길", "tone": "따뜻하게"}
 
 
+def test_이미지와_상권도_로그인해야_한다() -> None:
+    """옆 엔드포인트에는 붙어 있는데 이것들만 빠져 있었다 (수호님 보안 점검 S1·S2).
+
+    /ads/image 는 열려 있으면 **팀 공용 키로 아무나 이미지를 뽑을 수 있고**,
+    /trade-area 는 카카오 무료 쿼터를 남이 태울 수 있다. 401 이어야 한다.
+    422(본문 검증까지 감)가 나오면 인증을 안 보고 있다는 뜻이다.
+    """
+    assert bare.post("/ads/image", json={"store_name": "가게"}).status_code == 401
+    assert bare.get("/trade-area", params=MANGWON).status_code == 401
+    assert bare.get("/jobs/그런건없다").status_code == 401
+
+
 def test_문구와_평가는_로그인해야_한다() -> None:
-    assert client.post("/ads/copies", json={"store_id": 1, **_BRIEF}).status_code == 401
-    assert client.post("/ads/review", json={"store_id": 1, "ad_id": 1, **_BRIEF}).status_code == 401
+    assert bare.post("/ads/copies", json={"store_id": 1, **_BRIEF}).status_code == 401
+    assert bare.post("/ads/review", json={"store_id": 1, "ad_id": 1, **_BRIEF}).status_code == 401
 
 
 def test_남의_가게로는_문구를_못_만든다() -> None:
@@ -446,7 +475,9 @@ def test_이미지_작업은_json_결과를_싣지_않는다() -> None:
 
 
 def test_대화는_로그인해야_한다() -> None:
-    assert client.post("/chat", json={"store_id": 1, "utterance": "안녕하세요"}).status_code == 401
+    # 토큰을 **안** 싣는 클라이언트로 부른다. 공용 client 는 _logged_in 픽스처가
+    # 로그인시켜 두므로 여기서는 401 이 안 나온다.
+    assert bare.post("/chat", json={"store_id": 1, "utterance": "안녕하세요"}).status_code == 401
 
 
 def test_남의_가게로는_대화를_못_한다() -> None:

@@ -411,3 +411,30 @@ def test_헤드라인이_비면_거부한다() -> None:
 
 def test_서브는_없어도_된다() -> None:
     assert CopyCandidate(headline="겨울 감성 크로플").sub == ""
+
+
+# ── 가게 등록 입력 (수호님 점검 9·12번) ──────────────────────
+
+
+def test_상호가_너무_길면_거부한다() -> None:
+    """100자짜리 상호가 그대로 등록돼 주문서에서 세 줄로 접히던 자리다."""
+    with pytest.raises(ValidationError):
+        store_input(name="아" * 41)
+
+
+def test_실제로_쓰는_상호는_통과한다() -> None:
+    """글자 종류는 막지 않는다 — 막으면 진짜 상호가 걸린다."""
+    for 상호 in ["카페 & 베이커리", "8番 라멘", "S/S 스튜디오", "이모네(본점)"]:
+        assert store_input(name=상호).name == 상호
+
+
+def test_연락처_모양이_아니면_거부한다() -> None:
+    """전단지·POP 에 그대로 실리는 값이다."""
+    for 값 in ["아무거나", "010-빵빵", "1", "0" * 16]:
+        with pytest.raises(ValidationError):
+            store_input(phone=값)
+
+
+def test_쓰이는_연락처_형식은_다_통과한다() -> None:
+    for 값 in ["02-123-4567", "010 1234 5678", "+82 2 123 4567", "(02)1234-5678", ""]:
+        assert store_input(phone=값).phone == 값.strip()
