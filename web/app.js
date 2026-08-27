@@ -106,6 +106,7 @@ const S = {
   options: [],       // 챗봇이 준 이번 턴의 선택지
   copies: null,      // /ads/copies 결과
   pick: 0,           // 사장님이 고른 문구의 자리. 안 고르면 1위
+  outputType: null,  // 대화보다 먼저 고른 결과물. 안 골랐으면 output() 이 기본값
   adId: null,        // 그 문구들이 저장된 광고 번호 — /ads/review 가 쓴다
   result: null,      // /ads/review 결과 중 1위 후보의 평가
   margin: null,      // clear_margin — "1등이 낫다"고 말할 기준
@@ -203,12 +204,30 @@ function imageCard(im) {
     </div>`;
 }
 
-/* 서버 계약이 `style` 에서 `output_type` 으로 바뀌는 중이다 (#76).
- * 둘 다 보내면 **어느 쪽 서버에도 붙는다** — ImageRequest 는 모르는 키를 무시한다.
- * #76 이 머지되면 style 을 뺀다. 화면 안에서는 style 이 계속 작업 키다. */
-const OUTPUT_TYPE = { simple: 'emotional_text', poster: 'poster' };
+/* 사장님이 **대화보다 먼저** 고르는 결과물 3종. app.py 의 OUTPUT_CARDS 와 같은
+ * 목록이다 — 갈리면 두 화면이 다른 것을 만든다.
+ *
+ * `style` 은 화면 안에서 작업을 구분하는 키이고, `value` 가 서버 계약이다. */
+const OUTPUTS = [
+  { value: 'emotional_no_text', style: 'simple', title: '감성 사진 · 글자 없음',
+    blurb: '문구 없이 사진에 집중',   steps: '문구·손님 반응을 건너뜁니다' },
+  { value: 'emotional_text',    style: 'simple', title: '감성 사진 · 글자 있음',
+    blurb: '짧은 문구로 분위기 전달', steps: '문구 3개 + 손님 반응을 봅니다' },
+  { value: 'poster',            style: 'poster', title: '포스터형 · 글자 필수',
+    blurb: '상품과 가격을 명확하게',  steps: '문구 3개 + 손님 반응을 봅니다' },
+];
 
-/** 두 형태를 한꺼번에 맡기고 각각 물어본다. 서버가 2개까지 동시에 돌린다. */
+/** 고른 결과물. 안 골랐으면 글자 있는 감성형 — 서버 기본값과 같은 자리다. */
+const output = () => OUTPUTS.find((o) => o.value === S.outputType) || OUTPUTS[1];
+
+/** 문구·손님 반응을 거쳐야 하는 유형인가. 서버의 needs_copy 와 같은 판정이다 —
+ *  갈리면 화면은 문구를 고르게 해놓고 서버는 그걸 안 쓰는 상태가 된다. */
+const needsCopy = () => output().value !== 'emotional_no_text';
+
+/** **고른 한 형태만** 맡긴다 (#76).
+ *
+ * 전에는 감성형·포스터형을 늘 둘 다 만들어서, 안 고른 쪽에 20~30초와 이미지
+ * 비용이 그대로 나갔다. 사장님이 쓰는 건 한 장이다. */
 async function startImages() {
   const store = picked();
   const body = {
@@ -231,19 +250,16 @@ async function startImages() {
     phone: store.phone || '',
   };
 
-  for (const im of M.images) {
-    S.jobs[im.style] = { status: 'queued', sec: 0 };
-    try {
-      // api() 로 부른다 — 토큰을 싣는 창구가 여기 하나다. 직접 fetch 를 쓰면
-      // Authorization 이 빠져서 서버가 인증을 걸 수 없다 (수호님 보안 점검 S1).
-      const { job_id: jobId } = await api('/ads/image', {
-        ...body, style: im.style, output_type: OUTPUT_TYPE[im.style],
-      });
-      S.jobs[im.style].jobId = jobId;
-      pollJob(im.style, jobId);
-    } catch (e) {
-      S.jobs[im.style] = { status: 'failed', error: String(e.message || e) };
-    }
+  const o = output();
+  S.jobs[o.style] = { status: 'queued', sec: 0 };
+  try {
+    // api() 로 부른다 — 토큰을 싣는 창구가 여기 하나다. 직접 fetch 를 쓰면
+    // Authorization 이 빠져서 서버가 인증을 걸 수 없다 (수호님 보안 점검 S1).
+    const { job_id: jobId } = await api('/ads/image', { ...body, output_type: o.value });
+    S.jobs[o.style].jobId = jobId;
+    pollJob(o.style, jobId);
+  } catch (e) {
+    S.jobs[o.style] = { status: 'failed', error: String(e.message || e) };
   }
   route();
 }
@@ -423,6 +439,32 @@ const SCREENS = {
       </div>`,
   },
 
+  output: {
+    title: '무엇을 만들까요',
+    bar: true, back: 'stores',
+    render: () => `
+      <div class="stack">
+        <div>
+          <h2 class="h2" style="margin-bottom:2px">어떤 광고를 만들까요?</h2>
+          <p class="muted">${esc(picked().name)} · 고르시면 그다음 단계가 정해집니다.</p>
+        </div>
+        <div class="stack--s">
+          ${OUTPUTS.map((o) => `
+            <button class="card card--tap" data-output="${o.value}"
+                    ${o.value === S.outputType ? 'aria-current="true"' : ''}>
+              <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">
+                <strong style="font-size:16px">${esc(o.title)}</strong>
+                ${o.value === S.outputType ? '<span class="tag">고름</span>' : ''}
+              </div>
+              <span class="muted">${esc(o.blurb)}</span>
+              <span class="data">${esc(o.steps)}</span>
+            </button>`).join('')}
+        </div>
+        <p class="muted rule">먼저 고르는 이유 — 글자가 없는 결과물은 문구를 안 씁니다.
+          대화부터 하면 문구 3개를 고르고 손님 반응까지 본 뒤에 그게 통째로 버려집니다.</p>
+      </div>`,
+  },
+
   storeNew: {
     title: '새 가게 등록',
     bar: true, back: 'stores',
@@ -470,7 +512,7 @@ const SCREENS = {
 
   chat: {
     title: '광고 만들기',
-    bar: true, back: 'stores',
+    bar: true, back: 'output',
     render: () => `
       <div class="stack">
         <div class="card" style="gap:12px">
@@ -753,10 +795,15 @@ const SCREENS = {
 
   image: {
     title: '광고 이미지',
-    bar: true, back: 'panel',
+    bar: true,
+    // 글자 없는 유형은 손님 반응 화면을 거치지 않았다. 거기로 되돌리면
+    // 사장님은 자기가 본 적 없는 화면으로 떨어진다.
+    get back() { return needsCopy() ? 'panel' : 'chat'; },
     render: () => `
       <div class="stack">
-        <div class="note note--accent">고른 문구 — <b>${esc(chosen().headline)}</b></div>
+        <div class="note note--accent">${needsCopy()
+          ? `고른 문구 — <b>${esc(chosen().headline)}</b>`
+          : `${esc(output().title)} — 글자 없이 사진만 만듭니다`}</div>
 
         <div class="stack--s">
           <button class="btn" data-make>광고 이미지 만들기</button>
@@ -766,7 +813,7 @@ const SCREENS = {
         </div>
 
         <div id="shots" class="stack--s rule">
-          ${M.images.map((im) => imageCard(im)).join('')}
+          ${imageCard({ style: output().style, label: output().title, saved: false })}
         </div>
 
         <!-- 무엇으로 만들었는지는 화면이 모른다. 서버의 image_backend.pop_notices()
@@ -774,8 +821,8 @@ const SCREENS = {
              만들었습니다"가 뜨던 자리다 (수호님 점검 6번). 늘 참인 말만 남긴다. -->
         <p class="muted">GPU가 없는 컴퓨터에서는 더 걸립니다.</p>
         <button class="btn btn--line" data-make>사진만 다시 만들기</button>
-        <p class="muted rule">문구를 바꾸려면 손님 반응 화면에서 다른 것을 고르세요 —
-          사진은 그대로 두고 글자만 다시 얹습니다.</p>
+        ${needsCopy() ? `<p class="muted rule">문구를 바꾸려면 손님 반응 화면에서 다른 것을 고르세요 —
+          사진은 그대로 두고 글자만 다시 얹습니다.</p>` : ''}
       </div>`,
   },
 };
@@ -785,6 +832,7 @@ const ORDER = [
   ['signup',   '가입하기'],
   ['stores',   '내 가게'],
   ['storeNew', '새 가게 등록'],
+  ['output',   '무엇을 만들까요'],
   ['chat',     '대화 — 광고 만들기'],
   ['photos',   '사진 넣기'],
   ['copy',     '문구 후보'],
@@ -846,12 +894,8 @@ document.addEventListener('click', (e) => {
   if (card) {
     S.store = storeList()[Number(card.dataset.store)];
     rememberStore(S.store);
-    // 하던 대화·문구·평가는 앞 가게 것이다. 그대로 두면 다른 가게 화면에
-    // 남의 문구가 붙어 있는다.
-    Object.assign(S, { draft: null, turns: [], options: [], copies: null,
-                       adId: null, result: null, margin: null, tone: null });
-    forget();
-    go('chat');
+    startFresh();
+    go('output');
     refreshPanel();
     return;
   }
@@ -861,9 +905,7 @@ document.addEventListener('click', (e) => {
     S.stores = [];
     S.store = null;
     rememberStore(null);
-    Object.assign(S, { draft: null, turns: [], options: [], copies: null,
-                       adId: null, result: null, margin: null, tone: null });
-    forget();
+    startFresh();
     openDrawer(false);
     go('login');
     toast('로그아웃했습니다');
@@ -904,6 +946,17 @@ document.addEventListener('click', (e) => {
     S.pick = Number(pickCopy.dataset.pickCopy);
     keep();
     go('image');
+    return;
+  }
+
+  const outCard = e.target.closest('[data-output]');
+  if (outCard) {
+    S.outputType = outCard.dataset.output;
+    // 유형이 갈리면 앞서 만든 문구는 이 결과물의 것이 아니다. 글자 없는 유형으로
+    // 바꿨는데 문구가 남아 있으면 이미지에 안 쓰이는 문구가 화면에 계속 보인다.
+    Object.assign(S, { copies: null, adId: null, result: null, pick: 0 });
+    keep();
+    go('chat');
     return;
   }
 
@@ -1112,7 +1165,8 @@ const rememberStore = (s) => {
  *
  * 손님 평가 한 번이 1분이다. 시연 중에 새로고침 한 번으로 그게 날아가면
  * 다시 1분을 기다려야 한다. 서버가 주는 것만 담는다 — 목업은 어차피 코드에 있다. */
-const KEEP = ['draft', 'turns', 'options', 'copies', 'adId', 'result', 'margin', 'tone', 'pick'];
+const KEEP = ['draft', 'turns', 'options', 'copies', 'adId', 'result', 'margin', 'tone',
+              'pick', 'outputType'];
 
 const keep = () => {
   const box = {};
@@ -1121,6 +1175,22 @@ const keep = () => {
 };
 
 const forget = () => localStorage.removeItem('work');
+
+/** 앞 가게에서 하던 것을 지운다.
+ *
+ * 가게가 바뀌면 주문서·대화·문구·평가가 전부 남의 것이 된다. 안 지우면 새 가게
+ * 화면에 **앞 가게의 주문서와 대화가 그대로 붙어 있는다** — 새로 등록한 가게에
+ * 남의 상품과 가격이 적혀 있는 모양이다.
+ *
+ * 세 곳이 같은 일을 한다(가게 고르기·새 가게 등록·로그아웃). 목록을 한 곳에
+ * 두는 이유는 상태를 하나 더할 때 **세 곳 중 하나를 빠뜨리기 때문**이다 —
+ * 실제로 addStore 가 빠져 있었다. */
+function startFresh() {
+  Object.assign(S, { draft: null, turns: [], options: [], copies: null, said: [],
+                     adId: null, result: null, margin: null, tone: null,
+                     pick: 0, outputType: null });
+  forget();
+}
 
 function restore() {
   let box;
@@ -1394,8 +1464,11 @@ async function addStore(form) {
     } catch (e) { 알린다(e.message); return; }
   }
   rememberStore(S.store);
+  // 새 가게다. 앞 가게의 주문서·대화가 남아 있으면 새로 등록한 가게 화면에
+  // 남의 상품과 가격이 적혀 있는 모양이 된다.
+  startFresh();
 
-  go('chat');
+  go('output');
   toast('가게를 등록했습니다');
   // 상권은 늦게 와도 된다. 기다렸다 넘어가면 등록 버튼이 몇 초 멈춘 것처럼 보인다.
   refreshPanel();
